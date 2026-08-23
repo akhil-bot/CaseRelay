@@ -1,0 +1,28 @@
+{
+  "name": "caserelay-portal",
+  "version": "0.1.0",
+  "private": true,
+  "description": "CaseRelay portal — UI-only prototype with synthetic data.",
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "eslint .",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "next": "^16.3.2",
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "4.1.13",
+    "@types/node": "24.5.2",
+    "@types/react": "^19.2.18",
+    "@types/react-dom": "^19.2.4",
+    "eslint": "9.36.0",
+    "eslint-config-next": "^16.3.2",
+    "tailwindcss": "4.1.13",
+    "typescript": "5.9.2"
+  }
+}

@@ -1,0 +1,135 @@
+"use client";
+
+import Link from "next/link";
+import { useEffect, useRef, useState } from "react";
+import { Icon, type IconName } from "@/components/icons";
+import { Badge } from "@/components/ui/primitives";
+import { cx, surface, type as type_, type Tone } from "@/design/tokens";
+import { useDemo } from "@/lib/demo-store";
+import { useViewer } from "@/lib/viewer";
+
+export function Notifications() {
+  const { pendingApprovals, commitments, activity, step } = useDemo();
+  const { showsTechnical } = useViewer();
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    function onPointerDown(event: MouseEvent) {
+      if (!ref.current?.contains(event.target as Node)) setOpen(false);
+    }
+    document.addEventListener("mousedown", onPointerDown);
+    return () => document.removeEventListener("mousedown", onPointerDown);
+  }, [open]);
+
+  const overdue = commitments.filter((item) => (item.daysOverdue ?? 0) > 0);
+  const latest = activity.at(-1);
+
+  const items: {
+    id: string;
+    icon: IconName;
+    variant: Tone;
+    title: string;
+    body: string;
+    href: string;
+  }[] = [
+    ...pendingApprovals.map((approval) => ({
+      id: approval.id,
+      icon: "approvals" as IconName,
+      variant: "accent" as Tone,
+      title: showsTechnical ? "Action held for a human principal" : "A message needs your approval",
+      body: approval.action,
+      href: "/approvals",
+    })),
+    ...overdue.map((commitment) => ({
+      id: commitment.id,
+      icon: "alert" as IconName,
+      variant: "danger" as Tone,
+      title: showsTechnical
+        ? `${commitment.daysOverdue} days without an acknowledged owner`
+        : `Waiting ${commitment.daysOverdue} days with nobody responsible`,
+      body: commitment.title,
+      href: "/cases/CR-1042",
+    })),
+    ...(latest && step > 0
+      ? [
+          {
+            id: latest.id,
+            icon: "activity" as IconName,
+            variant: "brand" as Tone,
+            title: latest.summary,
+            body: showsTechnical ? `${latest.at} · ${latest.actor}` : latest.at,
+            href: showsTechnical ? "/audit" : "/cases/CR-1042",
+          },
+        ]
+      : []),
+  ];
+
+  return (
+    <div className="relative" ref={ref}>
+      <button
+        type="button"
+        onClick={() => setOpen((value) => !value)}
+        aria-expanded={open}
+        aria-label={`Notifications (${items.length})`}
+        className="relative flex size-9 items-center justify-center rounded-control border border-line bg-surface text-ink-soft transition-colors hover:bg-surface-soft hover:text-ink"
+      >
+        <Icon name="bell" size={17} />
+        {items.length > 0 && (
+          <span className="absolute -top-1 -right-1 flex min-w-4 items-center justify-center rounded-full bg-danger px-1 font-mono text-[9.5px] leading-4 text-white">
+            {items.length}
+          </span>
+        )}
+      </button>
+
+      {open && (
+        <div
+          className={cx(surface.pop, "animate-rise absolute top-full right-0 z-30 mt-2 w-[340px] p-2")}
+        >
+          <div className="flex items-center justify-between px-2 py-1.5">
+            <p className={type_.label}>Notifications</p>
+            <Badge variant="neutral">{items.length}</Badge>
+          </div>
+
+          {items.length === 0 ? (
+            <p className={cx("px-3 py-6 text-center", type_.meta)}>
+              Nothing needs your attention right now.
+            </p>
+          ) : (
+            <ul className="space-y-0.5">
+              {items.map((item) => (
+                <li key={`${item.id}-${item.title}`}>
+                  <Link
+                    href={item.href}
+                    onClick={() => setOpen(false)}
+                    className="flex gap-3 rounded-control px-2.5 py-2.5 transition-colors hover:bg-surface-soft"
+                  >
+                    <span
+                      className={cx(
+                        "mt-0.5 flex size-7 shrink-0 items-center justify-center rounded-full border",
+                        item.variant === "danger"
+                          ? "border-danger/25 bg-danger-soft text-danger"
+                          : item.variant === "accent"
+                            ? "border-accent/25 bg-accent-soft text-accent-deep"
+                            : "border-brand/25 bg-brand-soft text-brand-deep",
+                      )}
+                    >
+                      <Icon name={item.icon} size={14} />
+                    </span>
+                    <span className="min-w-0">
+                      <span className="block text-[12.5px] font-medium text-ink">{item.title}</span>
+                      <span className="mt-0.5 block text-[11.5px] leading-relaxed text-ink-muted">
+                        {item.body}
+                      </span>
+                    </span>
+                  </Link>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}

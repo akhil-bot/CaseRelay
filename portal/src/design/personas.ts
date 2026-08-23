@@ -1,0 +1,97 @@
+import type { IconName } from "@/components/icons";
+
+/**
+ * Two people use CaseRelay and they need different products.
+ *
+ * `advocate` is a CASA volunteer. She is not technical, she is accountable for a
+ * child's next step, and she should never be shown a trace ID or a policy rule
+ * number to do her job.
+ *
+ * `platform` is the person who operates the agent fleet. They need identities,
+ * scopes, spans, checkpoints, and refusals — and they have no business reading
+ * case narrative they were not appointed to.
+ */
+export type Persona = "advocate" | "platform";
+
+export interface PersonaProfile {
+  id: Persona;
+  name: string;
+  role: string;
+  org: string;
+  email: string;
+  /** Short label for the view switcher. */
+  viewLabel: string;
+  /** What the account is called at sign-in, where you are picking a person, not a view. */
+  accountLabel: string;
+  viewHint: string;
+  icon: IconName;
+}
+
+export const PERSONAS: Record<Persona, PersonaProfile> = {
+  advocate: {
+    id: "advocate",
+    name: "Elena Vasquez",
+    role: "CASA volunteer advocate",
+    org: "Mesa County CASA",
+    email: "elena.v@mesacasa.example",
+    viewLabel: "Advocate",
+    accountLabel: "Advocate",
+    viewHint: "What the volunteer sees: cases, next steps, and approvals.",
+    icon: "user",
+  },
+  platform: {
+    id: "platform",
+    name: "Priya Raghavan",
+    role: "Platform administrator",
+    org: "CaseRelay platform team",
+    email: "priya.r@caserelay.example",
+    viewLabel: "Platform",
+    accountLabel: "Admin",
+    viewHint: "What the operator sees: agents, scopes, traces, and policy.",
+    icon: "code",
+  },
+};
+
+export const PERSONA_ORDER: Persona[] = ["advocate", "platform"];
+
+export interface NavItem {
+  href: string;
+  label: string;
+  icon: IconName;
+  badge?: "approvals";
+}
+
+/** Navigation is defined per persona, so a view can never link somewhere it should not go. */
+export const NAV: Record<Persona, NavItem[]> = {
+  advocate: [
+    { href: "/", label: "Today", icon: "home" },
+    { href: "/cases", label: "My cases", icon: "cases" },
+    { href: "/approvals", label: "Needs my approval", icon: "approvals", badge: "approvals" },
+  ],
+  platform: [
+    { href: "/", label: "Fleet health", icon: "home" },
+    { href: "/registry", label: "Agent registry", icon: "agents" },
+    { href: "/audit", label: "Traces & audit", icon: "audit" },
+    { href: "/approvals", label: "Policy queue", icon: "shield", badge: "approvals" },
+    { href: "/cases", label: "Workflows", icon: "cases" },
+  ],
+};
+
+/** Routes only one view is allowed to open. */
+export const PLATFORM_ONLY_ROUTES = ["/registry", "/audit"];
+
+export function isRouteAllowed(pathname: string, persona: Persona) {
+  if (persona === "platform") return true;
+  return !PLATFORM_ONLY_ROUTES.some((route) => pathname.startsWith(route));
+}
+
+export type PageKey = "overview" | "cases" | "caseDetail" | "approvals" | "registry" | "audit";
+
+export function pageKeyFor(pathname: string): PageKey {
+  if (pathname.startsWith("/cases/")) return "caseDetail";
+  if (pathname.startsWith("/cases")) return "cases";
+  if (pathname.startsWith("/approvals")) return "approvals";
+  if (pathname.startsWith("/registry")) return "registry";
+  if (pathname.startsWith("/audit")) return "audit";
+  return "overview";
+}
