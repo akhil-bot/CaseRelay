@@ -1,0 +1,50 @@
+# Workspace-level ignores. Build output and dependencies are ignored next to the
+# workspace that produces them — see portal/.gitignore for the Next.js app.
+
+# ── Operating system ─────────────────────────────────────────────────────────
+.DS_Store
+._*
+.Spotlight-V100
+.Trashes
+Thumbs.db
+desktop.ini
+
+# ── Editors and tooling ──────────────────────────────────────────────────────
+.idea/
+.vscode/*
+!.vscode/extensions.json
+*.swp
+*.swo
+
+# ── Secrets and local configuration ──────────────────────────────────────────
+.env
+.env.*
+!.env.example
+!.env.*.example
+
+# Google Cloud service account keys. A committed key is a live credential.
+*-key.json
+service-account*.json
+*credentials*.json
+application_default_credentials.json
+
+# ── Python backend (FastAPI / ADK agents) ────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+.venv/
+venv/
+env/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# ── Logs and scratch ─────────────────────────────────────────────────────────
+*.log
+tmp/
+.cache/
