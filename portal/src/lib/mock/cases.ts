@@ -45,7 +45,7 @@ export const CASES: CaseSummary[] = [
     county: "Mesa County",
     openedOn: "Day -6",
     courtOrder: "Order 2026-JV-0451",
-    flags: ["blocked"],
+    flags: ["blocked", "approval_needed"],
     state: "attention_required",
     commitmentCount: 3,
     openCommitments: 2,
@@ -61,13 +61,14 @@ export const CASES: CaseSummary[] = [
     county: "Mesa County",
     openedOn: "Day -11",
     courtOrder: "Order 2026-JV-0429",
-    flags: ["on_track"],
-    state: "monitoring",
+    flags: ["on_track", "approval_needed"],
+    state: "approval_required",
     commitmentCount: 4,
     openCommitments: 2,
     oldestGapDays: 1,
     nextDeadline: "Day 19",
-    headline: "All commitments have a verified owner and an in-window deadline.",
+    headline:
+      "Every commitment has a verified owner. One appointment needs its outcome confirmed.",
   },
   {
     id: "CR-1029",
@@ -232,4 +233,19 @@ export const AUTHORITY_GRANT = {
   ],
   expiresOn: "Day 180",
   retention: "Operational facts 7 years · raw packet 90 days",
+};
+
+/**
+ * The grant read out loud, for anyone who is not reading scope identifiers.
+ * Same list either way — an advocate and the runtime are held to one grant, not
+ * to a plain-language summary of it and a machine-readable version that drifts.
+ */
+export const PLAIN_SCOPES: Record<string, string> = {
+  monitor_commitment_status: "Keep track of whether each step is done",
+  request_enrollment_verification: "Ask the school to confirm she is enrolled",
+  draft_escalation_for_human_approval: "Write a follow-up message for you to approve",
+  placement_decision: "Decide where she lives",
+  clinical_decision: "Decide what medical care she gets",
+  legal_strategy: "Decide how her case is argued",
+  eligibility_determination: "Decide what services she qualifies for",
 };

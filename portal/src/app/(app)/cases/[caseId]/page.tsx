@@ -12,14 +12,15 @@ import {
   EmptyState,
   Field,
   FlagBadge,
+  Group,
   Mono,
-  Note,
   ProgressBar,
+  Rows,
   StatusBadge,
   cx,
 } from "@/components/ui/primitives";
 import { fieldLabel } from "@/design/copy";
-import { control, layout, surface, type as type_ } from "@/design/tokens";
+import { control, layout, row, surface, type as type_ } from "@/design/tokens";
 import { useDemo } from "@/lib/demo-store";
 import { AGENTS_BY_ID } from "@/lib/mock/agents";
 import { AUTHORITY_GRANT, PRIMARY_CASE_ID } from "@/lib/mock/cases";
@@ -30,7 +31,7 @@ import type { Commitment } from "@/lib/types";
 export default function CaseDetailPage() {
   const params = useParams<{ caseId: string }>();
   const caseId = params?.caseId ?? PRIMARY_CASE_ID;
-  const { step, setStep, commitments, cases, meta } = useDemo();
+  const { step, setStep, commitments, cases } = useDemo();
   const { copy, showsTechnical } = useViewer();
   const record = cases.find((item) => item.id === caseId);
 
@@ -65,7 +66,8 @@ export default function CaseDetailPage() {
         <span className="text-ink-soft">{showsTechnical ? record.id : record.childAlias}</span>
       </nav>
 
-      <section className={cx(surface.card, "px-5 py-5")}>
+      {/* Clipped so the action band below can bleed to the card's rounded edges. */}
+      <section className={cx(surface.card, "overflow-hidden px-5 py-5")}>
         <div className="flex flex-wrap items-start gap-4">
           <Avatar name={record.childAlias} size={52} variant={activated ? "brand" : "neutral"} />
           <div className="min-w-0 flex-1">
@@ -154,50 +156,6 @@ export default function CaseDetailPage() {
         )}
       </section>
 
-      <div className="grid gap-4 lg:grid-cols-2">
-        <Card
-          icon="check"
-          title={copy.caseDetail.permitted.title}
-          subtitle={copy.caseDetail.permitted.subtitle}
-        >
-          <ul className="space-y-2">
-            {AUTHORITY_GRANT.scope.map((scope) => (
-              <li key={scope} className="flex items-start gap-2.5">
-                <Icon name="check" size={15} className="mt-0.5 shrink-0 text-brand" />
-                {showsTechnical ? (
-                  <Mono className="text-ink">{scope}</Mono>
-                ) : (
-                  <span className="text-[13px] text-ink">
-                    {PLAIN_SCOPES[scope] ?? scope.replace(/_/g, " ")}
-                  </span>
-                )}
-              </li>
-            ))}
-          </ul>
-        </Card>
-
-        <Card
-          icon="close"
-          title={copy.caseDetail.excluded.title}
-          subtitle={copy.caseDetail.excluded.subtitle}
-        >
-          <ul className="space-y-2">
-            {AUTHORITY_GRANT.excluded.map((scope) => (
-              <li key={scope} className="flex items-start gap-2.5">
-                <Icon name="close" size={15} className="mt-0.5 shrink-0 text-danger" />
-                {showsTechnical ? (
-                  <Mono>{scope}</Mono>
-                ) : (
-                  <span className="text-[13px] text-ink-soft">
-                    {PLAIN_SCOPES[scope] ?? scope.replace(/_/g, " ")}
-                  </span>
-                )}
-              </li>
-            ))}
-          </ul>
-        </Card>
-      </div>
-
       <Card
         icon="cases"
         title={copy.caseDetail.commitments.title}
@@ -207,9 +165,9 @@ export default function CaseDetailPage() {
             <ProgressBar value={closed} total={commitments.length} variant="seal" />
           </div>
         }
-        bodyClassName="px-3 py-3"
+        flush
       >
-        <ol className="grid gap-2 2xl:grid-cols-2">
+        <Rows as="ol">
           {commitments.map((commitment) => (
             <CommitmentRow
               key={commitment.id}
@@ -218,7 +176,7 @@ export default function CaseDetailPage() {
               evidenceLabel={copy.caseDetail.evidenceLabel}
             />
           ))}
-        </ol>
+        </Rows>
       </Card>
 
       {isPrimary && step >= 4 && (
@@ -228,13 +186,14 @@ export default function CaseDetailPage() {
           subtitle={copy.caseDetail.projection.subtitle}
           action={showsTechnical ? <Mono>verify_school_enrollment</Mono> : undefined}
         >
-          <div className="grid gap-3 lg:grid-cols-2">
-            <div className="rounded-control border border-brand/20 bg-brand-soft px-4 py-3">
-              <p className="flex items-center gap-1.5 text-[11px] font-medium tracking-[0.08em] text-brand-deep uppercase">
-                <Icon name="check" size={13} />
-                {copy.caseDetail.disclosedLabel} · {EDUCATION_PROJECTION.disclosed.length}
-              </p>
-              <ul className="mt-2.5 space-y-1.5">
+          <div className="grid gap-5 lg:grid-cols-2">
+            <Group
+              variant="brand"
+              icon="check"
+              label={copy.caseDetail.disclosedLabel}
+              count={EDUCATION_PROJECTION.disclosed.length}
+            >
+              <ul className="space-y-1.5">
                 {EDUCATION_PROJECTION.disclosed.map((field) => (
                   <li key={field}>
                     {showsTechnical ? (
@@ -245,13 +204,14 @@ export default function CaseDetailPage() {
                   </li>
                 ))}
               </ul>
-            </div>
-            <div className="rounded-control border border-danger/20 bg-danger-soft px-4 py-3">
-              <p className="flex items-center gap-1.5 text-[11px] font-medium tracking-[0.08em] text-danger uppercase">
-                <Icon name="close" size={13} />
-                {copy.caseDetail.withheldLabel} · {EDUCATION_PROJECTION.withheld.length}
-              </p>
-              <ul className="mt-2.5 space-y-2">
+            </Group>
+            <Group
+              variant="danger"
+              icon="close"
+              label={copy.caseDetail.withheldLabel}
+              count={EDUCATION_PROJECTION.withheld.length}
+            >
+              <ul className="space-y-2">
                 {EDUCATION_PROJECTION.withheld.map((entry) => (
                   <li key={entry.field}>
                     {showsTechnical ? (
@@ -269,11 +229,14 @@ export default function CaseDetailPage() {
                   </li>
                 ))}
               </ul>
-            </div>
+            </Group>
           </div>
-          <div className="mt-3">
-            <Note icon="shield">{copy.caseDetail.projectionNote}</Note>
-          </div>
+          <p className={cx("mt-5 flex items-start gap-2.5 border-t border-line pt-4", type_.meta)}>
+            <Icon name="shield" size={15} className="mt-px shrink-0" />
+            <span className={cx("leading-relaxed", layout.measure)}>
+              {copy.caseDetail.projectionNote}
+            </span>
+          </p>
         </Card>
       )}
 
@@ -283,12 +246,13 @@ export default function CaseDetailPage() {
           title={copy.caseDetail.handoff.title}
           subtitle={copy.caseDetail.handoff.subtitle}
         >
-          <div className="grid gap-3 lg:grid-cols-2">
-            <div className={cx(surface.inset, "px-4 py-3")}>
-              <p className="text-[13px] font-medium text-ink">
-                {showsTechnical ? "Persisted" : "Carries over to the next volunteer"}
-              </p>
-              <ul className="mt-2 space-y-1.5">
+          <div className="grid gap-5 lg:grid-cols-2">
+            <Group
+              variant="brand"
+              icon="check"
+              label={showsTechnical ? "Persisted" : "Carries over to the next volunteer"}
+            >
+              <ul className="space-y-1.5">
                 {(showsTechnical
                   ? [
                       "Five commitment states with source and timestamp",
@@ -307,12 +271,13 @@ export default function CaseDetailPage() {
                   </li>
                 ))}
               </ul>
-            </div>
-            <div className={cx(surface.inset, "px-4 py-3")}>
-              <p className="text-[13px] font-medium text-ink">
-                {showsTechnical ? "Revoked at rotation" : "Stops immediately"}
-              </p>
-              <ul className="mt-2 space-y-1.5">
+            </Group>
+            <Group
+              variant="danger"
+              icon="close"
+              label={showsTechnical ? "Revoked at rotation" : "Stops immediately"}
+            >
+              <ul className="space-y-1.5">
                 {(showsTechnical
                   ? [
                       "Outgoing principal's session and API tokens",
@@ -331,30 +296,14 @@ export default function CaseDetailPage() {
                   </li>
                 ))}
               </ul>
-            </div>
+            </Group>
           </div>
         </Card>
       )}
 
-      {!isPrimary && (
-        <Note icon="clock">
-          The walkthrough only drives {PRIMARY_CASE_ID}. This one is a fixed example for context.
-          Currently at {meta.dayLabel} · {meta.label}.
-        </Note>
-      )}
     </div>
   );
 }
-
-const PLAIN_SCOPES: Record<string, string> = {
-  monitor_commitment_status: "Keep track of whether each step is done",
-  request_enrollment_verification: "Ask the school to confirm she is enrolled",
-  draft_escalation_for_human_approval: "Write a follow-up message for you to approve",
-  placement_decision: "Decide where she lives",
-  clinical_decision: "Decide what medical care she gets",
-  legal_strategy: "Decide how her case is argued",
-  eligibility_determination: "Decide what services she qualifies for",
-};
 
 function ActionBar({
   variant,
@@ -376,8 +325,13 @@ function ActionBar({
       ? "border-warn/25 bg-warn-soft text-warn"
       : "border-accent/25 bg-accent-soft text-accent-deep";
   return (
+    // A band across the foot of the card rather than a bordered box inside it:
+    // the tint still marks it as needing a person, without a second outline.
     <div
-      className={cx("mt-4 flex flex-wrap items-center gap-3 rounded-control border px-4 py-3.5", skin)}
+      className={cx(
+        "-mx-5 -mb-5 mt-5 flex flex-wrap items-center gap-3 border-t px-5 py-4",
+        skin,
+      )}
     >
       <Icon name={icon} size={18} className="shrink-0" />
       <div className="min-w-0 flex-1">
@@ -406,14 +360,17 @@ function CommitmentRow({
   const overdue = (commitment.daysOverdue ?? 0) > 0;
 
   return (
+    // State reads off a rule down the leading edge instead of a fill and an
+    // outline. The transparent case keeps every row on the same text baseline.
     <li
       className={cx(
-        "rounded-control border px-4 py-3.5 transition-colors",
+        "border-l-2",
+        row.pad,
         overdue
-          ? "border-danger/25 bg-danger-soft"
+          ? "border-l-danger"
           : commitment.status === "completed"
-            ? "border-seal/20 bg-seal-soft"
-            : "border-line bg-surface-soft",
+            ? "border-l-seal"
+            : "border-l-transparent",
       )}
     >
       <div className="flex flex-wrap items-start gap-3">

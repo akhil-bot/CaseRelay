@@ -3,8 +3,17 @@
 import { useMemo, useState } from "react";
 import { Icon, type IconName } from "@/components/icons";
 import { AccessNotice } from "@/components/shell/AccessNotice";
-import { Badge, Card, Field, HealthBadge, Mono, Note, cx } from "@/components/ui/primitives";
-import { control, layout, surface, tone, type as type_, type Tone } from "@/design/tokens";
+import {
+  Badge,
+  Card,
+  Field,
+  Group,
+  HealthBadge,
+  Mono,
+  Rows,
+  cx,
+} from "@/components/ui/primitives";
+import { control, layout, row, surface, tone, type as type_, type Tone } from "@/design/tokens";
 import { useDemo } from "@/lib/demo-store";
 import { AGENTS } from "@/lib/mock/agents";
 import { useViewer } from "@/lib/viewer";
@@ -86,9 +95,9 @@ export default function AgentsPage() {
           title="Registry"
           subtitle="Select an agent to inspect its card."
           action={<span className={type_.meta}>{visible.length} agents</span>}
-          bodyClassName="px-3 py-3"
+          flush
         >
-          <ul className="grid gap-2 3xl:grid-cols-2">
+          <Rows>
             {visible.map((agent) => {
               const owner = OWNER_KIND_META[agent.ownerKind];
               const active = agent.id === selectedId;
@@ -97,11 +106,11 @@ export default function AgentsPage() {
                   <button
                     type="button"
                     onClick={() => setSelectedId(agent.id)}
+                    aria-pressed={active}
                     className={cx(
-                      "w-full rounded-control border px-4 py-3.5 text-left transition-colors",
-                      active
-                        ? "border-brand/30 bg-brand-soft"
-                        : "border-line bg-surface-soft hover:bg-surface-muted",
+                      "w-full text-left",
+                      row.pad,
+                      active ? row.selected : row.hover,
                     )}
                   >
                     <div className="flex flex-wrap items-center gap-2.5">
@@ -139,7 +148,7 @@ export default function AgentsPage() {
                 </li>
               );
             })}
-          </ul>
+          </Rows>
         </Card>
 
         <AgentDetail agent={selected} />
@@ -148,18 +157,11 @@ export default function AgentsPage() {
       <Card
         icon="shield"
         title="Fleet capability proof"
-        subtitle="What has actually been demonstrated at the current point in the scenario."
-        bodyClassName="px-3 py-3"
+        subtitle="What the fleet has actually proven, and what is still unproven."
       >
-        <ul className="grid gap-2 sm:grid-cols-2 2xl:grid-cols-3 3xl:grid-cols-4">
+        <ul className="grid gap-x-6 gap-y-5 sm:grid-cols-2 2xl:grid-cols-3 3xl:grid-cols-4">
           {capabilities.map((capability) => (
-            <li
-              key={capability.key}
-              className={cx(
-                "rounded-control border px-3.5 py-3",
-                capability.proven ? "border-seal/20 bg-seal-soft" : "border-line bg-surface-soft",
-              )}
-            >
+            <li key={capability.key} className="min-w-0">
               <div className="flex flex-wrap items-center gap-2">
                 <span
                   className={cx(
@@ -187,10 +189,6 @@ export default function AgentsPage() {
         </ul>
       </Card>
 
-      <Note icon="alert">
-        Health, latency, and endpoint values here are illustrative. This build is a UI prototype: no
-        agent is deployed and no request leaves the browser.
-      </Note>
     </div>
   );
 }
@@ -235,33 +233,25 @@ function AgentDetail({ agent }: { agent: AgentCard }) {
         </ul>
       </div>
 
-      <div className="mt-4 grid gap-3">
-        <div className="rounded-control border border-brand/20 bg-brand-soft px-3.5 py-3">
-          <p className="flex items-center gap-1.5 text-[11px] font-medium tracking-[0.08em] text-brand-deep uppercase">
-            <Icon name="check" size={13} />
-            In scope
-          </p>
-          <ul className="mt-2 space-y-1">
+      <div className="mt-5 grid gap-5">
+        <Group variant="brand" icon="check" label="In scope">
+          <ul className="space-y-1">
             {agent.dataScopes.map((scope) => (
               <li key={scope}>
                 <Mono className="text-ink">{scope}</Mono>
               </li>
             ))}
           </ul>
-        </div>
-        <div className="rounded-control border border-danger/20 bg-danger-soft px-3.5 py-3">
-          <p className="flex items-center gap-1.5 text-[11px] font-medium tracking-[0.08em] text-danger uppercase">
-            <Icon name="close" size={13} />
-            Denied by card
-          </p>
-          <ul className="mt-2 space-y-1">
+        </Group>
+        <Group variant="danger" icon="close" label="Denied by card">
+          <ul className="space-y-1">
             {agent.deniedScopes.map((scope) => (
               <li key={scope}>
                 <Mono className="line-through decoration-danger/40">{scope}</Mono>
               </li>
             ))}
           </ul>
-        </div>
+        </Group>
       </div>
     </Card>
   );

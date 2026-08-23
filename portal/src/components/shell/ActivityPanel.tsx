@@ -2,7 +2,7 @@
 
 import { Icon, type IconName } from "@/components/icons";
 import { Badge, Dot } from "@/components/ui/primitives";
-import { cx, type as type_, type Tone } from "@/design/tokens";
+import { chrome, cx, type as type_, type Tone } from "@/design/tokens";
 import { useDemo } from "@/lib/demo-store";
 import { TRACE_ID, WORKFLOW_ID } from "@/lib/mock/cases";
 import type { ActivityKind } from "@/lib/types";
@@ -33,13 +33,15 @@ export function ActivityPanel({ onClose }: { onClose?: () => void }) {
 
   return (
     <aside className="flex h-full min-h-0 flex-col border-l border-line bg-surface">
-      <div className="flex h-16 shrink-0 items-center gap-2 border-b border-line px-4">
+      <div className={cx(chrome.row, "gap-2 px-4")}>
         <span className="flex size-7 items-center justify-center rounded-full bg-brand-soft text-brand">
           <Icon name="activity" size={15} />
         </span>
         <div className="min-w-0 flex-1">
-          <p className="text-[13px] font-semibold text-ink">Agent activity</p>
-          <p className="font-mono text-[10.5px] text-ink-muted">{activity.length} spans recorded</p>
+          <p className={cx(chrome.title, "text-[13px] font-semibold text-ink")}>Agent activity</p>
+          <p className={cx(chrome.subtitle, "font-mono text-[10.5px] text-ink-muted")}>
+            {activity.length} spans recorded
+          </p>
         </div>
         {onClose && (
           <button

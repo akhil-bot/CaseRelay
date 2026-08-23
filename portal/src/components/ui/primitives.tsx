@@ -1,6 +1,6 @@
-import type { ReactNode } from "react";
+import type { ElementType, ReactNode } from "react";
 import { Icon, type IconName } from "@/components/icons";
-import { control, cx, layout, surface, tone, type Tone, type as type_ } from "@/design/tokens";
+import { control, cx, layout, row, surface, tone, type Tone, type as type_ } from "@/design/tokens";
 import type {
   CaseFlag,
   CommitmentStatus,
@@ -19,19 +19,48 @@ export function Card({
   children,
   className,
   bodyClassName,
+  flush,
+  fill,
 }: {
   title?: ReactNode;
   subtitle?: ReactNode;
   icon?: IconName;
+  /**
+   * What operates on the body: a link out, a count, or the controls that filter
+   * and reshape it. It holds its width and the title lockup yields, because a
+   * control that moves to a band of its own stops reading as part of the header.
+   */
   action?: ReactNode;
   children: ReactNode;
   className?: string;
   bodyClassName?: string;
+  /** Drop the body padding, so divided rows can carry their own and reach the edges. */
+  flush?: boolean;
+  /**
+   * Scroll the body inside the card rather than letting it set the card's height.
+   * For the one card a page is *about* — a caseload, a log — so its header and
+   * controls stay put while the rows move. The height itself comes from the
+   * caller (`layout.fillHeight`); the floor here is what stops a short window
+   * squeezing the body down to a row and a half.
+   */
+  fill?: boolean;
 }) {
   return (
-    <section className={cx(surface.card, className)}>
+    <section
+      className={cx(
+        surface.card,
+        "overflow-hidden",
+        fill && "flex min-h-[360px] flex-col",
+        className,
+      )}
+    >
       {(title || action) && (
-        <header className="flex items-start justify-between gap-4 border-b border-line px-5 py-4">
+        <header
+          className={cx(
+            "flex items-start justify-between gap-4 border-b border-line px-5 py-4",
+            fill && "shrink-0",
+          )}
+        >
           <div className="flex min-w-0 items-start gap-3">
             {icon && (
               <span className="mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-control bg-brand-soft text-brand">
@@ -46,8 +75,73 @@ export function Card({
           {action && <div className="shrink-0">{action}</div>}
         </header>
       )}
-      <div className={cx("px-5 py-4", bodyClassName)}>{children}</div>
+      <div
+        className={cx(
+          !flush && "px-5 py-4",
+          fill && "thin-scroll min-h-0 flex-1 overflow-y-auto",
+          bodyClassName,
+        )}
+      >
+        {children}
+      </div>
     </section>
+  );
+}
+
+/**
+ * A list inside a card: hairlines between the entries, nothing around them.
+ * Use with `flush` on the card so each row's own padding sets the inset and the
+ * dividers run the full width, the way a table rule does.
+ */
+export function Rows({
+  as: Tag = "ul",
+  children,
+  className,
+}: {
+  as?: ElementType;
+  children: ReactNode;
+  className?: string;
+}) {
+  return <Tag className={cx(row.divide, className)}>{children}</Tag>;
+}
+
+/**
+ * A labelled group of facts inside a card — disclosed against withheld, in scope
+ * against denied.
+ *
+ * These used to be bordered, tinted boxes, which put a second card inside the
+ * first. The distinction they carry is worth keeping, so it moves to the label
+ * and a single left rule: still legible at a glance, no longer a container.
+ */
+export function Group({
+  label,
+  variant = "neutral",
+  icon,
+  count,
+  children,
+  className,
+}: {
+  label: ReactNode;
+  variant?: Tone;
+  icon?: IconName;
+  count?: number;
+  children: ReactNode;
+  className?: string;
+}) {
+  return (
+    <div className={cx("border-l-2 pl-4", tone[variant].border, className)}>
+      <p
+        className={cx(
+          "flex items-center gap-1.5 text-[11px] font-medium tracking-[0.08em] uppercase",
+          tone[variant].text,
+        )}
+      >
+        {icon && <Icon name={icon} size={13} />}
+        {label}
+        {count !== undefined && <span className="font-mono opacity-70">{count}</span>}
+      </p>
+      <div className="mt-2.5">{children}</div>
+    </div>
   );
 }
 
@@ -134,21 +228,31 @@ export function ProgressBar({
   value,
   total,
   variant = "brand",
+  hideValue,
+  className,
 }: {
   value: number;
   total: number;
   variant?: Tone;
+  /**
+   * Drops the percentage, for callers that already state the same thing in a
+   * more useful form — a table cell reading "2 of 5" does not also need "40%".
+   */
+  hideValue?: boolean;
+  className?: string;
 }) {
   const pct = total === 0 ? 0 : Math.round((value / total) * 100);
   return (
-    <span className="flex items-center gap-2">
+    <span className={cx("flex items-center gap-2", className)}>
       <span className="h-1.5 w-full overflow-hidden rounded-full bg-surface-muted">
         <span
           className={cx("block h-full rounded-full transition-[width]", tone[variant].bar)}
           style={{ width: `${pct}%` }}
         />
       </span>
-      <span className="w-9 shrink-0 text-right font-mono text-[11px] text-ink-muted">{pct}%</span>
+      {!hideValue && (
+        <span className="w-9 shrink-0 text-right font-mono text-[11px] text-ink-muted">{pct}%</span>
+      )}
     </span>
   );
 }

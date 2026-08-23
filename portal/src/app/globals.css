@@ -7,7 +7,8 @@
  *
  * Palette rule: two accent families only — brand blue for identity, navigation and
  * progress; amber/red for attention and refusal. Plus a deep navy "seal" for
- * finished work. No greens, no purples.
+ * finished work. No purples, and one green: `live`, which is spent entirely on
+ * the presence dot, where the convention is older than this product.
  */
 @theme inline {
   /* Surfaces */
@@ -44,6 +45,9 @@
   /* Sealed / completed */
   --color-seal: #1e3a6b;
   --color-seal-soft: #eaeff8;
+
+  /* Presence. The only green in the product; see the palette rule above. */
+  --color-live: #16a34a;
 
   /* Type */
   --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
@@ -89,6 +93,129 @@ body {
 /* The sign-in screen runs dark, where the brand-blue ring loses its contrast. */
 .on-dark :focus-visible {
   outline-color: #ffffff;
+}
+
+/*
+ * ── CopilotKit theme bridge ──────────────────────────────────────────────────
+ * CopilotKit ships its own Tailwind build scoped to [data-copilotkit], themed
+ * through two layers: a shadcn-style semantic set (--primary, --muted, --border)
+ * and the raw --cpk-* palette its utilities compile against. Rather than fight
+ * the class names, we repoint both at the CaseRelay tokens above, so the chat
+ * inherits the product's palette instead of carrying a second one.
+ *
+ * The selector is `html [data-copilotkit]` on purpose: it outranks the
+ * package's own declarations regardless of stylesheet import order.
+ *
+ * Note the emerald ramp maps onto "seal", not a green. The palette rule holds
+ * inside the chat panel too.
+ */
+html [data-copilotkit] {
+  /* Semantic layer — what most of the chat chrome actually reads. */
+  --background: var(--color-surface);
+  --foreground: var(--color-ink);
+  --card: var(--color-surface);
+  --card-foreground: var(--color-ink);
+  --popover: var(--color-surface);
+  --popover-foreground: var(--color-ink);
+  --primary: var(--color-brand);
+  --primary-foreground: #ffffff;
+  --secondary: var(--color-surface-muted);
+  --secondary-foreground: var(--color-ink);
+  --muted: var(--color-surface-soft);
+  --muted-foreground: var(--color-ink-muted);
+  --accent: var(--color-brand-soft);
+  --accent-foreground: var(--color-brand-deep);
+  --destructive: var(--color-danger);
+  --destructive-foreground: var(--color-danger);
+  --border: var(--color-line);
+  --input: var(--color-line);
+  --ring: var(--color-brand);
+  --radius: 10px;
+
+  /* Raw palette layer — for the utilities that name a colour directly. */
+  --cpk-color-white: var(--color-surface);
+  --cpk-color-zinc-50: var(--color-surface-soft);
+  --cpk-color-gray-50: var(--color-surface-soft);
+  --cpk-color-zinc-100: var(--color-surface-muted);
+  --cpk-color-gray-100: var(--color-surface-muted);
+  --cpk-color-zinc-200: var(--color-line);
+  --cpk-color-gray-200: var(--color-line);
+  --cpk-color-zinc-300: var(--color-line-strong);
+  --cpk-color-zinc-400: var(--color-ink-muted);
+  --cpk-color-gray-400: var(--color-ink-muted);
+  --cpk-color-zinc-500: var(--color-ink-muted);
+  --cpk-color-gray-500: var(--color-ink-muted);
+  --cpk-color-gray-600: var(--color-ink-soft);
+  --cpk-color-zinc-700: var(--color-ink-soft);
+  --cpk-color-gray-700: var(--color-ink-soft);
+  --cpk-color-zinc-800: var(--color-ink);
+  --cpk-color-gray-800: var(--color-ink);
+  --cpk-color-zinc-900: var(--color-ink);
+  --cpk-color-gray-900: var(--color-ink);
+  --cpk-color-black: var(--color-ink);
+
+  --cpk-color-blue-500: var(--color-brand);
+
+  --cpk-color-amber-50: var(--color-warn-soft);
+  --cpk-color-amber-100: var(--color-warn-soft);
+  --cpk-color-amber-200: var(--color-warn-soft);
+  --cpk-color-amber-400: var(--color-warn);
+  --cpk-color-amber-500: var(--color-warn);
+  --cpk-color-amber-700: var(--color-warn);
+  --cpk-color-amber-800: var(--color-warn);
+
+  --cpk-color-red-50: var(--color-danger-soft);
+  --cpk-color-red-200: var(--color-danger-soft);
+  --cpk-color-red-700: var(--color-danger);
+
+  --cpk-color-emerald-100: var(--color-seal-soft);
+  --cpk-color-emerald-400: var(--color-seal);
+  --cpk-color-emerald-500: var(--color-seal);
+  --cpk-color-emerald-800: var(--color-seal);
+
+  --cpk-font-sans: var(--font-sans);
+  --cpk-font-mono: var(--font-mono);
+  --cpk-default-font-family: var(--font-sans);
+  --cpk-default-mono-font-family: var(--font-mono);
+  --cpk-radius-2xl: var(--radius-card);
+}
+
+/*
+ * The composer sits in a wrapper that CopilotKit pads to 32px a side inside a
+ * sidebar, which spends 64px of a 492px panel on margin and forces the
+ * placeholder to wrap. That wrapper is not exposed as a slot, so it is reached
+ * as the first child of the input root, which we tag via the `input` slot.
+ *
+ * The bottom gutter is set here too. It used to come from the disclaimer that
+ * sat under the composer; with that hidden, the pill would otherwise rest on the
+ * panel's bottom edge. It cannot go on the input root, which carries an inline
+ * `padding-bottom` for the license banner that a stylesheet cannot outrank.
+ */
+html .caserelay-chat-input > div:first-child {
+  padding-inline: 0.75rem;
+  padding-block-end: 0.75rem;
+}
+
+/*
+ * The composer is a bare textarea inside a rounded shell, so the product's focus
+ * ring traces the textarea's own box and lands as a blue rectangle sitting inside
+ * a pill. CopilotKit already sets `outline-none` there, but that is a class and
+ * loses to this sheet's `:focus-visible` on source order. The caret carries focus
+ * on a text box, so the ring is dropped here and only here.
+ */
+html .caserelay-chat-input textarea:focus-visible {
+  outline: none;
+}
+
+/* The launcher is a fixed-position element outside the panel; give it the same
+   elevation as every other floating surface in the product. */
+html [data-copilotkit][data-slot="chat-toggle-button"] {
+  box-shadow: var(--shadow-pop);
+}
+
+/* The panel ships with a heavier drop shadow than anything else in the app. */
+html aside[data-copilot-sidebar] {
+  box-shadow: var(--shadow-pop);
 }
 
 .thin-scroll {

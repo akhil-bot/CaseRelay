@@ -56,36 +56,24 @@ export function LogoMark({
 export function Logo({
   size = 32,
   variant = "brand",
-  sublabel,
   className,
 }: {
   size?: number;
   variant?: "brand" | "light";
-  sublabel?: string;
   className?: string;
 }) {
   const light = variant === "light";
   return (
     <span className={cx("flex items-center gap-2.5", className)}>
       <LogoMark size={size} variant={variant} />
-      <span className="min-w-0">
-        <span
-          className={cx(
-            "block leading-tight font-semibold tracking-[-0.01em]",
-            light ? "text-white" : "text-ink",
-          )}
-          style={{ fontSize: size * 0.44 }}
-        >
-          CaseRelay
-        </span>
-        {sublabel && (
-          <span
-            className={cx("block truncate", light ? "text-white/55" : "text-ink-muted")}
-            style={{ fontSize: size * 0.33 }}
-          >
-            {sublabel}
-          </span>
+      <span
+        className={cx(
+          "min-w-0 leading-tight font-semibold tracking-[-0.01em]",
+          light ? "text-white" : "text-ink",
         )}
+        style={{ fontSize: size * 0.44 }}
+      >
+        CaseRelay
       </span>
     </span>
   );

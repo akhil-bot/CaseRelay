@@ -54,11 +54,7 @@ export function ProfileMenu() {
         aria-haspopup="menu"
         className="flex items-center gap-2.5 rounded-full border border-line bg-surface py-1 pr-2.5 pl-1 transition-colors hover:bg-surface-soft"
       >
-        <Avatar
-          name={profile.name}
-          size={30}
-          variant={showsTechnical ? "accent" : "brand"}
-        />
+        <Avatar name={profile.name} size={30} variant={profile.tone} />
         <span className="hidden text-left sm:block">
           <span className="block text-[12.5px] leading-tight font-medium text-ink">
             {profile.name}
@@ -71,10 +67,10 @@ export function ProfileMenu() {
       {open && (
         <div
           role="menu"
-          className={cx(surface.pop, "animate-rise absolute top-full right-0 z-30 mt-2 w-72 p-2")}
+          className={cx(surface.pop, "animate-rise absolute top-full right-0 z-30 mt-2 w-80 p-2")}
         >
           <div className="flex items-center gap-3 rounded-control bg-surface-soft px-3 py-3">
-            <Avatar name={profile.name} size={38} variant={showsTechnical ? "accent" : "brand"} />
+            <Avatar name={profile.name} size={38} variant={profile.tone} />
             <div className="min-w-0">
               <p className="truncate text-[13px] font-medium text-ink">{profile.name}</p>
               <p className="truncate text-[11.5px] text-ink-muted">{profile.email}</p>
@@ -82,17 +78,17 @@ export function ProfileMenu() {
           </div>
 
           <div className="mt-2 flex flex-wrap gap-1.5 px-1">
-            <Badge variant={showsTechnical ? "accent" : "brand"} icon={profile.icon}>
+            <Badge variant={profile.tone} icon={profile.icon}>
               {profile.role}
             </Badge>
           </div>
 
-          <div className="mt-3 rounded-control border border-line px-3 py-2.5">
-            <p className={type_.label}>Switch view</p>
-            <div className="mt-2">
-              <ViewSwitcher />
-            </div>
-            <p className={cx("mt-2", type_.meta)}>{profile.viewHint}</p>
+          {/* A hairline, not a box: the popover is already a surface, and a
+              bordered panel inside it makes the choice look like a settings
+              form rather than two of the items in this menu. */}
+          <div className="mt-2 border-t border-line pt-2">
+            <p className={cx("px-2.5 pb-1", type_.label)}>Switch view</p>
+            <ViewSwitcher />
           </div>
 
           <ul className="mt-2 space-y-0.5">

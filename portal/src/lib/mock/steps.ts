@@ -11,7 +11,7 @@ export const DEMO_STEPS: DemoStep[] = [
     label: "Intake review",
     dayLabel: "Day 0",
     narration:
-      "The Intake & Authority Agent extracted five operational commitments from a synthetic referral packet. Nothing is active until a supervisor verifies court authority.",
+      "The Intake & Authority Agent extracted five operational commitments from the referral packet. Nothing is active until a supervisor verifies court authority.",
     caseState: "intake_review",
   },
   {

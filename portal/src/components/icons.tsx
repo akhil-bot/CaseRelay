@@ -37,6 +37,7 @@ export type IconName =
   | "legal"
   | "shelter"
   | "document"
+  | "book"
   | "registry"
   | "memory"
   | "identity"
@@ -53,7 +54,9 @@ export type IconName =
   | "eye"
   | "eyeOff"
   | "list"
-  | "grid";
+  | "grid"
+  | "plus"
+  | "history";
 
 const PATHS: Record<IconName, React.ReactNode> = {
   home: (
@@ -211,6 +214,12 @@ const PATHS: Record<IconName, React.ReactNode> = {
       <path d="M13 4.5v5h5M9 13h6M9 16.5h4" />
     </>
   ),
+  book: (
+    <>
+      <path d="M4.5 18V6.5A2.5 2.5 0 0 1 7 4h11.5a1 1 0 0 1 1 1v14.5a1 1 0 0 1-1 1H7a1 1 0 0 1 0-5h12.5" />
+      <path d="M8.5 8.5h7M8.5 11.5h4.5" />
+    </>
+  ),
   registry: (
     <>
       <path d="M5 6.5A1.5 1.5 0 0 1 6.5 5H10v14H6.5A1.5 1.5 0 0 1 5 17.5z" />
@@ -310,6 +319,14 @@ const PATHS: Record<IconName, React.ReactNode> = {
       <rect x="13.2" y="4.2" width="6.6" height="6.6" rx="1.6" />
       <rect x="4.2" y="13.2" width="6.6" height="6.6" rx="1.6" />
       <rect x="13.2" y="13.2" width="6.6" height="6.6" rx="1.6" />
+    </>
+  ),
+  plus: <path d="M12 5.5v13M5.5 12h13" />,
+  history: (
+    <>
+      <path d="M3.6 12a8.4 8.4 0 1 0 2.7-6.2" />
+      <path d="M3.5 4.9v3.5H7" />
+      <path d="M12 8.3V12l2.8 1.7" />
     </>
   ),
 };

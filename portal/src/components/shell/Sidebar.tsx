@@ -6,19 +6,19 @@ import { Icon } from "@/components/icons";
 import { Logo } from "@/components/Logo";
 import { ScenarioControl } from "@/components/shell/ScenarioControl";
 import { Badge } from "@/components/ui/primitives";
-import { cx, type as type_ } from "@/design/tokens";
+import { chrome, cx, type as type_ } from "@/design/tokens";
 import { useDemo } from "@/lib/demo-store";
 import { useViewer } from "@/lib/viewer";
 
 export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
   const pathname = usePathname() ?? "/";
   const { pendingApprovals } = useDemo();
-  const { nav, copy, profile, showsTechnical } = useViewer();
+  const { nav, copy } = useViewer();
 
   return (
     <div className="flex h-full flex-col bg-surface">
-      <div className="flex h-16 items-center border-b border-line px-5">
-        <Logo size={33} sublabel={profile.org} />
+      <div className={cx(chrome.row, "px-5")}>
+        <Logo size={33} />
       </div>
 
       <nav className="flex-1 overflow-y-auto px-3 py-4" aria-label="Main">
@@ -52,20 +52,6 @@ export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
               </li>
             );
           })}
-        </ul>
-
-        <p className={cx("mt-6 px-2 pb-2", type_.label)}>{copy.sidebar.limitsLabel}</p>
-        <ul className="space-y-1.5 px-2">
-          {copy.sidebar.limits.map((item) => (
-            <li key={item} className="flex items-start gap-2 text-[12px] text-ink-muted">
-              <Icon
-                name={showsTechnical ? "lock" : "close"}
-                size={13}
-                className="mt-0.5 shrink-0 text-danger"
-              />
-              {item}
-            </li>
-          ))}
         </ul>
       </nav>
 

@@ -22,6 +22,33 @@ export const surface = {
   rail: "border-line bg-surface",
 } as const;
 
+/**
+ * What sits inside a card.
+ *
+ * A card is the only elevated surface in the product, and it is one level deep.
+ * Anything within one is therefore separated by a hairline and tinted on hover —
+ * never given a border and a fill of its own, which reads as a second card and
+ * makes a page of lists look like a page of boxes.
+ */
+export const row = {
+  /** Hairlines between rows. Pair with a flush card body so they reach the edges. */
+  divide: "divide-y divide-line",
+  /** The inset every row shares. Display is the caller's, so add `flex` or `block`. */
+  pad: "px-5 py-3.5",
+  /**
+   * Resting and selected are separate recipes rather than one plus a modifier:
+   * both set a hover background, and two competing `hover:` utilities resolve by
+   * stylesheet order rather than by the order they are passed in.
+   */
+  hover: "transition-colors hover:bg-surface-soft",
+  selected: "bg-brand-soft/60 transition-colors hover:bg-brand-soft",
+  /**
+   * A cell in a grid of facts. A grid cannot be divided, so the hairline goes
+   * above each cell instead of around it.
+   */
+  cell: "border-t border-line pt-3",
+} as const;
+
 /** Type scale. Every size in the product comes from this list. */
 export const type = {
   pageTitle: "text-[19px] font-semibold tracking-[-0.01em] text-ink",
@@ -37,6 +64,25 @@ export const type = {
   monoSmall: "font-mono text-[11px] tracking-tight text-ink-muted",
 } as const;
 
+/**
+ * The row that runs across the top of every column: sidebar wordmark, page
+ * header, activity rail, chat panel. Each is a two-line lockup set at a
+ * different size, and they sit side by side, so the metrics are pinned rather
+ * than font-relative — a fixed 64px row (border included) and fixed line boxes
+ * are what put all four pairs of lines on the same two baselines.
+ */
+export const chrome = {
+  row: "flex h-16 shrink-0 items-center border-b border-line",
+  /**
+   * First line. Carries the box only; the size comes from `type`. The height is
+   * stated as well as the leading so the box holds even where the line is a
+   * flex row with a badge on it, which leading alone would not constrain.
+   */
+  title: "h-[22px] leading-[22px]",
+  /** Second line. Carries the box only; each surface sets its own size. */
+  subtitle: "mt-0.5 block truncate leading-[16px]",
+} as const;
+
 /** Interactive controls. */
 export const control = {
   primary:
@@ -46,9 +92,33 @@ export const control = {
   ghost:
     "inline-flex items-center justify-center gap-2 rounded-control px-2.5 py-2 text-[13px] font-medium text-ink-soft transition-colors hover:bg-surface-muted hover:text-ink disabled:opacity-40",
   icon: "inline-flex size-9 items-center justify-center rounded-control border border-line bg-surface text-ink-soft transition-colors hover:bg-surface-soft hover:text-ink",
+  /**
+   * An icon control that carries a tone at rest, for the one button whose subject
+   * is a standing note rather than an action on the case in front of you.
+   * Written out in full, like `chip` and `chipActive`, so neither state resolves
+   * by stylesheet order.
+   */
+  iconWarn:
+    "inline-flex size-9 items-center justify-center rounded-control border border-line bg-surface text-warn transition-colors hover:border-warn/30 hover:bg-warn-soft",
+  iconWarnActive:
+    "inline-flex size-9 items-center justify-center rounded-control border border-warn/35 bg-warn-soft text-warn",
   chip: "inline-flex items-center gap-1.5 rounded-full border border-line-strong bg-surface px-3 py-1.5 text-[12.5px] text-ink-soft transition-colors hover:bg-surface-soft hover:text-ink",
   chipActive:
     "inline-flex items-center gap-1.5 rounded-full border border-brand/35 bg-brand-soft px-3 py-1.5 text-[12.5px] font-medium text-brand-deep",
+  /**
+   * A control that opens a menu, and the native selects it sits beside. The
+   * active recipe carries a tint, because a control that is narrowing the list
+   * below it should never look the same as one that is letting everything past.
+   */
+  select:
+    "inline-flex items-center gap-2 rounded-control border border-line bg-surface-soft px-3 py-2 text-[13px] text-ink-soft transition-colors hover:bg-surface hover:text-ink focus:border-brand/40 focus:outline-none",
+  selectActive:
+    "inline-flex items-center gap-2 rounded-control border border-brand/35 bg-brand-soft px-3 py-2 text-[13px] font-medium text-brand-deep transition-colors focus:outline-none",
+  /** A row inside a popover menu. Both states are full recipes, as above. */
+  menuItem:
+    "flex w-full items-center gap-2.5 rounded-control px-2.5 py-2 text-left text-[13px] text-ink-soft transition-colors hover:bg-surface-soft hover:text-ink",
+  menuItemActive:
+    "flex w-full items-center gap-2.5 rounded-control bg-brand-soft px-2.5 py-2 text-left text-[13px] font-medium text-brand-deep",
   input:
     "w-full rounded-control border border-line bg-surface-soft py-2 pr-3 pl-9 text-[13px] text-ink transition-colors placeholder:text-ink-muted focus:border-brand/40 focus:bg-surface focus:outline-none",
 } as const;
@@ -170,6 +240,15 @@ export const layout = {
   /** Content fills the viewport; only the reading measure is capped, never the shell. */
   page: "w-full px-4 py-5 sm:px-6 2xl:px-8",
   stack: "space-y-5",
+  /**
+   * What the window has left below the chrome row: 100dvh less the 64px header
+   * and the 40px the page pads itself with, top and bottom. For the one region
+   * on a page that should reach the bottom of the screen instead of stopping
+   * where its content happens to stop — a caseload, a log. Pair it with a floor
+   * (`Card`'s `fill` carries one) so a short window scrolls the page rather than
+   * crushing the region into a couple of rows.
+   */
+  fillHeight: "h-[calc(100dvh-104px)]",
   /** Paragraph width cap, so prose stays readable on a 2560px display. */
   measure: "max-w-[78ch]",
   sidebarWidth: "w-[248px]",

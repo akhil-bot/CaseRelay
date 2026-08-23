@@ -11,12 +11,12 @@ import {
   EmptyState,
   FlagBadge,
   Mono,
-  Note,
   ProgressBar,
+  Rows,
   StatusBadge,
   cx,
 } from "@/components/ui/primitives";
-import { control, layout, surface, tone, type as type_, type Tone } from "@/design/tokens";
+import { control, layout, row, surface, tone, type as type_, type Tone } from "@/design/tokens";
 import { useDemo } from "@/lib/demo-store";
 import { PRIMARY_CASE_ID } from "@/lib/mock/cases";
 import { useViewer } from "@/lib/viewer";
@@ -57,7 +57,7 @@ export default function OverviewPage() {
           </Link>
         </div>
 
-        <div className={cx(surface.inset, "mt-4 flex flex-wrap items-center gap-3 px-4 py-3")}>
+        <div className="mt-4 flex flex-wrap items-center gap-3 border-t border-line pt-4">
           <Badge variant="brand" icon="clock">
             {meta.dayLabel}
           </Badge>
@@ -106,7 +106,7 @@ export default function OverviewPage() {
               {showsTechnical ? "All workflows" : "All cases"}
             </Link>
           }
-          bodyClassName="px-3 py-3"
+          flush={attention.length > 0}
         >
           {attention.length === 0 ? (
             <EmptyState
@@ -115,12 +115,12 @@ export default function OverviewPage() {
               hint={copy.overview.attentionEmpty.hint}
             />
           ) : (
-            <ul className="grid gap-2 3xl:grid-cols-2">
+            <Rows>
               {attention.map((item) => (
                 <li key={item.id}>
                   <Link
                     href={`/cases/${item.id}`}
-                    className="flex items-start gap-3 rounded-control border border-line bg-surface-soft px-3.5 py-3 transition-colors hover:bg-surface-muted"
+                    className={cx("flex items-start gap-3", row.pad, row.hover)}
                   >
                     <Avatar name={item.childAlias} size={34} variant="danger" />
                     <span className="min-w-0 flex-1">
@@ -141,7 +141,7 @@ export default function OverviewPage() {
                   </Link>
                 </li>
               ))}
-            </ul>
+            </Rows>
           )}
         </Card>
 
@@ -156,13 +156,13 @@ export default function OverviewPage() {
               </Link>
             ) : undefined
           }
-          bodyClassName="px-3 py-3"
+          flush
         >
-          <ol className="space-y-1">
+          <Rows as="ol">
             {recent.map((event) => {
               const kind = KIND_META[event.kind];
               return (
-                <li key={event.id} className="flex gap-3 rounded-control px-2.5 py-2">
+                <li key={event.id} className={cx("flex gap-3", row.pad)}>
                   <span
                     className={cx(
                       "mt-0.5 flex size-7 shrink-0 items-center justify-center rounded-full border",
@@ -184,7 +184,7 @@ export default function OverviewPage() {
                 </li>
               );
             })}
-          </ol>
+          </Rows>
         </Card>
       </div>
 
@@ -193,17 +193,10 @@ export default function OverviewPage() {
           icon="shield"
           title="Governed capabilities"
           subtitle="Demonstrated at the current point in the scenario, with the evidence that proves it."
-          bodyClassName="px-3 py-3"
         >
-          <ul className="grid gap-2 sm:grid-cols-2 2xl:grid-cols-3">
+          <ul className="grid gap-x-6 gap-y-5 sm:grid-cols-2 2xl:grid-cols-3">
             {capabilities.map((capability) => (
-              <li
-                key={capability.key}
-                className={cx(
-                  "rounded-control border px-3.5 py-3",
-                  capability.proven ? "border-seal/20 bg-seal-soft" : "border-line bg-surface-soft",
-                )}
-              >
+              <li key={capability.key} className="min-w-0">
                 <div className="flex flex-wrap items-center gap-2">
                   <span className="text-[12.5px] font-medium text-ink">{capability.label}</span>
                   <Badge
@@ -241,12 +234,9 @@ export default function OverviewPage() {
           </span>
         </div>
 
-        <ul className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3 3xl:grid-cols-4">
+        <ul className="grid gap-x-6 gap-y-5 sm:grid-cols-2 xl:grid-cols-3 3xl:grid-cols-4">
           {commitments.map((commitment) => (
-            <li
-              key={commitment.id}
-              className={cx(surface.inset, "flex items-start gap-3 px-3.5 py-3")}
-            >
+            <li key={commitment.id} className="flex items-start gap-3">
               <DomainIcon domain={commitment.domain} size={32} />
               <span className="min-w-0 flex-1">
                 <span className="block truncate text-[12.5px] font-medium text-ink">
@@ -270,8 +260,6 @@ export default function OverviewPage() {
           ))}
         </ul>
       </Card>
-
-      <Note icon="shield">{copy.overview.footnote}</Note>
     </div>
   );
 }

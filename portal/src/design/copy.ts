@@ -1,5 +1,6 @@
 import type { IconName } from "@/components/icons";
 import type { Persona } from "@/design/personas";
+import { PRIMARY_CASE_ID } from "@/lib/mock/cases";
 
 /**
  * All persona-dependent wording lives here, next to the design tokens, so the two
@@ -12,14 +13,43 @@ interface PageHeading {
   subtitle: string;
 }
 
+/** A heading with the list it introduces, where the list is copy rather than data. */
+interface Section<T> extends PageHeading {
+  items: T[];
+}
+
+/**
+ * One task walkthrough. The steps are the order a person actually does them in,
+ * so they are a list rather than a paragraph.
+ */
+interface HowTo {
+  title: string;
+  icon: IconName;
+  /** The screen the walkthrough is about, where there is one to open. */
+  href?: string;
+  steps: string[];
+}
+
+/**
+ * A standing limit on what the product does. Stated as the claim first and the
+ * detail second, so the page can be skimmed down the titles alone.
+ */
+interface Limit {
+  title: string;
+  body: string;
+  icon: IconName;
+}
+
 interface PersonaCopy {
   pages: {
     overview: PageHeading;
     cases: PageHeading;
     caseDetail: PageHeading;
     approvals: PageHeading;
+    approvalDetail: PageHeading;
     registry: PageHeading;
     audit: PageHeading;
+    guidelines: PageHeading;
   };
   overview: {
     attention: PageHeading;
@@ -28,20 +58,24 @@ interface PersonaCopy {
     stats: { owner: string; waiting: string; open: string; steps: string };
     statNotes: { owner: string; waiting: string; open: string; steps: string };
     attentionEmpty: { title: string; hint: string };
-    footnote: string;
   };
   cases: {
     listing: PageHeading;
     searchPlaceholder: string;
     filterAll: string;
     empty: { title: string; hint: string };
-    footnote: string;
-    columns: { commitments: string; deadline: string; third: string; fourth: string };
+    /** Column headings for the list view, in the order they are laid out. */
+    columns: {
+      case: string;
+      status: string;
+      commitments: string;
+      deadline: string;
+      third: string;
+      fourth: string;
+    };
   };
   caseDetail: {
     commitments: PageHeading;
-    permitted: PageHeading;
-    excluded: PageHeading;
     projection: PageHeading;
     disclosedLabel: string;
     withheldLabel: string;
@@ -54,19 +88,51 @@ interface PersonaCopy {
     empty: (advanced: boolean) => { title: string; hint: string };
     context: PageHeading;
     history: PageHeading;
-    rules: PageHeading;
+    /** Column headings for the queue, in the order they are laid out. */
+    columns: {
+      subject: string;
+      status: string;
+      shares: string;
+      recipient: string;
+      purpose: string;
+      raised: string;
+    };
     disclosedLabel: string;
     withheldLabel: string;
     approveLabel: string;
     declineLabel: string;
     actingAs: string;
-    footnote: string;
   };
   sidebar: {
     sectionLabel: string;
-    limitsLabel: string;
-    limits: string[];
     footerNote: string;
+  };
+  /**
+   * The scope of the product, and how to work inside it.
+   *
+   * This is the whole of it: what CaseRelay is for, what it refuses, the rules
+   * that enforce the refusals, and the walkthroughs for each screen. It is one
+   * tab rather than a footnote on every page, because guidance repeated six
+   * times is guidance nobody reads once.
+   *
+   * The limits are the point — but a list of refusals on its own reads as a
+   * disclaimer, so each one is preceded by the thing CaseRelay does instead.
+   */
+  guidelines: {
+    /** The claim the page opens with. */
+    label: string;
+    intro: string;
+    footnote: string;
+    /**
+     * The two scope lists are not written here: they are the authority grant's
+     * own scopes, read through `AUTHORITY_GRANT`. Copy that restated them could
+     * go stale against the order it claims to describe.
+     */
+    permitted: PageHeading;
+    excluded: PageHeading;
+    howTo: Section<HowTo>;
+    rules: PageHeading;
+    limits: Section<Limit>;
   };
   signIn: {
     /**
@@ -103,8 +169,16 @@ const advocate: PersonaCopy = {
       title: "Needs my approval",
       subtitle: "Nothing is sent to another organization until you have read it and said yes.",
     },
+    approvalDetail: {
+      title: "Before this is sent",
+      subtitle: "The exact message, exactly what it shares, and what it is based on.",
+    },
     registry: { title: "Not in this view", subtitle: "" },
     audit: { title: "Not in this view", subtitle: "" },
+    guidelines: {
+      title: "Guidelines",
+      subtitle: "What CaseRelay will do for you, what it will never do, and how to use each screen.",
+    },
   },
   overview: {
     attention: {
@@ -135,20 +209,18 @@ const advocate: PersonaCopy = {
       title: "Nothing is overdue right now.",
       hint: "Every step has someone responsible and a date that has not passed.",
     },
-    footnote:
-      "Every child, family, school, and court order here is made up for a demonstration. CaseRelay is not connected to any real case system and is not endorsed by National CASA/GAL.",
   },
   cases: {
     listing: {
       title: "Your caseload",
-      subtitle: "Six children. The one marked live is the case in this walkthrough.",
+      subtitle: "Sorted so the children waiting longest come first.",
     },
     searchPlaceholder: "Search by child, case number, or county",
     filterAll: "All my cases",
     empty: { title: "No case matches that search.", hint: "Try a different name or case number." },
-    footnote:
-      "CaseRelay keeps track of whether someone has taken responsibility for a step. It never decides where a child lives, what care they receive, or how their case should be argued.",
     columns: {
+      case: "Child",
+      status: "Status",
       commitments: "Steps done",
       deadline: "Next due date",
       third: "Court order",
@@ -159,14 +231,6 @@ const advocate: PersonaCopy = {
     commitments: {
       title: "Next steps",
       subtitle: "Each step belongs to one organization. CaseRelay chases the ones nobody claimed.",
-    },
-    permitted: {
-      title: "What you are allowed to do",
-      subtitle: "Set by the court order your supervisor verified.",
-    },
-    excluded: {
-      title: "What nobody here decides",
-      subtitle: "These belong to the court and the professionals involved.",
     },
     projection: {
       title: "What the school was told",
@@ -198,27 +262,109 @@ const advocate: PersonaCopy = {
       subtitle: "The school's last reply asked for information it is not allowed to have.",
     },
     history: { title: "What you have already decided", subtitle: "" },
-    rules: {
-      title: "Promises CaseRelay keeps",
-      subtitle: "These are fixed rules, not judgement calls the software makes each time.",
+    columns: {
+      subject: "Child",
+      status: "Status",
+      shares: "Shares",
+      recipient: "Goes to",
+      purpose: "Why",
+      raised: "Asked you",
     },
     disclosedLabel: "This message will share",
     withheldLabel: "This message will not share",
     approveLabel: "Approve and send",
     declineLabel: "Do not send",
     actingAs: "You are approving as",
-    footnote:
-      "CaseRelay can draft wording and read documents. It cannot choose who to contact, what to share, or when to send — those are fixed rules and your decision.",
   },
   sidebar: {
     sectionLabel: "My work",
-    limitsLabel: "What CaseRelay will never do",
-    limits: [
-      "Decide where a child lives",
-      "Give legal or medical advice",
-      "Contact anyone without your approval",
-    ],
     footerNote: "No real child, family, or school record is used anywhere in this demonstration.",
+  },
+  guidelines: {
+    label: "What CaseRelay is for",
+    intro:
+      "CaseRelay keeps track of whether someone has taken responsibility for a step, and chases the steps nobody has claimed. That is the whole job.",
+    footnote: "Everything else stays with you, the court, and the professionals involved.",
+    permitted: {
+      title: "What you are allowed to do",
+      subtitle: "Set by the court order your supervisor verified.",
+    },
+    excluded: {
+      title: "What nobody here decides",
+      subtitle: "These belong to the court and the professionals involved.",
+    },
+    howTo: {
+      title: "How to use CaseRelay",
+      subtitle: "Four things you will do most often, in the order you would do them.",
+      items: [
+        {
+          title: "Start your day on Today",
+          icon: "home",
+          href: "/",
+          steps: [
+            "Read “Needs your attention” first. Those are steps nobody has taken responsibility for yet, and they are the only things on the page that are stuck.",
+            "Check “Waiting on you” for messages CaseRelay has drafted and cannot send until you say yes.",
+            "Skim “Moved forward without you asking”. That already happened while you were away — it is there so you know, not so you act.",
+          ],
+        },
+        {
+          title: "When a step has no owner",
+          icon: "alert",
+          href: "/cases",
+          steps: [
+            "Open the case and find the step. It names the one organization it belongs to.",
+            "Look at how long it has been waiting. CaseRelay has already been chasing it — the day count is how long nobody has answered.",
+            "Ask CaseRelay to draft a follow-up. It will write the message and bring it to you.",
+            "Nothing reaches the organization until you have read that message and approved it.",
+          ],
+        },
+        {
+          title: "Approve a message before it is sent",
+          icon: "approvals",
+          href: "/approvals",
+          steps: [
+            "Open “Needs my approval” and read the message itself — use “Read the message first” to see the exact wording.",
+            "Check the two lists beside it: what the message will share, and what it will not.",
+            "Look at “What this is based on” if you want to see the document a claim came from.",
+            "Choose “Approve and send” or “Do not send”. If you do nothing, nothing is sent.",
+          ],
+        },
+        {
+          title: "Ask CaseRelay a question",
+          icon: "sparkle",
+          steps: [
+            "Open the chat panel and ask about any case you are appointed to.",
+            "It can read the documents on the case, summarise where a step stands, and draft wording for you.",
+            "It cannot contact anyone, decide anything, or act without your approval. If you ask it to, it will say no and tell you why.",
+          ],
+        },
+      ],
+    },
+    rules: {
+      title: "Promises CaseRelay keeps",
+      subtitle: "These are fixed rules, not judgement calls the software makes each time.",
+    },
+    limits: {
+      title: "Limits",
+      subtitle: "Worth knowing before you rely on anything here.",
+      items: [
+        {
+          title: "Nothing on this site is real",
+          icon: "shield",
+          body: "Every child, family, school, and court order in this walkthrough is made up for a demonstration. CaseRelay is not connected to any real case system and is not endorsed by National CASA/GAL.",
+        },
+        {
+          title: "Decisions about a child are never CaseRelay's",
+          icon: "lock",
+          body: "It never decides where a child lives, what care they receive, what services they qualify for, or how their case should be argued. It only tracks whether the people responsible for those things have done what they promised.",
+        },
+        {
+          title: "It can write, it cannot send",
+          icon: "user",
+          body: "CaseRelay reads documents and drafts wording. It cannot choose who to contact, what to share, or when to send — those are fixed rules and your decision.",
+        },
+      ],
+    },
   },
   signIn: {
     panel: {
@@ -253,6 +399,10 @@ const platform: PersonaCopy = {
       title: "Policy queue",
       subtitle: "Actions held by POL-ESC-007 pending a human principal, with full field projections.",
     },
+    approvalDetail: {
+      title: "Held action",
+      subtitle: "Drafted payload, computed projection, evidence provenance, and applied rule IDs.",
+    },
     registry: {
       title: "Agent registry",
       subtitle: "Versioned cards, owning organizations, declared scopes, and denied scopes.",
@@ -260,6 +410,10 @@ const platform: PersonaCopy = {
     audit: {
       title: "Traces & audit",
       subtitle: "One correlated trace across discovery, runtime, gateway, armor, policy, and completion.",
+    },
+    guidelines: {
+      title: "Operating envelope",
+      subtitle: "Enforced constraints, the rules that implement them, and how to read each console.",
     },
   },
   overview: {
@@ -291,20 +445,18 @@ const platform: PersonaCopy = {
       title: "No SLA breaches at this step.",
       hint: "Every commitment has an acknowledged owner and an in-window deadline.",
     },
-    footnote:
-      "Synthetic fixtures only. No agent is deployed behind this build, no request leaves the browser, and health and latency figures are illustrative.",
   },
   cases: {
     listing: {
       title: "Durable executions",
-      subtitle: "Six workflows. CR-1042 is bound to the scenario clock.",
+      subtitle: "One workflow per case reference, ranked by open commitment age.",
     },
     searchPlaceholder: "Search by case reference, workflow, or county",
     filterAll: "All workflows",
     empty: { title: "No workflow matches that query.", hint: "Try a case reference or filter." },
-    footnote:
-      "Deterministic code owns authorization, field projection, deadline thresholds, retries, state transitions, approval requirements, and idempotency. The model only extracts, classifies, and drafts.",
     columns: {
+      case: "Workflow",
+      status: "State",
       commitments: "Terminal states",
       deadline: "Next deadline",
       third: "Authority ref",
@@ -315,14 +467,6 @@ const platform: PersonaCopy = {
     commitments: {
       title: "Commitments",
       subtitle: "One owning organization per commitment, each with a distinct identity and data scope.",
-    },
-    permitted: {
-      title: "Granted scopes",
-      subtitle: "Purposes carried in the request envelope.",
-    },
-    excluded: {
-      title: "Denied scopes",
-      subtitle: "Rejected at the gateway regardless of caller.",
     },
     projection: {
       title: "Gateway projection · verify_school_enrollment",
@@ -354,27 +498,108 @@ const platform: PersonaCopy = {
       subtitle: "The partner payload was quarantined before it entered any agent context.",
     },
     history: { title: "Decision log", subtitle: "Bound to the exact disclosed field set." },
-    rules: {
-      title: "Policy rules in force",
-      subtitle: "Deterministic evaluation order, applied before any outbound effect.",
+    columns: {
+      subject: "Request",
+      status: "State",
+      shares: "Projection",
+      recipient: "Recipient",
+      purpose: "Purpose",
+      raised: "Raised",
     },
     disclosedLabel: "Disclosed set",
     withheldLabel: "Withheld set",
     approveLabel: "Approve and dispatch",
     declineLabel: "Deny",
     actingAs: "Acting as human principal",
-    footnote:
-      "Agents return evidence, applied rule IDs, and human-readable explanations — never private chain-of-thought.",
   },
   sidebar: {
     sectionLabel: "Platform",
-    limitsLabel: "Enforced invariants",
-    limits: [
-      "No cross-domain field projection",
-      "No self-approved outbound action",
-      "Exactly-once business effect",
-    ],
     footerNote: "Synthetic fixtures. Nothing in this build is deployed and no request leaves the browser.",
+  },
+  guidelines: {
+    label: "Operating envelope",
+    intro:
+      "Constraints the runtime enforces before any outbound effect — not conventions a model is asked to follow.",
+    footnote: "Violations quarantine the payload rather than degrade the response.",
+    permitted: {
+      title: "Granted scopes",
+      subtitle: "Purposes carried in the request envelope.",
+    },
+    excluded: {
+      title: "Denied scopes",
+      subtitle: "Rejected at the gateway regardless of caller.",
+    },
+    howTo: {
+      title: "Reading the consoles",
+      subtitle: "What each surface is authoritative for, and where the evidence sits.",
+      items: [
+        {
+          title: "Trace a request end to end",
+          icon: "audit",
+          href: "/audit",
+          steps: [
+            "Open Traces & audit. One correlated trace spans discovery, runtime, gateway, Model Armor, policy, and completion.",
+            "Expand a span for its actor identity, elapsed time, and the rule IDs evaluated inside it.",
+            "The policy decisions list is the authority for an outcome — each entry carries the rule that fired, not a post-hoc summary.",
+          ],
+        },
+        {
+          title: "Check what an agent can reach",
+          icon: "agents",
+          href: "/registry",
+          steps: [
+            "Open the Agent registry and select the agent. Its versioned card declares the owning organization, service identity, granted scopes, and denied scopes.",
+            "The gateway computes every projection from that card, so a denied scope is unreachable by construction rather than filtered on the way out.",
+            "A capability with no proof recorded shows as unverified. Treat it as unproven, not as working.",
+          ],
+        },
+        {
+          title: "Read a field projection",
+          icon: "gateway",
+          href: `/cases/${PRIMARY_CASE_ID}`,
+          steps: [
+            "Open the workflow and find the gateway projection for the outbound call.",
+            "The disclosed set is the minimum-necessary field list computed for that purpose. The withheld set names each field and the rule that withheld it.",
+            "The orchestrator never held the withheld fields either — cross-domain records are unreachable, so there is no assembled record to leak.",
+          ],
+        },
+        {
+          title: "Interpret a refusal",
+          icon: "shield",
+          href: "/approvals",
+          steps: [
+            "A quarantine sets the partner payload aside before it enters any agent context. Nothing downstream sees the instruction.",
+            "The rule ID on the decision is the authority for the refusal, and the response carries an explanation rather than private chain-of-thought.",
+            "A bounded retry reuses the original idempotency key, so a repeated attempt cannot repeat the business effect.",
+          ],
+        },
+      ],
+    },
+    rules: {
+      title: "Policy rules in force",
+      subtitle: "Deterministic evaluation order, applied before any outbound effect.",
+    },
+    limits: {
+      title: "Limits",
+      subtitle: "What this build is and is not evidence of.",
+      items: [
+        {
+          title: "Synthetic fixtures throughout",
+          icon: "shield",
+          body: "No agent is deployed behind this build, no request leaves the browser, and health and latency figures are illustrative. Every case, identity, and trace is fabricated.",
+        },
+        {
+          title: "Deterministic code owns the consequential path",
+          icon: "lock",
+          body: "Authorization, field projection, deadline thresholds, retries, state transitions, approval requirements, and idempotency are code. The model only extracts, classifies, and drafts.",
+        },
+        {
+          title: "Explanations, not chain-of-thought",
+          icon: "sparkle",
+          body: "Agents return evidence references, applied rule IDs, and human-readable explanations. Private reasoning traces are never surfaced, logged, or persisted.",
+        },
+      ],
+    },
   },
   signIn: {
     panel: {
@@ -419,4 +644,70 @@ const FIELD_LABELS: Record<string, string> = {
 export function fieldLabel(field: string, technical: boolean) {
   if (technical) return field;
   return FIELD_LABELS[field] ?? field.split(".").pop()?.replace(/_/g, " ") ?? field;
+}
+
+/**
+ * The same policy rules, read as promises rather than as controls. Keyed by rule
+ * ID so the plain wording and the enforced rule cannot drift into describing
+ * different things — every ID in `POLICY_RULES` needs an entry here.
+ */
+const PLAIN_RULES: Record<string, { title: string; summary: string }> = {
+  "POL-AUTH-004": {
+    title: "A verified court order first",
+    summary: "Nothing starts until a supervisor has confirmed you are appointed to the case.",
+  },
+  "POL-OWN-006": {
+    title: "Somebody is always responsible",
+    summary:
+      "A step with no named person responsible for it is treated as a problem, not as work in progress.",
+  },
+  "POL-PROJ-011": {
+    title: "Only what the question needs",
+    summary:
+      "Whoever is asked a question is told only what that question needs. Nothing else is included.",
+  },
+  "POL-INJ-002": {
+    title: "Outside messages cannot give instructions",
+    summary:
+      "If a reply from another organization tries to tell CaseRelay what to do, it is set aside and never acted on.",
+  },
+  "POL-ESC-007": {
+    title: "A person approves every message out",
+    summary:
+      "CaseRelay cannot contact another organization until you have read the message and agreed.",
+  },
+  "POL-IDEM-001": {
+    title: "Never sent twice",
+    summary: "If CaseRelay retries, the same message will not reach anyone a second time.",
+  },
+  "POL-RET-003": {
+    title: "Closed cases stop being watched",
+    summary:
+      "When a case closes, CaseRelay stops checking on it and keeps only what it is required to keep, for only as long as it must.",
+  },
+};
+
+export function ruleCopy(
+  rule: { id: string; title: string; summary: string },
+  technical: boolean,
+) {
+  if (technical) return rule;
+  return PLAIN_RULES[rule.id] ?? rule;
+}
+
+/**
+ * Authorized purposes, said the way you would explain them to the person whose
+ * approval is being asked for. Keyed by the purpose carried in the request
+ * envelope, so the sentence and the scope it describes cannot come apart.
+ */
+const PLAIN_PURPOSES: Record<string, string> = {
+  verify_school_enrollment: "To confirm she is enrolled at school",
+  confirm_legal_referral_status: "To check her lawyer referral is moving",
+  confirm_shelter_referral_status: "To find out who is handling her shelter referral",
+  confirm_appointment_completed: "To confirm her medical appointment happened",
+};
+
+export function purposeLabel(purpose: string, technical: boolean) {
+  if (technical) return purpose;
+  return PLAIN_PURPOSES[purpose] ?? purpose.replace(/_/g, " ");
 }

@@ -12,9 +12,10 @@ import {
   Mono,
   Note,
   OutcomeBadge,
+  Rows,
   cx,
 } from "@/components/ui/primitives";
-import { control, layout, surface, tone, type as type_ } from "@/design/tokens";
+import { control, layout, row, tone, type as type_ } from "@/design/tokens";
 import { useDemo } from "@/lib/demo-store";
 import { TRACE_ID, WORKFLOW_ID } from "@/lib/mock/cases";
 import { useViewer } from "@/lib/viewer";
@@ -90,9 +91,9 @@ export default function ActivityLogPage() {
         title="Correlated spans"
         subtitle="Append-only. Every row keeps its actor, timing, and policy outcome."
         action={<span className={type_.meta}>{filtered.length} shown</span>}
-        bodyClassName="px-3 py-3"
+        flush
       >
-        <div className="mb-3 flex flex-wrap gap-1.5 px-1">
+        <div className="flex flex-wrap gap-1.5 border-b border-line px-5 py-3.5">
           {GROUPS.map((option) => (
             <button
               key={option.id}
@@ -107,17 +108,15 @@ export default function ActivityLogPage() {
         </div>
 
         {filtered.length === 0 ? (
-          <EmptyState
-            icon="clock"
-            title="No spans of this type yet."
-            hint="Advance the scenario clock to generate more of the trace."
-          />
+          <div className="px-5 py-4">
+            <EmptyState icon="clock" title="No spans of this type yet." />
+          </div>
         ) : (
-          <ol className="space-y-1.5">
+          <Rows as="ol">
             {filtered.map((event) => (
               <SpanRow key={event.id} event={event} maxSpan={maxSpan} />
             ))}
-          </ol>
+          </Rows>
         )}
       </Card>
 
@@ -125,14 +124,14 @@ export default function ActivityLogPage() {
         icon="shield"
         title="Policy decision log"
         subtitle="Every allow, refusal, quarantine, and human-approval requirement with the rules that produced it."
-        bodyClassName="px-3 py-3"
+        flush={policyDecisions.length > 0}
       >
         {policyDecisions.length === 0 ? (
           <EmptyState icon="shield" title="No policy decisions recorded yet." />
         ) : (
-          <ul className="grid gap-2 3xl:grid-cols-2">
+          <Rows>
             {policyDecisions.map((decision) => (
-              <li key={decision.id} className={cx(surface.inset, "px-4 py-3.5")}>
+              <li key={decision.id} className={row.pad}>
                 <div className="flex flex-wrap items-center gap-2">
                   <Mono className="text-brand-deep">{decision.id}</Mono>
                   <OutcomeBadge outcome={decision.outcome} />
@@ -154,7 +153,7 @@ export default function ActivityLogPage() {
                   )}
                 </div>
                 {decision.retryInstruction && (
-                  <p className="mt-2.5 flex items-start gap-2 rounded-control border border-line bg-surface px-3 py-2.5 text-[12px] text-ink-soft">
+                  <p className="mt-2.5 flex items-start gap-2 text-[12px] text-ink-soft">
                     <Icon name="retry" size={14} className="mt-0.5 shrink-0 text-warn" />
                     <span>
                       <span className="font-medium text-ink">Safe retry: </span>
@@ -164,13 +163,13 @@ export default function ActivityLogPage() {
                 )}
               </li>
             ))}
-          </ul>
+          </Rows>
         )}
       </Card>
 
       <Note icon="document">
         Agents record evidence, applied rules, and human-readable explanations — not private
-        chain-of-thought. Raw synthetic documents stay in object storage; shared state holds only
+        chain-of-thought. Raw documents stay in object storage; shared state holds only
         operational facts with source, timestamp, purpose, and retention metadata.
       </Note>
     </div>
@@ -183,12 +182,12 @@ function SpanRow({ event, maxSpan }: { event: ActivityEvent; maxSpan: number }) 
   const width = event.spanMs === 0 ? 4 : Math.max(4, Math.round((event.spanMs / maxSpan) * 100));
 
   return (
-    <li className={cx(surface.inset, "overflow-hidden")}>
+    <li>
       <button
         type="button"
         onClick={() => setOpen((value) => !value)}
         aria-expanded={open}
-        className="w-full px-4 py-3 text-left"
+        className={cx("w-full text-left", row.pad, row.hover)}
       >
         <div className="flex flex-wrap items-center gap-2">
           <span
@@ -223,8 +222,10 @@ function SpanRow({ event, maxSpan }: { event: ActivityEvent; maxSpan: number }) 
         </div>
       </button>
 
+      {/* A disclosure, so it stays a full-bleed band under its row: tinted and
+          ruled off, never boxed. */}
       {open && (
-        <div className="animate-rise border-t border-line bg-surface px-4 py-3">
+        <div className="animate-rise border-t border-line bg-surface-soft px-5 py-3.5">
           <p className={type_.small}>{event.detail}</p>
           <div className="mt-2.5 flex flex-wrap items-center gap-x-4 gap-y-1.5 text-[11.5px] text-ink-muted">
             <span className="flex items-center gap-1.5">
