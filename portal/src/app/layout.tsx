@@ -1,5 +1,7 @@
 import type { Metadata } from "next";
 import "./globals.css";
+import "@copilotkit/react-core/v2/styles.css";
+import { CopilotProvider } from "@/components/copilot/CopilotProvider";
 import { DemoProvider } from "@/lib/demo-store";
 import { ViewerProvider } from "@/lib/viewer";
 
@@ -14,7 +16,9 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
     <html lang="en">
       <body className="font-sans antialiased">
         <ViewerProvider>
-          <DemoProvider>{children}</DemoProvider>
+          <DemoProvider>
+            <CopilotProvider>{children}</CopilotProvider>
+          </DemoProvider>
         </ViewerProvider>
       </body>
     </html>

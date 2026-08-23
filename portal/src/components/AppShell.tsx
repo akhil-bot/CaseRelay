@@ -2,6 +2,7 @@
 
 import { usePathname } from "next/navigation";
 import { useState, type ReactNode } from "react";
+import { CaseRelayCopilot } from "@/components/copilot/CaseRelayCopilot";
 import { ActivityPanel } from "@/components/shell/ActivityPanel";
 import { Header } from "@/components/shell/Header";
 import { Sidebar } from "@/components/shell/Sidebar";
@@ -70,6 +71,8 @@ export function AppShell({ children }: { children: ReactNode }) {
           )}
         </div>
       </div>
+
+      <CaseRelayCopilot />
     </div>
   );
 }
