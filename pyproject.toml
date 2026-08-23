@@ -1,0 +1,24 @@
+[project]
+name = "caserelay"
+version = "0.1.0"
+description = "CaseRelay — multi-agent continuity platform"
+requires-python = ">=3.12"
+dependencies = [
+    "google-adk[a2a]>=2.7.1",
+    "google-cloud-aiplatform[agent_engines,adk]",
+    "google-cloud-firestore",
+    "google-cloud-pubsub",
+    "google-cloud-tasks",
+    "fastapi>=0.115",
+    "uvicorn[standard]",
+    "pydantic>=2.0",
+    "opentelemetry-exporter-gcp-trace",
+    "sse-starlette",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["app", "backend", "contracts"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"

@@ -1,0 +1,29 @@
+{
+  "indexes": [
+    {
+      "collectionGroup": "commitments",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "type", "order": "ASCENDING" },
+        { "fieldPath": "status", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "partner_updates",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "idempotency_key", "order": "ASCENDING" },
+        { "fieldPath": "received_at", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "audit_events",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "trace_id", "order": "ASCENDING" },
+        { "fieldPath": "timestamp", "order": "ASCENDING" }
+      ]
+    }
+  ],
+  "fieldOverrides": []
+}

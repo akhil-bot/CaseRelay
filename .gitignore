@@ -44,6 +44,15 @@ env/
 .coverage
 htmlcov/
 
+# ── ADK local state and generated artifacts ──────────────────────────────────
+# Session databases from `adk web` / `adk run`, and the agent cards that
+# app/agent_server.py writes and deletes per process to control A2A routing.
+.adk/
+backend/agents/*/agent.json
+
+# Written by the ADK deploy CLI on every deploy; describes one machine's run.
+deployment_metadata.json
+
 # ── Node ─────────────────────────────────────────────────────────────────────
 # The Next.js app owns its own dependencies. A node_modules or a lockfile up
 # here means an npm command was run from the wrong directory — there is no
@@ -62,3 +71,6 @@ tmp/
 # Everything else Cursor writes under .cursor/ is one machine's local state.
 .cursor/*
 !.cursor/rules/
+
+# ── Agent harness scratch ────────────────────────────────────────────────────
+.omc/

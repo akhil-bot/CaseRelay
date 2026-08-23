@@ -134,37 +134,31 @@ Eight agents, each with a distinct Google service-account identity and a scoped 
 
 ## Local Setup
 
-> **Note:** Full setup instructions will be added as infrastructure is finalized. The outline below describes the intended flow.
-
-**Prerequisites:** Python 3.12+, Node.js 20+, Google Cloud project with GEAP access, `gcloud` CLI authenticated.
+**Prerequisites:** Python 3.12+, `uv`, Google Cloud project with GEAP access, `gcloud` CLI authenticated.
 
 ```bash
-# Clone and set up backend
 git clone https://github.com/<your-org>/caserelay.git
 cd caserelay
-
-# Backend (FastAPI / ADK agents)
-cd backend
-python -m venv .venv && source .venv/bin/activate
-pip install -r requirements.txt
-cp .env.example .env   # fill in GCP project, Firestore, and Vertex AI config
-
-# Start API locally
-uvicorn main:app --reload
-
-# Portal (Next.js)
-cd ../portal
-npm install
-cp .env.local.example .env.local   # fill in API URL
-npm run dev
+uv sync                       # installs from pyproject.toml into .venv
+source .venv/bin/activate
 ```
 
-**Google Cloud deployment:**
+Set the required environment variables (see `.env.example`), then run the full local journey:
+
+```python
+# In a Python shell with PYTHONPATH=.
+from backend.runtime.fleet import run_maya
+out = run_maya()
+```
+
+For cloud testing, source the fleet endpoints and use the CLI:
 
 ```bash
-gcloud run deploy caserelay-api --source ./backend --region us-central1
-gcloud run deploy caserelay-portal --source ./portal --region us-central1
+source infra/fleet_endpoints.env
+python infra/case_cli.py ls
 ```
+
+Full instructions, expected outputs, and the deploy procedure are in **[docs/caserelay-walkthrough.md](docs/caserelay-walkthrough.md)**.
 
 ---
 
@@ -178,6 +172,9 @@ gcloud run deploy caserelay-portal --source ./portal --region us-central1
 | Demo duration | ≤ 3:50 |
 | Demo language | English (with captions) |
 | Cloud platform | Google Cloud (Cloud Run, Firestore, Pub/Sub, Vertex AI, GEAP) |
+
+Official rules, submission checklist, scoring mechanism, and judging criteria are mirrored in
+[docs/hackathon-rulebook.md](docs/hackathon-rulebook.md).
 
 ---
 

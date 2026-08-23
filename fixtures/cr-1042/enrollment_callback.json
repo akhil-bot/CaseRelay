@@ -1,0 +1,14 @@
+{
+  "source_agent": "education-liaison-v1",
+  "commitment_id": "cmt-edu-1042",
+  "update_type": "callback",
+  "idempotency_key": "idem-edu-enroll-1042",
+  "payload": {
+    "status": "completed",
+    "enrollment_confirmed": true,
+    "child_name": "Maya",
+    "dob": "2017-04-12",
+    "referral_id": "edu-1042",
+    "school_name": "Lincoln Elementary"
+  }
+}

@@ -1,0 +1,173 @@
+"""Synthetic case generation.
+
+CR-1042 is the scripted demo case and its facts live in fixtures/. For repeatable testing we
+need many cases that do not collide, so this module derives a complete, self-consistent case
+from any case id: the referral packet, the commitments, and the authority grants a supervisor
+would be asked to approve. Referral ids are derived from the case suffix, which keeps a case's
+records identifiable in Firestore and in the audit trail.
+"""
+
+import random
+from datetime import datetime, timedelta, timezone
+from typing import Any
+
+# type -> (referral prefix, grant prefix, identity, purpose, allowed fields, legal basis)
+SERVICES: list[tuple[str, str, str, str, str, list[str], str]] = [
+    (
+        "education",
+        "edu",
+        "edu",
+        "education-agent@caserelay.iam",
+        "verify_school_enrollment",
+        ["child_name", "dob", "referral_id"],
+        "ferpa_court_order",
+    ),
+    (
+        "health",
+        "hlth",
+        "hlth",
+        "health-agent@caserelay.iam",
+        "check_appointment_status",
+        ["appointment_status", "provider_name", "appointment_date"],
+        "hipaa_signed_authorization",
+    ),
+    (
+        "legal",
+        "leg",
+        "leg",
+        "legal-agent@caserelay.iam",
+        "check_referral_status",
+        ["case_reference", "deadline"],
+        "state_juvenile_court_order",
+    ),
+    (
+        "shelter",
+        "shl",
+        "shl",
+        "shelter-agent@caserelay.iam",
+        "check_availability",
+        ["referral_id", "scheduling"],
+        "state_juvenile_court_order",
+    ),
+    (
+        "family_services",
+        "fam",
+        "fam",
+        "family-agent@caserelay.iam",
+        "check_assessment_schedule",
+        ["assessment_scheduling"],
+        "state_juvenile_court_order",
+    ),
+]
+
+ORGS = {
+    "education": "Lincoln Unified School District",
+    "health": "Harbor Pediatric Clinic",
+    "legal": "County Legal Aid",
+    "shelter": "Safe Harbor Youth Shelter",
+    "family_services": "County Family Services",
+}
+
+OWNER_AGENTS = {
+    "education": "education-liaison-v1",
+    "health": "health-coordination-v1",
+    "legal": "legal-aid-v1",
+    "shelter": "shelter-status-v1",
+    "family_services": "family-services-v1",
+}
+
+NAMES = ["Maya", "Noah", "Amara", "Diego", "Priya", "Ellis", "Rosa", "Kai", "Leila", "Theo"]
+
+# Days from the referral date to each service's due date; education is the one that goes stale.
+DUE_OFFSETS = {"education": 17, "health": 24, "legal": 14, "shelter": 31, "family_services": 36}
+
+
+def new_case_id() -> str:
+    """A fresh case id that will not collide with an earlier test run."""
+    return f"CR-{datetime.now(timezone.utc).strftime('%m%d%H%M%S')}"
+
+
+def _suffix(case_id: str) -> str:
+    digits = "".join(ch for ch in case_id if ch.isdigit())
+    return digits or "0000"
+
+
+def build_packet(case_id: str) -> dict[str, Any]:
+    """A referral packet for this case. Deterministic per case id so reruns match."""
+    suffix = _suffix(case_id)
+    rng = random.Random(suffix)
+    referral_date = datetime.now(timezone.utc) - timedelta(days=17)
+
+    referrals = []
+    for service, ref_prefix, _grant, _identity, _purpose, _fields, _basis in SERVICES:
+        due = referral_date + timedelta(days=DUE_OFFSETS[service])
+        referrals.append(
+            {
+                "type": service,
+                "referral_id": f"{ref_prefix}-{suffix}",
+                "target_org": ORGS[service],
+                "referral_date": referral_date.date().isoformat(),
+                "due_date": due.date().isoformat(),
+                "status": "sent",
+            }
+        )
+
+    dob = datetime(rng.randint(2012, 2019), rng.randint(1, 12), rng.randint(1, 28))
+    return {
+        "case_id": case_id,
+        "child": {
+            "child_id": f"child-{suffix}",
+            "name": rng.choice(NAMES),
+            "dob": dob.date().isoformat(),
+        },
+        "volunteer_id": "elena-volunteer-001",
+        "supervisor_id": "supervisor-001",
+        "retention_policy": "standard_7y",
+        "source_document_ref": f"gs://caserelay-fixtures/{case_id.lower()}/referral-packet.pdf",
+        "court": {
+            "docket_number": f"JV-2026-{suffix}",
+            "appointment_date": referral_date.date().isoformat(),
+            "judge_name": "Hon. Rivera",
+        },
+        "referrals": referrals,
+        "synthetic": True,
+    }
+
+
+def build_commitments(packet: dict[str, Any]) -> list[dict[str, Any]]:
+    suffix = _suffix(packet["case_id"])
+    by_type = {r["type"]: r for r in packet["referrals"]}
+    rows = []
+    for service, ref_prefix, _g, _i, _p, _f, _b in SERVICES:
+        referral = by_type[service]
+        rows.append(
+            {
+                "commitment_id": f"cmt-{ref_prefix}-{suffix}",
+                "type": service,
+                "status": "pending",
+                "owner_agent": OWNER_AGENTS[service],
+                "owner_org": referral["target_org"],
+                "deadline": f"{referral['due_date']}T00:00:00Z",
+                "referral_id": referral["referral_id"],
+                "referral_date": f"{referral['referral_date']}T00:00:00Z",
+                "response_payload": None,
+            }
+        )
+    return rows
+
+
+def build_grants(packet: dict[str, Any]) -> list[dict[str, Any]]:
+    suffix = _suffix(packet["case_id"])
+    grants = []
+    for _service, _ref, grant_prefix, identity, purpose, fields, basis in SERVICES:
+        grants.append(
+            {
+                "grant_id": f"grant-{grant_prefix}-{suffix}",
+                "granted_to": identity,
+                "purpose": purpose,
+                "allowed_fields": list(fields),
+                "legal_basis": basis,
+                "status": "proposed",
+            }
+        )
+    return grants

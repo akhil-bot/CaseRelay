@@ -1,0 +1,98 @@
+[
+  {
+    "agent_id": "intake-authority-v1",
+    "display_name": "Intake & Authority",
+    "owner_org": "CASA Program",
+    "version": "1.0.0",
+    "purpose": "Extract commitments and propose authority grants",
+    "tools": ["validate_packet", "extract_commitments", "propose_grants"],
+    "allowed_data_scopes": ["referral_packet", "authority_grants"],
+    "denied_data_scopes": ["clinical_notes", "legal_strategy"],
+    "identity": "intake-agent@caserelay.iam",
+    "health_status": "healthy"
+  },
+  {
+    "agent_id": "continuity-orchestrator-v1",
+    "display_name": "Continuity Orchestrator",
+    "owner_org": "CASA Program",
+    "version": "1.0.0",
+    "purpose": "Dispatch scoped tasks and checkpoint workflow",
+    "tools": ["dispatch_task", "read_checkpoint", "write_checkpoint", "schedule_wake", "request_approval"],
+    "allowed_data_scopes": ["commitment_status"],
+    "denied_data_scopes": ["raw_partner_records"],
+    "identity": "orchestrator-agent@caserelay.iam",
+    "health_status": "healthy"
+  },
+  {
+    "agent_id": "education-liaison-v1",
+    "display_name": "Education Liaison",
+    "owner_org": "Lincoln Unified School District",
+    "version": "1.0.0",
+    "purpose": "Verify school enrollment status",
+    "tools": ["check_enrollment", "request_status", "report_callback"],
+    "allowed_data_scopes": ["child_name", "dob", "referral_id"],
+    "denied_data_scopes": ["health", "legal", "shelter", "family"],
+    "identity": "education-agent@caserelay.iam",
+    "health_status": "healthy"
+  },
+  {
+    "agent_id": "health-coordination-v1",
+    "display_name": "Health Coordination",
+    "owner_org": "Harbor Pediatric Clinic",
+    "version": "1.0.0",
+    "purpose": "Report appointment status only",
+    "tools": ["check_appointment", "report_callback"],
+    "allowed_data_scopes": ["appointment_status", "provider_name", "appointment_date"],
+    "denied_data_scopes": ["diagnosis", "medication", "clinical_notes"],
+    "identity": "health-agent@caserelay.iam",
+    "health_status": "healthy"
+  },
+  {
+    "agent_id": "legal-aid-v1",
+    "display_name": "Legal Aid",
+    "owner_org": "County Legal Aid",
+    "version": "1.0.0",
+    "purpose": "Report referral acceptance and deadlines",
+    "tools": ["check_referral_status", "report_callback"],
+    "allowed_data_scopes": ["case_reference", "deadline"],
+    "denied_data_scopes": ["legal_strategy"],
+    "identity": "legal-agent@caserelay.iam",
+    "health_status": "healthy"
+  },
+  {
+    "agent_id": "shelter-status-v1",
+    "display_name": "Shelter Status",
+    "owner_org": "Safe Harbor Youth Shelter",
+    "version": "1.0.0",
+    "purpose": "Report availability and scheduling",
+    "tools": ["check_availability", "report_callback"],
+    "allowed_data_scopes": ["referral_id", "scheduling"],
+    "denied_data_scopes": ["placement_rankings"],
+    "identity": "shelter-agent@caserelay.iam",
+    "health_status": "healthy"
+  },
+  {
+    "agent_id": "family-services-v1",
+    "display_name": "Family Services",
+    "owner_org": "County Family Services",
+    "version": "1.0.0",
+    "purpose": "Report assessment scheduling only",
+    "tools": ["check_assessment", "report_callback"],
+    "allowed_data_scopes": ["assessment_scheduling"],
+    "denied_data_scopes": ["risk_scores", "findings"],
+    "identity": "family-agent@caserelay.iam",
+    "health_status": "healthy"
+  },
+  {
+    "agent_id": "safeguarding-verifier-v1",
+    "display_name": "Safeguarding Verifier",
+    "owner_org": "CASA Compliance",
+    "version": "1.0.0",
+    "purpose": "Allow, quarantine, or escalate partner responses",
+    "tools": ["evaluate_policy", "quarantine_response", "generate_safe_retry", "write_audit"],
+    "allowed_data_scopes": ["policy_rules"],
+    "denied_data_scopes": ["raw_case_data"],
+    "identity": "verifier-agent@caserelay.iam",
+    "health_status": "healthy"
+  }
+]

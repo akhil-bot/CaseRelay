@@ -1,0 +1,42 @@
+[
+  {
+    "grant_id": "grant-edu-1042",
+    "granted_to": "education-agent@caserelay.iam",
+    "purpose": "verify_school_enrollment",
+    "allowed_fields": ["child_name", "dob", "referral_id"],
+    "legal_basis": "ferpa_court_order",
+    "status": "proposed"
+  },
+  {
+    "grant_id": "grant-hlth-1042",
+    "granted_to": "health-agent@caserelay.iam",
+    "purpose": "check_appointment_status",
+    "allowed_fields": ["appointment_status", "provider_name", "appointment_date"],
+    "legal_basis": "hipaa_signed_authorization",
+    "status": "proposed"
+  },
+  {
+    "grant_id": "grant-leg-1042",
+    "granted_to": "legal-agent@caserelay.iam",
+    "purpose": "check_referral_status",
+    "allowed_fields": ["case_reference", "deadline"],
+    "legal_basis": "state_juvenile_court_order",
+    "status": "proposed"
+  },
+  {
+    "grant_id": "grant-shl-1042",
+    "granted_to": "shelter-agent@caserelay.iam",
+    "purpose": "check_availability",
+    "allowed_fields": ["referral_id", "scheduling"],
+    "legal_basis": "state_juvenile_court_order",
+    "status": "proposed"
+  },
+  {
+    "grant_id": "grant-fam-1042",
+    "granted_to": "family-agent@caserelay.iam",
+    "purpose": "check_assessment_schedule",
+    "allowed_fields": ["assessment_scheduling"],
+    "legal_basis": "state_juvenile_court_order",
+    "status": "proposed"
+  }
+]

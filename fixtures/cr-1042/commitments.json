@@ -1,0 +1,57 @@
+[
+  {
+    "commitment_id": "cmt-edu-1042",
+    "type": "education",
+    "status": "pending",
+    "owner_agent": "education-liaison-v1",
+    "owner_org": "Lincoln Unified School District",
+    "deadline": "2026-08-01T00:00:00Z",
+    "referral_id": "edu-1042",
+    "referral_date": "2026-07-15T00:00:00Z",
+    "response_payload": null
+  },
+  {
+    "commitment_id": "cmt-hlth-1042",
+    "type": "health",
+    "status": "pending",
+    "owner_agent": "health-coordination-v1",
+    "owner_org": "Harbor Pediatric Clinic",
+    "deadline": "2026-08-08T00:00:00Z",
+    "referral_id": "hlth-1042",
+    "referral_date": "2026-07-15T00:00:00Z",
+    "response_payload": null
+  },
+  {
+    "commitment_id": "cmt-leg-1042",
+    "type": "legal",
+    "status": "pending",
+    "owner_agent": "legal-aid-v1",
+    "owner_org": "County Legal Aid",
+    "deadline": "2026-07-29T00:00:00Z",
+    "referral_id": "leg-1042",
+    "referral_date": "2026-07-15T00:00:00Z",
+    "response_payload": null
+  },
+  {
+    "commitment_id": "cmt-shl-1042",
+    "type": "shelter",
+    "status": "pending",
+    "owner_agent": "shelter-status-v1",
+    "owner_org": "Safe Harbor Youth Shelter",
+    "deadline": "2026-08-15T00:00:00Z",
+    "referral_id": "shl-1042",
+    "referral_date": "2026-07-15T00:00:00Z",
+    "response_payload": null
+  },
+  {
+    "commitment_id": "cmt-fam-1042",
+    "type": "family_services",
+    "status": "pending",
+    "owner_agent": "family-services-v1",
+    "owner_org": "County Family Services",
+    "deadline": "2026-08-20T00:00:00Z",
+    "referral_id": "fam-1042",
+    "referral_date": "2026-07-15T00:00:00Z",
+    "response_payload": null
+  }
+]
