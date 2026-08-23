@@ -1,0 +1,23 @@
+---
+description: How to verify changes — the user tests the running app manually
+alwaysApply: true
+---
+
+# Verifying changes
+
+The user tests the running application themselves. Do not verify UI work by driving a browser.
+
+- Never open, launch, or automate Chrome or any other browser to test a change, and do not take screenshots of the running app.
+- Do not start a dev server to check your work. One is normally already running on port 3000 — check the terminals folder rather than starting a second one, which fails anyway with "Another next dev server is already running."
+- Verify with static checks instead, run from `portal/`:
+  - `./node_modules/.bin/tsc --noEmit` (note: `npm run typecheck` resolves to the wrong package.json from this workspace)
+  - `npx eslint .` for lint, or the `ReadLints` tool
+
+## Hand it back to the user
+
+Anything that only shows up on screen — hover states, animation, spacing, colour, focus rings — is the user's to confirm. When you finish such a change:
+
+1. Say what you changed and where to look for it (which screen, which element, what interaction triggers it).
+2. Stop. Do not try to prove it works.
+
+Rendering a static asset to inspect an icon or diagram you authored is fine; that is not testing the app.

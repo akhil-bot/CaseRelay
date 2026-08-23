@@ -44,7 +44,21 @@ env/
 .coverage
 htmlcov/
 
+# ── Node ─────────────────────────────────────────────────────────────────────
+# The Next.js app owns its own dependencies. A node_modules or a lockfile up
+# here means an npm command was run from the wrong directory — there is no
+# package.json at this level for either of them to describe.
+node_modules/
+/package-lock.json
+
 # ── Logs and scratch ─────────────────────────────────────────────────────────
 *.log
 tmp/
 .cache/
+
+# ── Cursor ───────────────────────────────────────────────────────────────────
+# Rules are project configuration: they tell whoever works here next how this
+# repo expects to be treated, so they are committed like any other convention.
+# Everything else Cursor writes under .cursor/ is one machine's local state.
+.cursor/*
+!.cursor/rules/
