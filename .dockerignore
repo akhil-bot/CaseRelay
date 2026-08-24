@@ -9,5 +9,5 @@ node_modules/
 .git/
 .cursor/
 .omc/
+harness/
 *.md
-uv.lock

@@ -17,6 +17,7 @@ RUN uv pip install --system .
 COPY backend/ ./backend/
 COPY contracts/ ./contracts/
 COPY app/ ./app/
+COPY fixtures/ ./fixtures/
 
 EXPOSE 8080
 CMD ["uvicorn", "backend.api.main:app", "--host", "0.0.0.0", "--port", "8080"]
