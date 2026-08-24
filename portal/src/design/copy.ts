@@ -49,6 +49,7 @@ interface PersonaCopy {
     approvalDetail: PageHeading;
     registry: PageHeading;
     audit: PageHeading;
+    admin: PageHeading;
     guidelines: PageHeading;
   };
   overview: {
@@ -175,6 +176,7 @@ const advocate: PersonaCopy = {
     },
     registry: { title: "Not in this view", subtitle: "" },
     audit: { title: "Not in this view", subtitle: "" },
+    admin: { title: "Not in this view", subtitle: "" },
     guidelines: {
       title: "Guidelines",
       subtitle: "What CaseRelay will do for you, what it will never do, and how to use each screen.",
@@ -410,6 +412,10 @@ const platform: PersonaCopy = {
     audit: {
       title: "Traces & audit",
       subtitle: "One correlated trace across discovery, runtime, gateway, armor, policy, and completion.",
+    },
+    admin: {
+      title: "Synthetic Data Lab",
+      subtitle: "Create test cases from named scenarios, run the agent fleet, and watch live events.",
     },
     guidelines: {
       title: "Operating envelope",

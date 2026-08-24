@@ -80,6 +80,7 @@ export const NAV: Record<Persona, NavItem[]> = {
   ],
   platform: [
     { href: "/", label: "Fleet health", icon: "home" },
+    { href: "/admin", label: "Synthetic Data Lab", icon: "sparkle" },
     { href: "/registry", label: "Agent registry", icon: "agents" },
     { href: "/audit", label: "Traces & audit", icon: "audit" },
     { href: "/approvals", label: "Policy queue", icon: "shield", badge: "approvals" },
@@ -89,7 +90,7 @@ export const NAV: Record<Persona, NavItem[]> = {
 };
 
 /** Routes only one view is allowed to open. */
-export const PLATFORM_ONLY_ROUTES = ["/registry", "/audit"];
+export const PLATFORM_ONLY_ROUTES = ["/registry", "/audit", "/admin"];
 
 export function isRouteAllowed(pathname: string, persona: Persona) {
   if (persona === "platform") return true;
@@ -104,9 +105,11 @@ export type PageKey =
   | "approvalDetail"
   | "registry"
   | "audit"
+  | "admin"
   | "guidelines";
 
 export function pageKeyFor(pathname: string): PageKey {
+  if (pathname.startsWith("/admin")) return "admin";
   if (pathname.startsWith("/cases/")) return "caseDetail";
   if (pathname.startsWith("/cases")) return "cases";
   // Before the queue itself, so the trailing segment wins.
