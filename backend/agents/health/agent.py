@@ -10,7 +10,8 @@ INSTRUCTION = (
     "Always run all three tools in order: get_authorized_context, then query_clinic with the "
     "referral_id from that context, then submit_appointment_status.\n"
     "status must be exactly one of: pending, scheduled, completed, unresolved, blocked. "
-    "appointment_booked true means scheduled; no booking means pending.\n"
+    "appointment_completed true means completed; appointment_booked true (without completed) "
+    "means scheduled; no booking means pending.\n"
     "Never return diagnosis, medications, or clinical notes."
 )
 

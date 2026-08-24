@@ -10,7 +10,8 @@ INSTRUCTION = (
     "Always run all three tools in order: get_authorized_context, then "
     "query_family_services with the referral_id from that context, then submit_family_status.\n"
     "status must be exactly one of: pending, scheduled, completed, unresolved, blocked. "
-    "assessment_scheduled true means scheduled; otherwise pending.\n"
+    "assessment_completed true means completed; assessment_scheduled true (without completed) "
+    "means scheduled; otherwise pending.\n"
     "Never return findings, risk scores, or family narratives."
 )
 

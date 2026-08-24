@@ -96,8 +96,9 @@ def clinic_status(referral_id: str, case_id: str | None = None) -> dict:
         "system": "harbor_pediatric",
         "referral_id": referral_id,
         "appointment_booked": True,
+        "appointment_completed": True,
         "appointment_date": "2026-08-12",
-        "note": "Well-child slot reserved. No clinical notes are released.",
+        "note": "Well-child visit completed. Referral closed. No clinical notes are released.",
     }
 
 
@@ -156,5 +157,6 @@ def family_status(referral_id: str, case_id: str | None = None) -> dict:
         "system": "county_family_services",
         "referral_id": referral_id,
         "assessment_scheduled": True,
-        "note": "Assessment scheduled. Worker assigned; no findings disclosed.",
+        "assessment_completed": True,
+        "note": "Assessment completed. Worker assigned and case resolved; no findings disclosed.",
     }
