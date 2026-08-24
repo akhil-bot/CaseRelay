@@ -3,7 +3,7 @@ from uuid import uuid4
 
 from opentelemetry import trace as _otel_trace
 
-from backend.identity.registry import IdentityDenied, PURPOSE_TO_IDENTITY, verify
+from backend.identity.registry import IdentityDenied, PURPOSE_TO_IDENTITY, assert_scope, verify
 from backend.memory import bank as memory
 from backend.policy.projection import project
 from backend.runtime import context as _ctx_mod
@@ -45,6 +45,26 @@ def authorized_context(case_id: str, purpose: str) -> dict[str, Any]:
             "clinical_notes": "WITHHOLD",
         }
         projected, disclosed, withheld = project(fat, grant["allowed_fields"])
+
+        for field in disclosed:
+            try:
+                assert_scope(target, field)
+            except IdentityDenied:
+                workspace.append_audit(
+                    case_id,
+                    {
+                        "event_id": f"evt-{uuid4().hex[:8]}",
+                        "trace_id": _ctx_mod.current().trace_id,
+                        "event_type": "denial",
+                        "agent_identity": target,
+                        "purpose": purpose,
+                        "denied_field": field,
+                        "verdict": "deny",
+                        "explanation": f"{target} denied access to {field} by scope policy",
+                    },
+                )
+                raise
+
         from backend.runtime.trace import tracer
 
         tracer.add(
