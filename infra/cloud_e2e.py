@@ -31,8 +31,21 @@ def main() -> int:
     ap.add_argument("--keep", action="store_true")
     args = ap.parse_args()
 
+    # Preflight: verify all specialist endpoints are reachable before running the journey.
+    import httpx as _httpx
+    required_agents = ["intake", "orchestrator", "education", "health", "legal", "shelter", "family", "verifier"]
+    for agent_key in required_agents:
+        url = a2a_client.endpoint(agent_key)
+        try:
+            _httpx.head(url, timeout=10, follow_redirects=True)
+        except (_httpx.ConnectError, _httpx.TimeoutException) as exc:
+            print(f"PREFLIGHT FAILED: {agent_key} at {url} unreachable: {exc}")
+            return 1
+        except _httpx.HTTPStatusError:
+            pass  # reachable, just rejected the request — that's fine
+
     case_id = args.case or (None if args.source == "synthetic" else "CR-1042")
-    case_id = dataset.create_case(case_id, source=args.source)
+    case_id = dataset.create_case(case_id, source=args.source, scenario="maya")
     packet = workspace.packet(case_id)
     print(f"created case {case_id} in Firestore — child {packet['child']['name']}, "
           f"referrals {[r['referral_id'] for r in packet['referrals']]}\n")
