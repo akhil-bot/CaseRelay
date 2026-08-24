@@ -1,3 +1,9 @@
+import os
+
+os.environ.setdefault("GOOGLE_CLOUD_PROJECT", "caserelay")
+os.environ.setdefault("GOOGLE_CLOUD_LOCATION", "global")
+os.environ.setdefault("GOOGLE_GENAI_USE_VERTEXAI", "1")
+
 from backend.agents.intake.agent import root_agent as intake_agent
 from backend.agents.orchestrator.agent import root_agent as orchestrator_agent
 from backend.memory import bank as memory

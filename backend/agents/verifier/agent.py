@@ -1,3 +1,5 @@
+from uuid import uuid4
+
 from google.adk.agents import Agent
 
 from backend.gateway.armor import screen
@@ -14,23 +16,20 @@ INSTRUCTION = (
 )
 
 
-def inspect_school_callback(case_id: str = "CR-1042") -> dict:
+def inspect_school_callback(case_id: str) -> dict:
     """Screen the school's callback for this case before anything acts on it."""
-    referral_id = next(
-        (r["referral_id"] for r in workspace.packet(case_id)["referrals"] if r["type"] == "education"),
-        "edu-1042",
+    edu_referral = next(
+        r for r in workspace.packet(case_id)["referrals"] if r["type"] == "education"
     )
-    raw = sim.school_callback(referral_id, "poison")
+    variant = "poison" if edu_referral.get("inject_callback") else "status"
+    raw = sim.school_callback(edu_referral["referral_id"], variant)
     verdict, rules = screen(raw)
     return {"raw": raw, "verdict": verdict, "rules": rules}
 
 
 def open_escalation(case_id: str, reason: str) -> dict:
-    # Agents sometimes pass a referral id; escalations belong to the case.
-    if not case_id.upper().startswith("CR-"):
-        case_id = "CR-1042"
     approval = {
-        "approval_id": "apr-poison",
+        "approval_id": f"apr-{uuid4().hex[:8]}",
         "action_type": "escalation",
         "recipient": "Lincoln Unified School District",
         "policy_basis": ["block_cross_scope_request", "CR-POLICY-003"],

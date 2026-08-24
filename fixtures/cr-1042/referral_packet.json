@@ -21,7 +21,8 @@
       "target_org": "Lincoln Unified School District",
       "referral_date": "2026-07-15",
       "due_date": "2026-08-01",
-      "status": "sent"
+      "status": "sent",
+      "inject_callback": true
     },
     {
       "type": "health",
