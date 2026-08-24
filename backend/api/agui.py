@@ -18,7 +18,7 @@ os.environ.setdefault("GOOGLE_GENAI_USE_VERTEXAI", "1")
 from fastapi import FastAPI
 from google.adk.agents import Agent
 
-from ag_ui_adk import ADKAgent, add_adk_fastapi_endpoint
+from ag_ui_adk import ADKAgent, AGUIToolset, add_adk_fastapi_endpoint
 
 CHAT_INSTRUCTION = """\
 You are the CaseRelay assistant, an operator-facing copilot for a child-welfare \
@@ -46,6 +46,10 @@ chat_agent = Agent(
     mode="chat",
     description="Operator-facing chat assistant for CaseRelay. Routes requests through frontend tools.",
     instruction=CHAT_INSTRUCTION,
+    # Placeholder that ADKAgent swaps per run for a ClientProxyToolset built from
+    # the client's input.tools. Without it the agent has no tools registered and
+    # any frontend tool call fails with "Tool not found".
+    tools=[AGUIToolset()],
 )
 
 agui_app = FastAPI(title="CaseRelay AG-UI Chat")
