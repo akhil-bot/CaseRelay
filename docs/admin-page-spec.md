@@ -40,6 +40,11 @@ Navigate to `/cases/{case_id}`, hit **Run**:
    - `run_failed` — all phases failed or a fatal error occurred (terminal)
    - `stream_end` — final event confirming the terminal state; close the connection
    - `stream_timeout` — safety-valve disconnection after 30 minutes; reconnect to resume
+
+   Every event carries a `message` field: a single human-readable sentence in plain English, present tense, no markdown, no truncation mid-word. Use it as the primary progress narration in the UI. Existing fields (`event`, `run_id`, `phase`, `commitment_states`, `failed_phases`, `error`, `summary`) remain unchanged.
+
+   The five specialist fan-out phases (`3-fanout-*`) execute concurrently, so their events will interleave. Each event carries a `phase` field identifying its specialist (e.g. `3-fanout-education_liaison`) for correct UI attribution.
+
 4. Poll `GET /v1/runs/{run_id}` for the authoritative terminal state:
 
 | `state` | Meaning | Portal treatment |

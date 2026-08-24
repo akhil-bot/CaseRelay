@@ -6,8 +6,10 @@ All routes are under /v1. Legacy routes from earlier prototypes have been remove
 from __future__ import annotations
 
 import asyncio
+import contextvars
 import json
 import threading
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta, timezone
 from typing import Any
 from uuid import uuid4
@@ -329,40 +331,175 @@ def delete_case(case_id: str) -> dict:
 # ---------------------------------------------------------------------------
 
 
+_SPECIALIST_LABELS = {
+    "education_liaison": "education liaison",
+    "health_coordination": "health coordinator",
+    "legal_aid": "legal aid specialist",
+    "shelter_status": "shelter placement officer",
+    "family_services": "family services worker",
+}
+
+_run_event_lock = threading.Lock()
+
+
+def _narrate(event: str, phase: str, *, summary: str = "", commitment_states: dict | None = None,
+             error: str = "", case_id: str = "") -> str:
+    """Derive a single human-readable sentence for a run event."""
+    specialist = None
+    if phase.startswith("3-fanout-"):
+        specialist = phase.removeprefix("3-fanout-")
+
+    if event == "run_started":
+        return f"Starting the agent fleet for case {case_id}."
+    if event == "run_completed":
+        closed = sum(1 for v in (commitment_states or {}).values() if v == "completed")
+        total = len(commitment_states or {})
+        if closed == total and total > 0:
+            return f"All {total} commitments closed."
+        return "Run completed successfully."
+    if event == "run_failed":
+        return f"Run failed: {error}." if error else "The run has failed."
+    if event == "run_partial_failure":
+        return f"Partial failure: {error}." if error else "Some phases encountered errors."
+
+    if event == "phase_started":
+        if phase == "intake":
+            return "Reading the referral packet and extracting commitments."
+        if specialist:
+            nice = _SPECIALIST_LABELS.get(specialist, specialist.replace("_", " "))
+            return f"Asking the {nice} to check and submit its commitment."
+        if "activate" in phase:
+            return "Supervisor is reviewing the proposed grants for activation."
+        if "checkpoint" in phase:
+            return "Checkpointing the workflow and setting the next wake."
+        if "wake" in phase:
+            return "Day-17 wake fired; re-checking open commitments."
+        if "quarantine" in phase:
+            return "Inspecting an inbound callback for safety concerns."
+        if "approve" in phase:
+            return "Supervisor is reviewing the quarantined escalation."
+        if "enrolled" in phase:
+            return "Verifying school enrollment via the SIS callback."
+        if "memory" in phase:
+            return "Closing the loop and persisting memory for future sessions."
+        return f"Starting phase {phase}."
+
+    if event == "phase_complete":
+        if phase == "intake":
+            return "Intake complete; commitments extracted and grants proposed."
+        if specialist:
+            nice = _SPECIALIST_LABELS.get(specialist, specialist.replace("_", " "))
+            states = commitment_states or {}
+            spec_type = {
+                "education_liaison": "education",
+                "health_coordination": "health",
+                "legal_aid": "legal",
+                "shelter_status": "shelter",
+                "family_services": "family_services",
+            }.get(specialist, specialist)
+            status = states.get(spec_type, "")
+            if status:
+                return f"{nice.capitalize()} reported status: {status}."
+            return f"{nice.capitalize()} completed its check."
+        if "checkpoint" in phase:
+            return "Checkpointing the workflow and setting the day-17 wake."
+        if "wake" in phase:
+            return "Wake phase complete; open commitments re-checked."
+        if "quarantine" in phase:
+            return "Callback inspected and quarantine decision made."
+        if "approve" in phase:
+            return "Supervisor approved the escalation."
+        if "enrolled" in phase:
+            return "School enrollment verified."
+        if "memory" in phase:
+            return "Memory persisted; all commitment statuses summarized."
+        return f"Phase {phase} complete."
+
+    if event == "phase_error":
+        if specialist:
+            nice = _SPECIALIST_LABELS.get(specialist, specialist.replace("_", " "))
+            return f"{nice.capitalize()} encountered an error: {error}."
+        return f"Phase {phase} failed: {error}."
+
+    return ""
+
+
 def _run_background(run_id: str, case_id: str) -> None:
-    """Drive the real agent fleet end-to-end: intake, then orchestrator through PHASES."""
+    """Drive the real agent fleet end-to-end: intake, then orchestrator through PHASES.
+
+    The five specialist fan-out phases (3-fanout-*) are dispatched concurrently via a
+    ThreadPoolExecutor. Each thread gets its own copy of the contextvars context so
+    case_id/run_id/trace_id propagate correctly without bleeding between tasks. All
+    other phases remain strictly sequential.
+
+    Concurrency mechanism: ThreadPoolExecutor with 5 workers. Chosen because run_agent
+    calls asyncio.run() internally (blocking), so asyncio.gather is not an option. Each
+    thread creates its own event loop.
+
+    Thread safety: workspace access is protected by a per-case RLock in Workspace._lock_for().
+    This prevents the race where load() replaces container lists wholesale while another thread
+    is iterating or mutating them. The _run_event_lock protects run event appends (which are
+    keyed by run_id, not case_id, so fall outside the case lock's scope).
+    """
     import logging
     import warnings
 
     from backend.agents.intake.agent import root_agent as intake_agent
     from backend.agents.orchestrator.agent import root_agent as orchestrator_agent
     from backend.runtime.context import bind as _bind
-    from backend.runtime.fleet import PHASES
+    from backend.runtime.fleet import PHASES, SPECIALISTS
     from backend.runtime.invoke import run_agent
 
-    # google.adk.workflow._node_runner and google.adk.runners emit
-    # logger.exception() on every agent failure. Those tracebacks are
-    # redundant: we capture the error in the run state and surface it
-    # via the API. Silence only the ADK logger, only during agent calls,
-    # and restore afterward.
     _adk_logger = logging.getLogger("google.adk")
 
     def _quiet_run_agent(*args, **kwargs):
         prev = _adk_logger.level
         _adk_logger.setLevel(logging.CRITICAL)
         with warnings.catch_warnings():
-            # ADK emits UserWarning for experimental features during execution
             warnings.filterwarnings("ignore", module=r"google\.adk")
             try:
                 return run_agent(*args, **kwargs)
             finally:
                 _adk_logger.setLevel(prev)
 
+    def _push_event(event: dict) -> None:
+        event.setdefault("timestamp", datetime.now(timezone.utc).isoformat())
+        with _run_event_lock:
+            workspace.push_run_event(run_id, event)
+
+    def _run_single_phase(label: str, template: str, ctx: contextvars.Context) -> tuple[str, str | None, str]:
+        """Execute one orchestrator phase inside the given context. Returns (label, error_or_None, orch_text)."""
+        def _inner():
+            prompt = template.format(case_id=case_id)
+            _push_event({
+                "event": "phase_started", "run_id": run_id, "phase": label,
+                "message": _narrate("phase_started", label, case_id=case_id),
+            })
+            try:
+                text = _quiet_run_agent(orchestrator_agent, prompt, app_name="continuity_orchestrator")
+            except Exception as exc:  # noqa: BLE001
+                _push_event({
+                    "event": "phase_error", "run_id": run_id,
+                    "phase": label, "error": str(exc),
+                    "message": _narrate("phase_error", label, error=str(exc)),
+                })
+                return (label, str(exc), "")
+            states = workspace.commitment_states(case_id)
+            _push_event({
+                "event": "phase_complete", "run_id": run_id,
+                "phase": label, "summary": (text or "")[:300],
+                "commitment_states": states,
+                "message": _narrate("phase_complete", label, commitment_states=states),
+            })
+            return (label, None, text or "")
+        return ctx.run(_inner)
+
     with _bind(case_id=case_id, run_id=run_id):
         try:
             workspace.update_run(run_id, state="running", current_phase="intake")
-            workspace.push_run_event(run_id, {
+            _push_event({
                 "event": "run_started", "run_id": run_id, "case_id": case_id,
+                "message": _narrate("run_started", "intake", case_id=case_id),
             })
 
             intake_text = _quiet_run_agent(
@@ -377,10 +514,12 @@ def _run_background(run_id: str, case_id: str) -> None:
                     f"Intake processed for case {case_id}: "
                     f"{cmt_count} commitments extracted, {grant_count} grants proposed."
                 )
-            workspace.push_run_event(run_id, {
+            states = workspace.commitment_states(case_id)
+            _push_event({
                 "event": "phase_complete", "run_id": run_id,
                 "phase": "intake", "summary": intake_text[:300],
-                "commitment_states": workspace.commitment_states(case_id),
+                "commitment_states": states,
+                "message": _narrate("phase_complete", "intake", commitment_states=states),
             })
 
             if not workspace.commitments.get(case_id) or not workspace.grants.get(case_id):
@@ -390,29 +529,101 @@ def _run_background(run_id: str, case_id: str) -> None:
             total_phases = len(PHASES)
             failed_phases: list[str] = []
 
+            fanout_prefix = "3-fanout-"
+            pre_fanout = [(l, t) for l, t in PHASES if not l.startswith(fanout_prefix)]
+            fanout_phases = [(l, t) for l, t in PHASES if l.startswith(fanout_prefix)]
+            # Separate sequential phases that come before and after the fan-out group.
+            # pre_fanout includes 2-activate and everything after 3-fanout-*.
+            sequential_before = []
+            sequential_after = []
+            found_fanout = False
+            past_fanout = False
             for label, template in PHASES:
+                if label.startswith(fanout_prefix):
+                    found_fanout = True
+                    past_fanout = False
+                elif found_fanout and not label.startswith(fanout_prefix):
+                    past_fanout = True
+                if not label.startswith(fanout_prefix) and not past_fanout:
+                    sequential_before.append((label, template))
+                elif not label.startswith(fanout_prefix) and past_fanout:
+                    sequential_after.append((label, template))
+
+            # --- Sequential phases BEFORE fan-out (e.g. 2-activate) ---
+            for label, template in sequential_before:
                 prompt = template.format(case_id=case_id)
                 workspace.update_run(
                     run_id, current_phase=label,
                     commitment_states=workspace.commitment_states(case_id),
                 )
-                workspace.push_run_event(run_id, {
+                _push_event({
                     "event": "phase_started", "run_id": run_id, "phase": label,
+                    "message": _narrate("phase_started", label, case_id=case_id),
                 })
                 try:
                     orch_text = _quiet_run_agent(orchestrator_agent, prompt, app_name="continuity_orchestrator")
                 except Exception as phase_exc:  # noqa: BLE001
                     phase_failures += 1
                     failed_phases.append(label)
-                    workspace.push_run_event(run_id, {
+                    _push_event({
                         "event": "phase_error", "run_id": run_id,
                         "phase": label, "error": str(phase_exc),
+                        "message": _narrate("phase_error", label, error=str(phase_exc)),
                     })
                     continue
-                workspace.push_run_event(run_id, {
+                states = workspace.commitment_states(case_id)
+                _push_event({
                     "event": "phase_complete", "run_id": run_id,
-                    "phase": label, "summary": orch_text[:300],
-                    "commitment_states": workspace.commitment_states(case_id),
+                    "phase": label, "summary": (orch_text or "")[:300],
+                    "commitment_states": states,
+                    "message": _narrate("phase_complete", label, commitment_states=states),
+                })
+
+            # --- CONCURRENT fan-out: five specialists dispatched in parallel ---
+            if fanout_phases:
+                workspace.update_run(
+                    run_id, current_phase="3-fanout",
+                    commitment_states=workspace.commitment_states(case_id),
+                )
+                with ThreadPoolExecutor(max_workers=len(fanout_phases), thread_name_prefix="fanout") as pool:
+                    futures = {
+                        pool.submit(_run_single_phase, label, template, contextvars.copy_context()): label
+                        for label, template in fanout_phases
+                    }
+                    for future in as_completed(futures):
+                        label_result, error, _ = future.result()
+                        if error is not None:
+                            phase_failures += 1
+                            failed_phases.append(label_result)
+
+            # --- Sequential phases AFTER fan-out (4-checkpoint, 5-wake, etc.) ---
+            for label, template in sequential_after:
+                prompt = template.format(case_id=case_id)
+                workspace.update_run(
+                    run_id, current_phase=label,
+                    commitment_states=workspace.commitment_states(case_id),
+                )
+                _push_event({
+                    "event": "phase_started", "run_id": run_id, "phase": label,
+                    "message": _narrate("phase_started", label, case_id=case_id),
+                })
+                try:
+                    orch_text = _quiet_run_agent(orchestrator_agent, prompt, app_name="continuity_orchestrator")
+                except Exception as phase_exc:  # noqa: BLE001
+                    phase_failures += 1
+                    failed_phases.append(label)
+                    _push_event({
+                        "event": "phase_error", "run_id": run_id,
+                        "phase": label, "error": str(phase_exc),
+                        "message": _narrate("phase_error", label, error=str(phase_exc)),
+                    })
+                    continue
+                states = workspace.commitment_states(case_id)
+                _push_event({
+                    "event": "phase_complete", "run_id": run_id,
+                    "phase": label, "summary": (orch_text or "")[:300],
+                    "commitment_states": states,
+                    "message": _narrate("phase_complete", label, commitment_states=states),
                 })
 
             commitments = workspace.commitment_states(case_id)
@@ -424,11 +635,12 @@ def _run_background(run_id: str, case_id: str) -> None:
                     commitment_states=commitments,
                     failed_phases=failed_phases,
                 )
-                workspace.push_run_event(run_id, {
+                _push_event({
                     "event": "run_failed", "run_id": run_id, "case_id": case_id,
                     "error": f"all {total_phases} phases failed",
                     "failed_phases": failed_phases,
                     "commitment_states": commitments,
+                    "message": _narrate("run_failed", "done", error=f"all {total_phases} phases failed"),
                 })
             elif phase_failures > 0:
                 workspace.update_run(
@@ -437,25 +649,29 @@ def _run_background(run_id: str, case_id: str) -> None:
                     commitment_states=commitments,
                     failed_phases=failed_phases,
                 )
-                workspace.push_run_event(run_id, {
+                _push_event({
                     "event": "run_partial_failure", "run_id": run_id, "case_id": case_id,
                     "error": f"{phase_failures}/{total_phases} phases failed",
                     "failed_phases": failed_phases,
                     "commitment_states": commitments,
+                    "message": _narrate("run_partial_failure", "done",
+                                        error=f"{phase_failures}/{total_phases} phases failed"),
                 })
             else:
                 workspace.update_run(
                     run_id, state="completed", current_phase="done",
                     commitment_states=commitments,
                 )
-                workspace.push_run_event(run_id, {
+                _push_event({
                     "event": "run_completed", "run_id": run_id, "case_id": case_id,
                     "commitment_states": commitments,
+                    "message": _narrate("run_completed", "done", commitment_states=commitments),
                 })
         except Exception as exc:  # noqa: BLE001
             workspace.update_run(run_id, state="failed", error=str(exc))
-            workspace.push_run_event(run_id, {
+            _push_event({
                 "event": "run_failed", "run_id": run_id, "error": str(exc),
+                "message": _narrate("run_failed", "", error=str(exc)),
             })
 
 
