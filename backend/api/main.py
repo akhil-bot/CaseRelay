@@ -370,6 +370,13 @@ def _run_background(run_id: str, case_id: str) -> None:
                 f"Process the referral packet for case {case_id}. Extract commitments and propose grants.",
                 app_name="intake_authority",
             )
+            if not intake_text:
+                cmt_count = len(workspace.commitments.get(case_id) or [])
+                grant_count = len(workspace.grants.get(case_id) or [])
+                intake_text = (
+                    f"Intake processed for case {case_id}: "
+                    f"{cmt_count} commitments extracted, {grant_count} grants proposed."
+                )
             workspace.push_run_event(run_id, {
                 "event": "phase_complete", "run_id": run_id,
                 "phase": "intake", "summary": intake_text[:300],
