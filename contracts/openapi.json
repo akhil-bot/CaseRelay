@@ -714,6 +714,7 @@
     "/v1/runs/{run_id}/events": {
       "get": {
         "summary": "Stream Run Events",
+        "description": "SSE stream of run events.\n\nYields all accumulated events then polls briefly for new ones. When the run\nreaches a terminal state the stream closes with a stream_end event. Non-terminal\nruns close after a short poll window; the client reconnects per the SSE spec\n(the retry field controls the interval).",
         "operationId": "stream_run_events_v1_runs__run_id__events_get",
         "parameters": [
           {

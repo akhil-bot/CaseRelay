@@ -7,11 +7,12 @@ from __future__ import annotations
 
 import asyncio
 import json
+import threading
 from datetime import datetime, timedelta, timezone
 from typing import Any
 from uuid import uuid4
 
-from fastapi import BackgroundTasks, FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
 
@@ -329,31 +330,84 @@ def delete_case(case_id: str) -> dict:
 
 
 def _run_background(run_id: str, case_id: str) -> None:
-    """Background task: update run state. Real agent invocation would happen here."""
+    """Drive the real agent fleet end-to-end: intake, then orchestrator through PHASES."""
+    import io
+    import logging
+    import sys
+    import warnings
+
+    warnings.filterwarnings("ignore")
+    logging.disable(logging.WARNING)
+    _orig_stderr = sys.stderr
+    sys.stderr = io.StringIO()
+    try:
+        from backend.agents.intake.agent import root_agent as intake_agent
+        from backend.agents.orchestrator.agent import root_agent as orchestrator_agent
+        from backend.runtime.fleet import PHASES
+    finally:
+        sys.stderr = _orig_stderr
+        logging.disable(logging.NOTSET)
+
     from backend.runtime.context import bind as _bind
+    from backend.runtime.invoke import run_agent
 
     with _bind(case_id=case_id, run_id=run_id):
         try:
-            workspace.update_run(run_id, state="running", current_phase="starting")
-            workspace.push_run_event(run_id, {"event": "run_started", "run_id": run_id, "case_id": case_id})
-            # Agent invocation is intentionally deferred — the control plane must be deployed
-            # and CASERELAY_URL_* set before running live agents.  The run state records that
-            # work was submitted; progress is observable via GET /v1/runs/{run_id}/events.
+            workspace.update_run(run_id, state="running", current_phase="intake")
+            workspace.push_run_event(run_id, {
+                "event": "run_started", "run_id": run_id, "case_id": case_id,
+            })
+
+            intake_text = run_agent(
+                intake_agent,
+                f"Process the referral packet for case {case_id}. Extract commitments and propose grants.",
+                app_name="intake_authority",
+            )
+            workspace.push_run_event(run_id, {
+                "event": "phase_complete", "run_id": run_id,
+                "phase": "intake", "summary": intake_text[:300],
+                "commitment_states": workspace.commitment_states(case_id),
+            })
+
+            if not workspace.commitments.get(case_id) or not workspace.grants.get(case_id):
+                raise RuntimeError(f"intake did not persist commitments/grants: {intake_text[:400]}")
+
+            for label, template in PHASES:
+                prompt = template.format(case_id=case_id)
+                workspace.update_run(
+                    run_id, current_phase=label,
+                    commitment_states=workspace.commitment_states(case_id),
+                )
+                workspace.push_run_event(run_id, {
+                    "event": "phase_started", "run_id": run_id, "phase": label,
+                })
+                try:
+                    orch_text = run_agent(orchestrator_agent, prompt, app_name="continuity_orchestrator")
+                except Exception as phase_exc:  # noqa: BLE001
+                    workspace.push_run_event(run_id, {
+                        "event": "phase_error", "run_id": run_id,
+                        "phase": label, "error": str(phase_exc),
+                    })
+                    continue
+                workspace.push_run_event(run_id, {
+                    "event": "phase_complete", "run_id": run_id,
+                    "phase": label, "summary": orch_text[:300],
+                    "commitment_states": workspace.commitment_states(case_id),
+                })
+
             workspace.update_run(
-                run_id,
-                state="submitted",
-                current_phase="awaiting_agents",
+                run_id, state="completed", current_phase="done",
                 commitment_states=workspace.commitment_states(case_id),
             )
             workspace.push_run_event(run_id, {
-                "event": "run_submitted",
-                "run_id": run_id,
-                "case_id": case_id,
+                "event": "run_completed", "run_id": run_id, "case_id": case_id,
                 "commitment_states": workspace.commitment_states(case_id),
             })
         except Exception as exc:  # noqa: BLE001
             workspace.update_run(run_id, state="failed", error=str(exc))
-            workspace.push_run_event(run_id, {"event": "run_failed", "run_id": run_id, "error": str(exc)})
+            workspace.push_run_event(run_id, {
+                "event": "run_failed", "run_id": run_id, "error": str(exc),
+            })
 
 
 @app.post(
@@ -361,13 +415,14 @@ def _run_background(run_id: str, case_id: str) -> None:
     status_code=202,
     responses={404: {"description": "Case not found"}},
 )
-def submit_run(case_id: str, background: BackgroundTasks) -> dict:
+def submit_run(case_id: str) -> dict:
     workspace.get_case(case_id)  # raises CaseNotFound if absent
     run_id = uuid4().hex[:12]
     from backend.runtime.context import current as _ctx
     workspace.create_run(run_id, case_id)
     workspace.update_run(run_id, trace_id=_ctx().trace_id)
-    background.add_task(_run_background, run_id, case_id)
+    t = threading.Thread(target=_run_background, args=(run_id, case_id), daemon=True)
+    t.start()
     return {"run_id": run_id, "case_id": case_id, "state": "queued"}
 
 
@@ -388,24 +443,42 @@ def get_run(run_id: str) -> dict:
     }
 
 
+_TERMINAL_STATES = {"completed", "failed"}
+
+
 @app.get(
     "/v1/runs/{run_id}/events",
     responses={404: {"description": "Run not found"}},
 )
 def stream_run_events(run_id: str) -> StreamingResponse:
+    """SSE stream of run events.
+
+    Yields all accumulated events then polls briefly for new ones. When the run
+    reaches a terminal state the stream closes with a stream_end event. Non-terminal
+    runs close after a short poll window; the client reconnects per the SSE spec
+    (the retry field controls the interval).
+    """
     run = workspace.get_run(run_id)
     if not run:
         raise HTTPException(status_code=404, detail=f"run {run_id!r} not found")
 
     async def _generate():
-        # Yield any events already queued for this run.
-        events = list(run.get("events", []))
-        if not events:
-            events = [{"event": "run_state", "run_id": run_id, "state": run.get("state", "queued")}]
-        for ev in events:
-            yield f"data: {json.dumps(ev)}\n\n"
-        # Keep connection alive briefly so the client can reconnect as new events arrive.
-        await asyncio.sleep(0)
+        yield "retry: 1000\n\n"
+        yield f"data: {json.dumps({'event': 'connected', 'run_id': run_id, 'state': run.get('state', 'queued')})}\n\n"
+        sent = 0
+        for _ in range(60):
+            current = workspace.get_run(run_id)
+            if current is None:
+                return
+            events = current.get("events", [])
+            for ev in events[sent:]:
+                yield f"data: {json.dumps(ev)}\n\n"
+                sent += 1
+            state = current.get("state", "queued")
+            if state in _TERMINAL_STATES:
+                yield f"data: {json.dumps({'event': 'stream_end', 'run_id': run_id, 'state': state})}\n\n"
+                return
+            await asyncio.sleep(0.5)
 
     return StreamingResponse(
         _generate(),
