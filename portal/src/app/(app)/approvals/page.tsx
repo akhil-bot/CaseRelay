@@ -78,7 +78,6 @@ export default function ApprovalsPage() {
                   <Badge variant="danger" icon="shield">
                     Model Armor · quarantined
                   </Badge>
-                  <Mono className="text-[11.5px]">evt-2051</Mono>
                 </div>
                 <pre className="thin-scroll mt-2.5 overflow-x-auto rounded-control border border-danger/20 bg-danger-soft px-4 py-3 font-mono text-[11.5px] leading-relaxed text-ink-soft">
                   {POISONED_PAYLOAD}

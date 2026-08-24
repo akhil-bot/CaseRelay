@@ -48,13 +48,6 @@ This message discloses only the student's first name, last initial, court refere
         capturedAt: "Day 17 · 09:00:18",
         confidence: 0.88,
       },
-      {
-        id: "EV-2204",
-        label: "Model Armor quarantine of the prior partner payload",
-        source: "model-armor · evt-2051",
-        capturedAt: "Day 17 · 09:00:09",
-        confidence: 1,
-      },
     ],
     projection: {
       disclosed: [

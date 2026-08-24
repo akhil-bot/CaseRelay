@@ -132,14 +132,6 @@ export default function AgentsPage() {
                     <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px] text-ink-muted">
                       <Mono className="text-[11px]">{agent.identity}</Mono>
                       <span className="flex items-center gap-1">
-                        <Icon name="clock" size={12} />
-                        p50 {agent.p50Ms}ms
-                      </span>
-                      <span className="flex items-center gap-1">
-                        <Icon name="activity" size={12} />
-                        {agent.lastHeartbeat}
-                      </span>
-                      <span className="flex items-center gap-1">
                         <Icon name="settings" size={12} />
                         {agent.tools.length} tools
                       </span>

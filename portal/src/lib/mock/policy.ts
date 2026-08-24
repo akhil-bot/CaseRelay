@@ -232,7 +232,7 @@ export const CAPABILITY_PROOFS: CapabilityProof[] = [
     label: "Model Armor",
     managedProduct: "Model Armor",
     status: "callable",
-    evidence: "Quarantine event evt-2051 on the poisoned school payload",
+    evidence: "",
     provenAtStep: 5,
   },
   {
@@ -240,7 +240,7 @@ export const CAPABILITY_PROOFS: CapabilityProof[] = [
     label: "Agent Observability",
     managedProduct: "Cloud Trace + Agent Observability",
     status: "callable",
-    evidence: "One trace (trace-7821) spanning discovery → completion, 26 correlated spans",
+    evidence: "",
     provenAtStep: 7,
   },
 ];

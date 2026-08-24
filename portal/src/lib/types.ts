@@ -61,8 +61,6 @@ export interface AgentCard {
   deniedScopes: string[];
   endpoint: string;
   health: Health;
-  p50Ms: number;
-  lastHeartbeat: string;
   registeredOn: string;
   domain?: Domain;
 }

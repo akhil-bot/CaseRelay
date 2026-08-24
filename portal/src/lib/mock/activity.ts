@@ -209,20 +209,6 @@ export const ACTIVITY: ActivityEvent[] = [
     capability: "gateway",
   },
   {
-    id: "evt-2051",
-    step: 5,
-    at: "Day 17 · 09:00:09",
-    dayOffset: 17,
-    kind: "armor",
-    actor: "model-armor",
-    summary: "Prompt injection detected in partner payload",
-    detail:
-      "Pattern: instruction-override + cross-domain data solicitation. Payload quarantined before reaching the agent context.",
-    spanMs: 132,
-    outcome: "quarantine",
-    capability: "model_armor",
-  },
-  {
     id: "evt-2052",
     step: 5,
     at: "Day 17 · 09:00:09",
