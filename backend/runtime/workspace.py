@@ -142,7 +142,7 @@ class Workspace:
             if (
                 target == identity
                 and grant_purpose == purpose
-                and grant.get("status") in {"granted", "proposed", None}
+                and grant.get("status") == "granted"
                 and not grant.get("revoked")
             ):
                 return grant
@@ -164,6 +164,9 @@ class Workspace:
                 row["last_update"] = _now().isoformat()
                 store.append_row(case_id, "commitments", row, str(row["commitment_id"]))
                 return
+        raise ValueError(
+            f"no commitment matching {commitment_id!r} in case {case_id}"
+        )
 
     def commitment_states(self, case_id: str) -> dict[str, str]:
         self.load(case_id)
@@ -248,6 +251,10 @@ class Workspace:
         return self.list_audit(case_id)
 
     def claim_update(self, case_id: str, key: str, payload: dict[str, Any]) -> tuple[dict[str, Any], bool]:
+        """Idempotent update claim. Uses Firestore transactions when available, in-process dict otherwise."""
+        if store.enabled():
+            from backend.infra.idempotency import claim
+            return claim(case_id, key, lambda: payload)
         bucket = self.updates.setdefault(case_id, {})
         if key in bucket:
             return bucket[key], True
