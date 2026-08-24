@@ -14,7 +14,7 @@ import {
 import { Icon } from "@/components/icons";
 import { LogoMark } from "@/components/Logo";
 import { chrome, cx, tone } from "@/design/tokens";
-import { isAdkConnected } from "@/lib/copilot/config";
+import { isAdkConnected, isRuntimeAvailable } from "@/lib/copilot/config";
 import { useViewer } from "@/lib/viewer";
 
 /**
@@ -120,7 +120,7 @@ function StatusPill() {
       )}
     >
       <span className="size-1.5 rounded-full bg-live" aria-hidden="true" />
-      {isAdkConnected ? "Live fleet" : "Online"}
+      {isAdkConnected ? "Live fleet" : isRuntimeAvailable ? "Built-in agent" : "Online"}
     </span>
   );
 }
