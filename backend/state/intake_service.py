@@ -11,7 +11,7 @@ REQUIRED_PACKET_KEYS = {
 }
 
 
-def validate_packet(case_id: str = "CR-1042") -> dict[str, Any]:
+def validate_packet(case_id: str) -> dict[str, Any]:
     packet = workspace.packet(case_id)
     missing = sorted(REQUIRED_PACKET_KEYS - set(packet))
     if missing:
@@ -30,7 +30,7 @@ def validate_packet(case_id: str = "CR-1042") -> dict[str, Any]:
     }
 
 
-def read_referral_packet(case_id: str = "CR-1042") -> dict[str, Any]:
+def read_referral_packet(case_id: str) -> dict[str, Any]:
     """Return the raw referral packet. The agent must extract commitments itself."""
     return {"ok": True, "packet": workspace.packet(case_id)}
 
@@ -95,7 +95,7 @@ def propose_grant(
     }
 
 
-def finalize_intake(case_id: str = "CR-1042") -> dict[str, Any]:
+def finalize_intake(case_id: str) -> dict[str, Any]:
     """Confirm intake is complete. Fails loudly if a commitment or grant is missing."""
     rows = workspace.commitments.get(case_id, [])
     grants = workspace.grants.get(case_id, [])

@@ -44,27 +44,27 @@ INSTRUCTION = (
 )
 
 
-def activate_case(case_id: str = "CR-1042") -> dict:
+def activate_case(case_id: str) -> dict:
     """Supervisor HITL: grant proposed authorities and start monitoring."""
     return {"case_id": case_id, "status": workspace.activate(case_id)["status"]}
 
 
-def schedule_wake(case_id: str = "CR-1042") -> dict:
+def schedule_wake(case_id: str) -> dict:
     """Checkpoint and schedule the day-17 education wake."""
     return write_checkpoint(case_id)
 
 
-def wake_workflow(case_id: str = "CR-1042") -> dict:
+def wake_workflow(case_id: str) -> dict:
     """Resume the same workflow_id with no user session."""
     return resume_wake(case_id)
 
 
-def preload_memory(case_id: str = "CR-1042") -> dict:
+def preload_memory(case_id: str) -> dict:
     """Memory Bank: operational state only."""
     return preload(case_id)
 
 
-def get_commitment_states(case_id: str = "CR-1042") -> dict:
+def get_commitment_states(case_id: str) -> dict:
     """Current commitment statuses.
 
     A remote specialist's prose does not survive the A2A task conversion, so the orchestrator
@@ -73,7 +73,7 @@ def get_commitment_states(case_id: str = "CR-1042") -> dict:
     return workspace.commitment_states(case_id)
 
 
-def approve_escalation(case_id: str = "CR-1042") -> dict:
+def approve_escalation(case_id: str) -> dict:
     """Supervisor HITL: release the quarantined action."""
     return workspace.decide_approval(case_id, "approved", "supervisor-001")
 
@@ -116,7 +116,7 @@ root_agent = Agent(
     name="continuity_orchestrator",
     model="gemini-3.5-flash",
     mode="chat",
-    description="Routes CR-1042 to specialist agents through granted identities. No raw records.",
+    description="Routes specialist agents through granted identities. No raw records.",
     instruction=INSTRUCTION,
     tools=[
         activate_case,

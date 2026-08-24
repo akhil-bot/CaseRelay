@@ -16,7 +16,7 @@ INSTRUCTION = (
 )
 
 
-def get_authorized_context(case_id: str = "CR-1042") -> dict:
+def get_authorized_context(case_id: str) -> dict:
     return authorized_context(case_id, "check_referral_status")
 
 

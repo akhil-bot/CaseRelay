@@ -16,7 +16,7 @@ INSTRUCTION = (
 )
 
 
-def get_authorized_context(case_id: str = "CR-1042") -> dict:
+def get_authorized_context(case_id: str) -> dict:
     """Only fields the Gateway allowlists for enrollment checks."""
     return authorized_context(case_id, "verify_school_enrollment")
 
