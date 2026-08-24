@@ -1,7 +1,0 @@
-{
-  "education": { "owner_agent": "education-liaison-v1", "initial_status": "unresolved" },
-  "health": { "owner_agent": "health-coordination-v1", "initial_status": "scheduled" },
-  "legal": { "owner_agent": "legal-aid-v1", "initial_status": "completed" },
-  "shelter": { "owner_agent": "shelter-status-v1", "initial_status": "pending" },
-  "family_services": { "owner_agent": "family-services-v1", "initial_status": "pending" }
-}
