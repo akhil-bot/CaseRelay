@@ -61,8 +61,7 @@ PHASES: list[tuple[str, str]] = [
     (
         "8-enrolled",
         "A clean enrollment callback arrived for case {case_id}. Ask education_liaison to "
-        "call query_school with variant 'enroll' and submit status completed if the SIS "
-        "confirms a seat. Then stop.",
+        "call query_school and submit status completed if the SIS confirms a seat. Then stop.",
     ),
     (
         "9-memory",

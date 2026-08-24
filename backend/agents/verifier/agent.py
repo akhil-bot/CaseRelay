@@ -21,8 +21,7 @@ def inspect_school_callback(case_id: str) -> dict:
     edu_referral = next(
         r for r in workspace.packet(case_id)["referrals"] if r["type"] == "education"
     )
-    variant = "poison" if edu_referral.get("inject_callback") else "status"
-    raw = sim.school_callback(edu_referral["referral_id"], variant)
+    raw = sim.school_callback(edu_referral["referral_id"], case_id=case_id)
     verdict, rules = screen(raw)
     return {"raw": raw, "verdict": verdict, "rules": rules}
 
