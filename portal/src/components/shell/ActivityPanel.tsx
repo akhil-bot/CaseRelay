@@ -1,10 +1,10 @@
 "use client";
 
 import { Icon, type IconName } from "@/components/icons";
-import { Badge, Dot } from "@/components/ui/primitives";
+import { Badge } from "@/components/ui/primitives";
 import { chrome, cx, type as type_, type Tone } from "@/design/tokens";
 import { useDemo } from "@/lib/demo-store";
-import { TRACE_ID, WORKFLOW_ID } from "@/lib/mock/cases";
+import { WORKFLOW_ID } from "@/lib/mock/cases";
 import type { ActivityKind } from "@/lib/types";
 
 export const KIND_META: Record<
@@ -59,10 +59,7 @@ export function ActivityPanel({ onClose }: { onClose?: () => void }) {
         <dl className="space-y-1.5">
           <div className="flex items-baseline justify-between gap-2">
             <dt className="text-[11.5px] text-ink-muted">Trace</dt>
-            <dd className="flex items-center gap-1.5">
-              <Dot variant="brand" pulse />
-              <span className="font-mono text-[11.5px] text-brand-deep">{TRACE_ID}</span>
-            </dd>
+            <dd className="font-mono text-[11.5px] text-ink-muted">—</dd>
           </div>
           <div className="flex items-baseline justify-between gap-2">
             <dt className="text-[11.5px] text-ink-muted">Workflow</dt>

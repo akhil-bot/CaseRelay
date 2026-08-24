@@ -320,7 +320,7 @@ export const ACTIVITY: ActivityEvent[] = [
     actor: "verifier@caserelay.iam",
     summary: "Commitment CM-03 closed · trace sealed",
     detail:
-      "26 append-only audit events under trace-7821 spanning registry, runtime, memory, identity, gateway, armor, approval and completion.",
+      "Append-only audit events spanning registry, runtime, memory, identity, gateway, armor, approval and completion.",
     spanMs: 51,
     capability: "observability",
   },

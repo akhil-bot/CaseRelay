@@ -175,7 +175,9 @@ export default function AgentsPage() {
                 </Badge>
               </div>
               <p className={cx("mt-2", type_.meta)}>{capability.managedProduct}</p>
-              <p className="mt-1 text-[12px] text-ink-soft">{capability.evidence}</p>
+              {capability.evidence && (
+                <p className="mt-1 text-[12px] text-ink-soft">{capability.evidence}</p>
+              )}
             </li>
           ))}
         </ul>

@@ -17,7 +17,7 @@ import {
 } from "@/components/ui/primitives";
 import { control, layout, row, tone, type as type_ } from "@/design/tokens";
 import { useDemo } from "@/lib/demo-store";
-import { TRACE_ID, WORKFLOW_ID } from "@/lib/mock/cases";
+import { WORKFLOW_ID } from "@/lib/mock/cases";
 import { useViewer } from "@/lib/viewer";
 import type { ActivityEvent, ActivityKind } from "@/lib/types";
 
@@ -71,7 +71,7 @@ export default function ActivityLogPage() {
       >
         <dl className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
           <Field label="Trace">
-            <Mono className="text-brand-deep">{TRACE_ID}</Mono>
+            <Mono className="text-ink-muted">—</Mono>
           </Field>
           <Field label="Workflow">
             <Mono>{WORKFLOW_ID}</Mono>
