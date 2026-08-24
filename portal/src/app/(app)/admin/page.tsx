@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Icon } from "@/components/icons";
 import { Badge, Card, cx } from "@/components/ui/primitives";
 import { control, layout, row, type as type_ } from "@/design/tokens";
@@ -13,9 +13,11 @@ import {
   submitRun,
   type CreatedCase,
   type RunEvent,
+  type RunRef,
   type RunStatus,
   type Scenario,
 } from "@/lib/api";
+import { useAdminCopilotTools } from "@/lib/copilot/admin-tools";
 
 type Phase = "pick" | "created" | "streaming" | "done";
 
@@ -75,6 +77,42 @@ export default function AdminPage() {
     [dueIn],
   );
 
+  const startEventStream = useCallback((runId: string) => {
+    setPhase("streaming");
+    setEvents([]);
+
+    const es = streamRunEvents(runId);
+    esRef.current = es;
+
+    es.onmessage = (msg) => {
+      try {
+        const ev: RunEvent = JSON.parse(msg.data);
+        setEvents((prev) => [...prev, ev]);
+        if (ev.event === "stream_end" || ev.event === "stream_timeout") {
+          es.close();
+          esRef.current = null;
+          getRunStatus(runId).then((status) => {
+            setRunStatus(status);
+            setPhase("done");
+          });
+        }
+      } catch {
+        // ignore unparseable
+      }
+    };
+
+    es.onerror = () => {
+      es.close();
+      esRef.current = null;
+      getRunStatus(runId)
+        .then((status) => {
+          setRunStatus(status);
+          setPhase("done");
+        })
+        .catch((err) => setStreamError(err instanceof Error ? err.message : String(err)));
+    };
+  }, []);
+
   const handleRun = useCallback(async () => {
     if (!createdCase) return;
     setStarting(true);
@@ -82,45 +120,35 @@ export default function AdminPage() {
     try {
       const ref = await submitRun(createdCase.case_id);
       setRunStatus({ run_id: ref.run_id, state: "queued" } as RunStatus);
-      setPhase("streaming");
-      setEvents([]);
-
-      const es = streamRunEvents(ref.run_id);
-      esRef.current = es;
-
-      es.onmessage = (msg) => {
-        try {
-          const ev: RunEvent = JSON.parse(msg.data);
-          setEvents((prev) => [...prev, ev]);
-          if (ev.event === "stream_end" || ev.event === "stream_timeout") {
-            es.close();
-            esRef.current = null;
-            getRunStatus(ref.run_id).then((status) => {
-              setRunStatus(status);
-              setPhase("done");
-            });
-          }
-        } catch {
-          // ignore unparseable
-        }
-      };
-
-      es.onerror = () => {
-        es.close();
-        esRef.current = null;
-        getRunStatus(ref.run_id)
-          .then((status) => {
-            setRunStatus(status);
-            setPhase("done");
-          })
-          .catch((err) => setStreamError(err instanceof Error ? err.message : String(err)));
-      };
+      startEventStream(ref.run_id);
     } catch (err: unknown) {
       setStreamError(err instanceof Error ? err.message : String(err));
     } finally {
       setStarting(false);
     }
-  }, [createdCase]);
+  }, [createdCase, startEventStream]);
+
+  const copilotCallbacks = useMemo(
+    () => ({
+      onCaseCreated: (result: CreatedCase, scenario: Scenario) => {
+        setSelectedScenario(scenario);
+        setCreatedCase(result);
+        setPhase("created");
+        setError(null);
+      },
+      onRunStarted: (ref: RunRef, caseId: string) => {
+        setRunStatus({ run_id: ref.run_id, state: "queued" } as RunStatus);
+        if (!createdCase || createdCase.case_id !== caseId) {
+          setCreatedCase({ case_id: caseId, scenario: "", due_at: "", summary: "" });
+        }
+        setStreamError(null);
+        startEventStream(ref.run_id);
+      },
+    }),
+    [createdCase, startEventStream],
+  );
+
+  useAdminCopilotTools(copilotCallbacks);
 
   const handleDelete = useCallback(async () => {
     if (!createdCase) return;
@@ -245,7 +273,16 @@ export default function AdminPage() {
           </Card>
 
           {phase === "done" && runStatus && (
-            <Card icon="checkCircle" title="Run Complete">
+            <Card
+              icon={runStatus.state === "completed" ? "checkCircle" : runStatus.state === "failed" ? "close" : "alert"}
+              title={
+                runStatus.state === "completed"
+                  ? "Run Complete"
+                  : runStatus.state === "partial_failure"
+                    ? "Run Partial Failure"
+                    : "Run Failed"
+              }
+            >
               <dl className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
                 <Fact label="Final state" value={runStatus.state} />
                 {runStatus.error && <Fact label="Error" value={runStatus.error} />}
@@ -374,15 +411,34 @@ function EventLog({ events, streaming }: { events: RunEvent[]; streaming: boolea
           <li key={i} className={cx("flex items-start gap-3 rounded px-3 py-2", row.hover)}>
             <EventIcon event={ev.event} />
             <div className="min-w-0 flex-1">
-              <div className="flex flex-wrap items-center gap-2">
-                <span className="font-mono text-[12px] font-medium text-ink">{ev.event}</span>
-                {ev.phase && (
-                  <Badge variant="neutral">{ev.phase}</Badge>
-                )}
-              </div>
-              {ev.detail && <p className={cx("mt-0.5", type_.meta)}>{ev.detail}</p>}
+              {ev.message ? (
+                <>
+                  <p className="text-[13px] leading-relaxed text-ink">
+                    {String(ev.message)}
+                  </p>
+                  <div className="mt-0.5 flex flex-wrap items-center gap-2">
+                    <span className="font-mono text-[11px] text-ink-muted">{ev.event}</span>
+                    {ev.phase && <Badge variant="neutral">{ev.phase}</Badge>}
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="font-mono text-[12px] font-medium text-ink">{ev.event}</span>
+                    {ev.phase && <Badge variant="neutral">{ev.phase}</Badge>}
+                  </div>
+                  {ev.detail && <p className={cx("mt-0.5", type_.meta)}>{ev.detail}</p>}
+                  {ev.summary && (
+                    <p className={cx("mt-0.5 line-clamp-2", type_.meta)}>{String(ev.summary)}</p>
+                  )}
+                </>
+              )}
               {ev.error && <p className="mt-0.5 text-[12px] text-danger">{ev.error}</p>}
-              {ev.summary && <p className={cx("mt-0.5 line-clamp-2", type_.meta)}>{String(ev.summary)}</p>}
+              {ev.failed_phases && ev.failed_phases.length > 0 && (
+                <p className="mt-0.5 text-[12px] text-warn">
+                  Failed: {ev.failed_phases.join(", ")}
+                </p>
+              )}
             </div>
           </li>
         ))}
@@ -418,10 +474,12 @@ function EventIcon({ event }: { event: string }) {
                     ? "checkCircle"
                     : "activity";
   const color =
-    event.includes("error") || event.includes("failed")
+    event === "run_failed" || event === "phase_error"
       ? "text-danger"
-      : event.includes("complete") || event === "stream_end"
-        ? "text-brand"
-        : "text-ink-muted";
+      : event === "run_partial_failure"
+        ? "text-warn"
+        : event === "run_completed" || event === "phase_complete" || event === "stream_end"
+          ? "text-brand"
+          : "text-ink-muted";
   return <Icon name={name as "play"} size={16} className={cx("mt-0.5 shrink-0", color)} />;
 }

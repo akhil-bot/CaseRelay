@@ -63,6 +63,8 @@ export interface RunEvent {
   state?: string;
   detail?: string;
   summary?: string;
+  /** Plain-English narration of what is happening, added by the backend agent. */
+  message?: string;
   failed_phases?: string[];
   error?: string;
   [key: string]: unknown;
