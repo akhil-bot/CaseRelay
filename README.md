@@ -55,7 +55,7 @@ CASA Volunteer / Supervisor
 
 | Layer | Technology |
 |---|---|
-| Agent runtime | Google ADK, Gemini 2.5 Flash (Vertex AI) |
+| Agent runtime | Google ADK, Gemini 3.5 Flash (`gemini-3.5-flash`, Vertex AI) |
 | Backend API | Python, FastAPI, Cloud Run |
 | Portal | Next.js, TypeScript |
 | State | Firestore |
