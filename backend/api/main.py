@@ -331,24 +331,10 @@ def delete_case(case_id: str) -> dict:
 
 def _run_background(run_id: str, case_id: str) -> None:
     """Drive the real agent fleet end-to-end: intake, then orchestrator through PHASES."""
-    import io
-    import logging
-    import sys
-    import warnings
-
-    warnings.filterwarnings("ignore")
-    logging.disable(logging.WARNING)
-    _orig_stderr = sys.stderr
-    sys.stderr = io.StringIO()
-    try:
-        from backend.agents.intake.agent import root_agent as intake_agent
-        from backend.agents.orchestrator.agent import root_agent as orchestrator_agent
-        from backend.runtime.fleet import PHASES
-    finally:
-        sys.stderr = _orig_stderr
-        logging.disable(logging.NOTSET)
-
+    from backend.agents.intake.agent import root_agent as intake_agent
+    from backend.agents.orchestrator.agent import root_agent as orchestrator_agent
     from backend.runtime.context import bind as _bind
+    from backend.runtime.fleet import PHASES
     from backend.runtime.invoke import run_agent
 
     with _bind(case_id=case_id, run_id=run_id):
@@ -372,6 +358,10 @@ def _run_background(run_id: str, case_id: str) -> None:
             if not workspace.commitments.get(case_id) or not workspace.grants.get(case_id):
                 raise RuntimeError(f"intake did not persist commitments/grants: {intake_text[:400]}")
 
+            phase_failures = 0
+            total_phases = len(PHASES)
+            failed_phases: list[str] = []
+
             for label, template in PHASES:
                 prompt = template.format(case_id=case_id)
                 workspace.update_run(
@@ -384,6 +374,8 @@ def _run_background(run_id: str, case_id: str) -> None:
                 try:
                     orch_text = run_agent(orchestrator_agent, prompt, app_name="continuity_orchestrator")
                 except Exception as phase_exc:  # noqa: BLE001
+                    phase_failures += 1
+                    failed_phases.append(label)
                     workspace.push_run_event(run_id, {
                         "event": "phase_error", "run_id": run_id,
                         "phase": label, "error": str(phase_exc),
@@ -395,14 +387,43 @@ def _run_background(run_id: str, case_id: str) -> None:
                     "commitment_states": workspace.commitment_states(case_id),
                 })
 
-            workspace.update_run(
-                run_id, state="completed", current_phase="done",
-                commitment_states=workspace.commitment_states(case_id),
-            )
-            workspace.push_run_event(run_id, {
-                "event": "run_completed", "run_id": run_id, "case_id": case_id,
-                "commitment_states": workspace.commitment_states(case_id),
-            })
+            commitments = workspace.commitment_states(case_id)
+
+            if phase_failures == total_phases:
+                workspace.update_run(
+                    run_id, state="failed", current_phase="done",
+                    error=f"all {total_phases} phases failed",
+                    commitment_states=commitments,
+                    failed_phases=failed_phases,
+                )
+                workspace.push_run_event(run_id, {
+                    "event": "run_failed", "run_id": run_id, "case_id": case_id,
+                    "error": f"all {total_phases} phases failed",
+                    "failed_phases": failed_phases,
+                    "commitment_states": commitments,
+                })
+            elif phase_failures > 0:
+                workspace.update_run(
+                    run_id, state="partial_failure", current_phase="done",
+                    error=f"{phase_failures}/{total_phases} phases failed",
+                    commitment_states=commitments,
+                    failed_phases=failed_phases,
+                )
+                workspace.push_run_event(run_id, {
+                    "event": "run_partial_failure", "run_id": run_id, "case_id": case_id,
+                    "error": f"{phase_failures}/{total_phases} phases failed",
+                    "failed_phases": failed_phases,
+                    "commitment_states": commitments,
+                })
+            else:
+                workspace.update_run(
+                    run_id, state="completed", current_phase="done",
+                    commitment_states=commitments,
+                )
+                workspace.push_run_event(run_id, {
+                    "event": "run_completed", "run_id": run_id, "case_id": case_id,
+                    "commitment_states": commitments,
+                })
         except Exception as exc:  # noqa: BLE001
             workspace.update_run(run_id, state="failed", error=str(exc))
             workspace.push_run_event(run_id, {
@@ -434,29 +455,42 @@ def get_run(run_id: str) -> dict:
     run = workspace.get_run(run_id)
     if not run:
         raise HTTPException(status_code=404, detail=f"run {run_id!r} not found")
-    return {
+    result = {
         "run_id": run["run_id"],
         "state": run.get("state", "queued"),
         "current_phase": run.get("current_phase"),
         "commitment_states": run.get("commitment_states", {}),
         "trace_id": run.get("trace_id", ""),
     }
+    if run.get("error"):
+        result["error"] = run["error"]
+    if run.get("failed_phases"):
+        result["failed_phases"] = run["failed_phases"]
+    return result
 
 
-_TERMINAL_STATES = {"completed", "failed"}
+_TERMINAL_STATES = {"completed", "failed", "partial_failure"}
+
+_SSE_HEARTBEAT_INTERVAL = 15
+_SSE_MAX_DURATION = 1800
 
 
 @app.get(
     "/v1/runs/{run_id}/events",
     responses={404: {"description": "Run not found"}},
 )
-def stream_run_events(run_id: str) -> StreamingResponse:
-    """SSE stream of run events.
+def stream_run_events(run_id: str, request: Request) -> StreamingResponse:
+    """SSE stream of run events. Lasts as long as the run does.
 
-    Yields all accumulated events then polls briefly for new ones. When the run
-    reaches a terminal state the stream closes with a stream_end event. Non-terminal
-    runs close after a short poll window; the client reconnects per the SSE spec
-    (the retry field controls the interval).
+    The stream terminates when the run reaches a terminal state (completed,
+    failed, partial_failure). Heartbeat comments are sent every 15 s to keep
+    the connection alive through proxies. A 30-minute safety valve prevents
+    leaked connections; if it fires, an explicit stream_timeout event is sent.
+
+    Client disconnect is handled at the ASGI layer: uvicorn cancels the response
+    task (raising CancelledError in asyncio.sleep), cleanly stopping the generator.
+    Starlette's Request.is_disconnected() is not used because it deadlocks under
+    anyio-shielded cancel scopes in TestClient and older Starlette builds.
     """
     run = workspace.get_run(run_id)
     if not run:
@@ -466,7 +500,10 @@ def stream_run_events(run_id: str) -> StreamingResponse:
         yield "retry: 1000\n\n"
         yield f"data: {json.dumps({'event': 'connected', 'run_id': run_id, 'state': run.get('state', 'queued')})}\n\n"
         sent = 0
-        for _ in range(60):
+        elapsed = 0.0
+        since_heartbeat = 0.0
+        poll_interval = 0.5
+        while elapsed < _SSE_MAX_DURATION:
             current = workspace.get_run(run_id)
             if current is None:
                 return
@@ -474,11 +511,18 @@ def stream_run_events(run_id: str) -> StreamingResponse:
             for ev in events[sent:]:
                 yield f"data: {json.dumps(ev)}\n\n"
                 sent += 1
+                since_heartbeat = 0.0
             state = current.get("state", "queued")
             if state in _TERMINAL_STATES:
                 yield f"data: {json.dumps({'event': 'stream_end', 'run_id': run_id, 'state': state})}\n\n"
                 return
-            await asyncio.sleep(0.5)
+            if since_heartbeat >= _SSE_HEARTBEAT_INTERVAL:
+                yield f": heartbeat {int(elapsed)}s\n\n"
+                since_heartbeat = 0.0
+            await asyncio.sleep(poll_interval)
+            elapsed += poll_interval
+            since_heartbeat += poll_interval
+        yield f"data: {json.dumps({'event': 'stream_timeout', 'run_id': run_id, 'reason': 'safety valve after 30 minutes'})}\n\n"
 
     return StreamingResponse(
         _generate(),
