@@ -22,6 +22,9 @@ def get_authorized_context(case_id: str) -> dict:
 
 def query_family_services(referral_id: str, case_id: str | None = None) -> dict:
     """Call county family services. Behaviour is determined by the case's scenario configuration."""
+    if not case_id:
+        from backend.runtime.context import current as _ctx
+        case_id = _ctx().case_id or None
     return sim.family_status(referral_id, case_id=case_id)
 
 
