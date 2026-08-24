@@ -29,9 +29,11 @@ app = FastAPI(
     description="Versioned HTTP control plane for the CaseRelay multi-agent fleet.",
 )
 
-from backend.api.agui import agui_app
-
-app.mount("/agui", agui_app)
+try:
+    from backend.api.agui import agui_app
+    app.mount("/agui", agui_app)
+except (ImportError, ModuleNotFoundError):
+    pass
 
 app.add_middleware(
     CORSMiddleware,
@@ -360,7 +362,23 @@ def _narrate(event: str, phase: str, *, summary: str = "", commitment_states: di
         total = len(commitment_states or {})
         if closed == total and total > 0:
             return f"All {total} commitments closed."
-        return "Run completed successfully."
+        if total == 0:
+            return "Run completed."
+        open_items = {k: v for k, v in (commitment_states or {}).items() if v != "completed"}
+        unresolved = [k for k, v in open_items.items() if v == "unresolved"]
+        pending = [k for k, v in open_items.items() if v == "pending"]
+        other = [f"{k} ({v})" for k, v in open_items.items() if v not in ("unresolved", "pending")]
+        parts = []
+        if unresolved:
+            names = ", ".join(unresolved)
+            parts.append(f"{names} {'remains' if len(unresolved) == 1 else 'remain'} unresolved")
+        if pending:
+            names = ", ".join(pending)
+            parts.append(f"{names} {'is' if len(pending) == 1 else 'are'} still pending")
+        if other:
+            parts.append(", ".join(other))
+        tail = "; ".join(parts) + "."
+        return f"{closed} of {total} commitments closed; {tail}"
     if event == "run_failed":
         return f"Run failed: {error}." if error else "The run has failed."
     if event == "run_partial_failure":
@@ -402,6 +420,10 @@ def _narrate(event: str, phase: str, *, summary: str = "", commitment_states: di
                 "family_services": "family_services",
             }.get(specialist, specialist)
             status = states.get(spec_type, "")
+            if status == "completed":
+                return f"{nice.capitalize()} confirmed its commitment is fulfilled."
+            if status == "unresolved":
+                return f"{nice.capitalize()} could not resolve its commitment; status is unresolved."
             if status:
                 return f"{nice.capitalize()} reported status: {status}."
             return f"{nice.capitalize()} completed its check."
@@ -414,9 +436,15 @@ def _narrate(event: str, phase: str, *, summary: str = "", commitment_states: di
         if "approve" in phase:
             return "Supervisor approved the escalation."
         if "enrolled" in phase:
-            return "School enrollment verified."
+            states = commitment_states or {}
+            edu_status = states.get("education", "")
+            if edu_status == "completed":
+                return "School enrollment confirmed via the SIS."
+            if edu_status:
+                return f"School enrollment check complete; education status is {edu_status}."
+            return "School enrollment check complete."
         if "memory" in phase:
-            return "Memory persisted; all commitment statuses summarized."
+            return "Memory persisted; commitment statuses summarized."
         return f"Phase {phase} complete."
 
     if event == "phase_error":
