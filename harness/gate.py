@@ -769,28 +769,52 @@ def _(c: Ctx) -> None:
 def _(c: Ctx) -> None:
     c.py(
         """
+        import threading, time
         from fastapi.testclient import TestClient
         from backend.api.main import app
+        from backend.runtime.workspace import workspace
+
         cl = TestClient(app)
-
         case_id = make_case("CASE-SSE-1", "noah")
-        run_id = cl.post(f"/v1/cases/{case_id}/runs").json()["run_id"]
 
+        # Drive run state directly rather than through POST /runs: the property under
+        # test is event delivery, not fleet behaviour, and a real run takes minutes.
+        run_id = "ssegate01"
+        workspace.create_run(run_id, case_id)
+        workspace.update_run(run_id, state="running")
+        workspace.push_run_event(run_id, {"event": "seed", "run_id": run_id})
+
+        def drive():
+            time.sleep(1.0)
+            workspace.push_run_event(run_id, {"event": "late_event", "run_id": run_id})
+            time.sleep(1.0)
+            workspace.update_run(run_id, state="completed")
+
+        threading.Thread(target=drive, daemon=True).start()
+
+        seen = []
+        deadline = time.time() + 30
         with cl.stream("GET", f"/v1/runs/{run_id}/events") as r:
             assert r.status_code == 200, r.status_code
             ctype = r.headers.get("content-type", "")
             assert "text/event-stream" in ctype, f"content-type is {ctype!r}"
-            saw = 0
             for line in r.iter_lines():
-                if line:
-                    saw += 1
-                if saw >= 1:
-                    break
-            assert saw >= 1, "stream produced no events"
+                if line.startswith("data: "):
+                    seen.append(line[6:])
+                    if "stream_end" in line:
+                        break
+                if time.time() > deadline:
+                    raise AssertionError("no stream_end within 30s; saw: " + " | ".join(seen))
+
+        blob = " ".join(seen)
+        assert "seed" in blob, "stream did not replay events queued before the client connected"
+        # A one-shot dump-and-close implementation cannot satisfy this.
+        assert "late_event" in blob, "stream did not deliver an event pushed after the client connected"
+        assert "stream_end" in blob, "stream never signalled termination"
         print("OK")
         """,
-        "the SSE endpoint streams text/event-stream and emits at least one event",
-        env={"CASERELAY_STATE": "memory"}, prelude=True,
+        "the SSE endpoint delivers events pushed after connect and terminates on a terminal state",
+        env={"CASERELAY_STATE": "memory"}, prelude=True, timeout=60,
     )
 
 
