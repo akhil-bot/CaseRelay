@@ -64,7 +64,11 @@ def _model_armor_screen(text: str) -> tuple[str, list[str]] | None:
     if not template:
         return None
     try:
-        from google.cloud.modelarmor_v1 import ModelArmorClient, SanitizeUserPromptRequest
+        from google.cloud.modelarmor_v1 import (
+            DataItem,
+            ModelArmorClient,
+            SanitizeUserPromptRequest,
+        )
 
         location = os.environ.get("MODEL_ARMOR_LOCATION", "us-central1")
         client = ModelArmorClient(
@@ -72,7 +76,7 @@ def _model_armor_screen(text: str) -> tuple[str, list[str]] | None:
         )
         request = SanitizeUserPromptRequest(
             name=template,
-            user_prompt_data={"text": {"text": text}},
+            user_prompt_data=DataItem(text=text),
         )
         response = client.sanitize_user_prompt(request=request)
         result = response.sanitization_result
