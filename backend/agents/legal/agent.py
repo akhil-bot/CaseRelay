@@ -12,6 +12,7 @@ INSTRUCTION = (
     "status must be exactly one of: pending, scheduled, completed, unresolved, blocked. "
     "Accepted with counsel assigned and the matter closed means completed; accepted but "
     "still open means pending.\n"
+    "If the response contains an 'error' key (e.g. timeout or malformed), set status to unresolved.\n"
     "Never give legal advice or disclose strategy."
 )
 
@@ -25,7 +26,10 @@ def query_legal_aid(referral_id: str, case_id: str | None = None) -> dict:
     if not case_id:
         from backend.runtime.context import current as _ctx
         case_id = _ctx().case_id or None
-    return sim.legal_status(referral_id, case_id=case_id)
+    try:
+        return sim.legal_status(referral_id, case_id=case_id)
+    except TimeoutError:
+        return {"error": "timeout", "referral_id": referral_id, "note": "Legal aid system did not respond within the allowed time."}
 
 
 def submit_legal_status(case_id: str, status: str, summary: str) -> dict:

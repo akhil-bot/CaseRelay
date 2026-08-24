@@ -11,6 +11,7 @@ INSTRUCTION = (
     "the referral_id from that context, then submit_shelter_status.\n"
     "status must be exactly one of: pending, scheduled, completed, unresolved, blocked. "
     "bed_confirmed true means completed; otherwise pending.\n"
+    "If the response contains an 'error' key (e.g. timeout or malformed), set status to unresolved.\n"
     "Never rank or recommend placements."
 )
 
@@ -24,7 +25,10 @@ def query_shelter(referral_id: str, case_id: str | None = None) -> dict:
     if not case_id:
         from backend.runtime.context import current as _ctx
         case_id = _ctx().case_id or None
-    return sim.shelter_status(referral_id, case_id=case_id)
+    try:
+        return sim.shelter_status(referral_id, case_id=case_id)
+    except TimeoutError:
+        return {"error": "timeout", "referral_id": referral_id, "note": "Shelter system did not respond within the allowed time."}
 
 
 def submit_shelter_status(case_id: str, status: str, summary: str) -> dict:

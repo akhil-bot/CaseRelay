@@ -23,7 +23,10 @@ def get_authorized_context(case_id: str) -> dict:
 
 def query_school(referral_id: str, case_id: str | None = None) -> dict:
     """Call the school SIS. Behaviour is determined by the case's scenario configuration."""
-    return sim.school_callback(referral_id, case_id=case_id)
+    try:
+        return sim.school_callback(referral_id, case_id=case_id)
+    except TimeoutError:
+        return {"error": "timeout", "referral_id": referral_id, "note": "School SIS did not respond within the allowed time."}
 
 
 def submit_enrollment_status(case_id: str, status: str, summary: str) -> dict:
