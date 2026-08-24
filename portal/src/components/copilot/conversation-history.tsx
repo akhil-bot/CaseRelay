@@ -71,8 +71,7 @@ export function ConversationBridge() {
  * thread change, but a live run keeps pushing its own accumulated snapshot of
  * the messages, so the reply you walked away from reappears — now filed under
  * the conversation you just opened. Detaching closes the subject the event
- * stream is gated on, which stops it for the scripted agent and the HTTP one
- * alike.
+ * stream is gated on, which stops it for both the ADK and built-in agents.
  *
  * `updates: []` keeps this hook from subscribing: it needs the agent, not a
  * re-render on every token.

@@ -1,8 +1,8 @@
 # CaseRelay Portal — UI prototype
 
 Front-end only. Every case, child, partner organization, court order, agent, and trace on these
-screens is synthetic and hard-coded in `src/lib/mock/`. No deployed agent sits behind this build:
-the chat panel talks to a scripted in-browser agent until an ADK backend is configured.
+screens is synthetic and hard-coded in `src/lib/mock/`. The chat panel requires a configured agent
+backend — see "Chat: CopilotKit and the ADK agent" below.
 
 ## Run
 
@@ -67,22 +67,20 @@ pick up the token colour of whatever they sit in.
 
 The chat panel is wired with [CopilotKit](https://copilotkit.ai), which speaks
 [AG-UI](https://docs.ag-ui.com/) — the same protocol Google ADK exposes through the `ag_ui_adk`
-middleware. Two wirings share one interface:
+middleware. Two modes share one interface:
 
-| Mode        | When                                | Path                                                             |
-| ----------- | ----------------------------------- | ---------------------------------------------------------------- |
-| **Preview** | `NEXT_PUBLIC_ADK_AGENT_URL` unset   | `CaseRelayPreviewAgent` runs in the browser; no network call      |
-| **ADK**     | `NEXT_PUBLIC_ADK_AGENT_URL` set     | Browser → `/api/copilotkit` → `HttpAgent` → the ADK FastAPI app   |
+| Mode             | When                                                      | Path                                                             |
+| ---------------- | --------------------------------------------------------- | ---------------------------------------------------------------- |
+| **ADK**          | `NEXT_PUBLIC_ADK_AGENT_URL` set                           | Browser → `/api/copilotkit` → `HttpAgent` → the ADK FastAPI app  |
+| **Built-in**     | `GOOGLE_API_KEY` + `NEXT_PUBLIC_COPILOT_RUNTIME=true` set | Browser → `/api/copilotkit` → `BuiltInAgent` (gemini-3.5-flash)  |
+| **Unconfigured** | Neither set                                               | Disabled indicator; no input box, no agent                        |
 
 - `src/lib/copilot/config.ts` — agent id and which mode is active
-- `src/lib/copilot/preview-agent.ts` — scripted `AbstractAgent` that streams AG-UI events
-- `src/app/api/copilotkit/route.ts` — `CopilotRuntime` forwarding to the ADK endpoint
+- `src/app/api/copilotkit/route.ts` — `CopilotRuntime` forwarding to the ADK endpoint or running the built-in Gemini agent
 - `src/components/copilot/` — the provider, the sidebar, and the slot overrides
 
-The preview agent implements the same `run()` contract the ADK agent arrives on, so streaming and
-context plumbing are exercised for real. It answers only from the synthetic fixtures and invents no
-case facts. To connect the backend, copy `.env.local.example` to `.env.local` and point
-`NEXT_PUBLIC_ADK_AGENT_URL` at the AG-UI endpoint.
+To connect the backend, copy `.env.local.example` to `.env.local` and set
+`NEXT_PUBLIC_ADK_AGENT_URL` (preferred) or `GOOGLE_API_KEY` + `NEXT_PUBLIC_COPILOT_RUNTIME=true`.
 
 What the agent can see is deliberately narrow. `useAgentContext` publishes three one-way values —
 the current route and role, a caseload count summary, and the scenario clock position — so a

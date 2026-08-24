@@ -20,8 +20,7 @@ import { ADK_AGENT_URL, CASERELAY_AGENT_ID, COPILOT_RUNTIME_URL } from "@/lib/co
  *      `gemini-3.5-flash` runs in-process. Frontend tools registered on the
  *      admin page give it the ability to create cases and submit runs.
  *
- * Without either, returns 503 and the client falls back to the in-browser
- * preview agent.
+ * Without either, returns 503 and the client shows a disabled indicator.
  */
 export const dynamic = "force-dynamic";
 
@@ -77,7 +76,7 @@ function notConfigured() {
       detail:
         "Set NEXT_PUBLIC_ADK_AGENT_URL to the ADK agent's AG-UI endpoint (preferred), " +
         "or GOOGLE_API_KEY for a built-in Gemini-backed fallback. " +
-        "Without either, the portal uses the in-browser preview agent.",
+        "Without either, the chat is disabled.",
     },
     { status: 503 },
   );

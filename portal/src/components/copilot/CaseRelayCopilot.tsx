@@ -11,9 +11,62 @@ import {
   ToggleOpenIcon,
 } from "@/components/copilot/chat-parts";
 import { ConversationBridge } from "@/components/copilot/conversation-history";
-import { CASERELAY_AGENT_ID } from "@/lib/copilot/config";
+import { LogoMark } from "@/components/Logo";
+import { cx } from "@/design/tokens";
+import { CASERELAY_AGENT_ID, isRuntimeAvailable } from "@/lib/copilot/config";
 import { useDemo } from "@/lib/demo-store";
 import { useViewer } from "@/lib/viewer";
+
+/**
+ * Entry point: renders the connected chat when an agent is configured, or a
+ * calm disabled indicator when neither `NEXT_PUBLIC_ADK_AGENT_URL` nor
+ * `GOOGLE_API_KEY` is set.
+ */
+export function CaseRelayCopilot() {
+  if (!isRuntimeAvailable) return <UnconfiguredChat />;
+  return <ConnectedChat />;
+}
+
+/**
+ * Floating toggle that communicates "chat is unavailable" and names the two
+ * environment variables that enable it. Hovering the dimmed mark surfaces
+ * the setup instructions without cluttering the page at rest.
+ */
+function UnconfiguredChat() {
+  return (
+    <div className="group fixed right-5 bottom-5 z-50">
+      <button
+        type="button"
+        disabled
+        aria-label="Chat unavailable — no agent configured"
+        className={cx(
+          "flex size-12 cursor-not-allowed items-center justify-center rounded-full",
+          "border border-line bg-surface opacity-40 shadow-card",
+        )}
+      >
+        <LogoMark size={26} />
+      </button>
+
+      <div
+        className={cx(
+          "pointer-events-none absolute right-0 bottom-full mb-2 w-72",
+          "rounded-card border border-line bg-surface p-3 shadow-pop",
+          "opacity-0 transition-opacity group-hover:opacity-100",
+        )}
+      >
+        <p className="text-[12.5px] font-medium text-ink">Chat unavailable</p>
+        <p className="mt-1 text-[11.5px] leading-relaxed text-ink-muted">
+          Set{" "}
+          <code className="font-mono text-[10.5px]">NEXT_PUBLIC_ADK_AGENT_URL</code>{" "}
+          for the ADK agent, or{" "}
+          <code className="font-mono text-[10.5px]">GOOGLE_API_KEY</code> +{" "}
+          <code className="font-mono text-[10.5px]">NEXT_PUBLIC_COPILOT_RUNTIME=true</code>{" "}
+          for the built-in Gemini agent.
+        </p>
+      </div>
+    </div>
+  );
+}
 
 /**
  * The chat surface, plus the context the agent is allowed to see.
@@ -23,7 +76,7 @@ import { useViewer } from "@/lib/viewer";
  * restating it. Only operational facts cross it — counts, flags, deadlines —
  * never the narrative detail of a child's record.
  */
-export function CaseRelayCopilot() {
+function ConnectedChat() {
   const pathname = usePathname() ?? "/";
   const { profile, showsTechnical } = useViewer();
   const { cases, pendingApprovals, meta } = useDemo();
@@ -50,22 +103,8 @@ export function CaseRelayCopilot() {
     <>
       <CopilotSidebar
         agentId={CASERELAY_AGENT_ID}
-        // Not sufficient on its own: every descendant chat configuration
-        // provider syncs itself to the root one, which starts open. The
-        // provider seeded above `CopilotKit` in `CopilotProvider` is what makes
-        // this hold.
         defaultOpen={false}
         width={492}
-        // No `threadId` prop. Passing one makes the thread prop-controlled,
-        // which turns `startNewThread` and `setActiveThreadId` into logged
-        // no-ops — and those are exactly what the header's controls call.
-        //
-        // The panel is a reader of the portal, nothing more: no file uploads to
-        // land a child's record in a chat log, no microphone, and no CopilotKit
-        // branding. What is left is a message list and a text box.
-        // `children` takes over the header's layout; `closeButton` is still passed
-        // as a slot so the render function receives it with the SDK's own close
-        // handler already bound.
         header={{ closeButton: ChatCloseButton, children: ChatHeader }}
         toggleButton={{ openIcon: ToggleOpenIcon, closeIcon: ToggleCloseIcon }}
         messageView={{ assistantMessage: AssistantMessage, intelligenceIndicator: Hidden }}
@@ -73,14 +112,8 @@ export function CaseRelayCopilot() {
           className: "caserelay-chat-input",
           addMenuButton: Hidden,
           startTranscribeButton: Hidden,
-          // The standing limit is the header's job now. Dropping the disclaimer
-          // also drops the block below the composer, so the pill sits on the
-          // bottom edge of the panel.
           showDisclaimer: false,
         }}
-        // No `modalHeaderTitle`: the header renders its own lockup, and the
-        // standing "decides nothing" line there covers what the greeting used to
-        // repeat, so the welcome text is now capability only.
         labels={{
           chatInputPlaceholder: showsTechnical
             ? "Ask about workflows, identities, or policy decisions"
@@ -91,10 +124,6 @@ export function CaseRelayCopilot() {
         }}
       />
 
-      {/* After the sidebar, not before: the restore has to win against the
-          clear `CopilotChat` runs on a thread change, and effects fire in tree
-          order. The bridge defers to a microtask so this ordering is belt and
-          braces rather than the whole mechanism. */}
       <ConversationBridge />
     </>
   );

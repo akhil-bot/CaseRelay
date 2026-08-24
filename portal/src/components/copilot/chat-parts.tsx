@@ -14,7 +14,7 @@ import {
 import { Icon } from "@/components/icons";
 import { LogoMark } from "@/components/Logo";
 import { chrome, cx, tone } from "@/design/tokens";
-import { isAdkConnected, isRuntimeAvailable } from "@/lib/copilot/config";
+import { isAdkConnected } from "@/lib/copilot/config";
 import { useViewer } from "@/lib/viewer";
 
 /**
@@ -103,10 +103,9 @@ export const AssistantMessage =
   AssistantMessageView as unknown as typeof CopilotChatAssistantMessage;
 
 /**
- * Presence, and which agent is behind it: scripted fixtures while the portal
- * runs on its own, the deployed fleet once `NEXT_PUBLIC_ADK_AGENT_URL` is set.
- * Held in the header as standing chrome — the alternative is a line the
- * assistant repeats in every single reply.
+ * Presence, and which agent is behind it: the deployed ADK fleet, or the
+ * built-in Gemini fallback. Held in the header as standing chrome — the
+ * alternative is a line the assistant repeats in every single reply.
  *
  * The dot is the product's one green, which the palette rule reserves for
  * exactly this.
@@ -120,7 +119,7 @@ function StatusPill() {
       )}
     >
       <span className="size-1.5 rounded-full bg-live" aria-hidden="true" />
-      {isAdkConnected ? "Live fleet" : isRuntimeAvailable ? "Built-in agent" : "Online"}
+      {isAdkConnected ? "Live fleet" : "Gemini agent"}
     </span>
   );
 }

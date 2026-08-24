@@ -9,7 +9,7 @@
  *     runs a BuiltInAgent backed by gemini-3.5-flash. Set
  *     `NEXT_PUBLIC_COPILOT_RUNTIME=true` so the client uses the runtime.
  *
- *   Preview — neither is configured. A scripted agent runs in the browser.
+ *   Unconfigured — neither is set. The chat shows a disabled indicator.
  */
 export const CASERELAY_AGENT_ID = "caserelay_continuity";
 
