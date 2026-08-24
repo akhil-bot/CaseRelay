@@ -20,8 +20,9 @@ def get_authorized_context(case_id: str) -> dict:
     return authorized_context(case_id, "check_referral_status")
 
 
-def query_legal_aid(referral_id: str) -> dict:
-    return sim.legal_status(referral_id)
+def query_legal_aid(referral_id: str, case_id: str | None = None) -> dict:
+    """Call the legal aid office. Behaviour is determined by the case's scenario configuration."""
+    return sim.legal_status(referral_id, case_id=case_id)
 
 
 def submit_legal_status(case_id: str, status: str, summary: str) -> dict:

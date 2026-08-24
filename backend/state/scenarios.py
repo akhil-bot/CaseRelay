@@ -20,7 +20,7 @@ class ScenarioSpec:
     description: str
     expected_outcome: str
     # Per-service partner behaviours.  Keys are service types; values are one of:
-    # "normal", "timeout", "malformed", "hallucinate", "inject"
+    # "normal", "stalled", "timeout", "malformed", "hallucinate", "inject", "cross_scope"
     partner_behaviours: dict[str, str] = field(default_factory=dict)
     # Referral-level inject_callback flag keyed by service type.
     inject_callback: dict[str, bool] = field(default_factory=dict)

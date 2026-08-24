@@ -19,8 +19,9 @@ def get_authorized_context(case_id: str) -> dict:
     return authorized_context(case_id, "check_assessment_schedule")
 
 
-def query_family_services(referral_id: str) -> dict:
-    return sim.family_status(referral_id)
+def query_family_services(referral_id: str, case_id: str | None = None) -> dict:
+    """Call county family services. Behaviour is determined by the case's scenario configuration."""
+    return sim.family_status(referral_id, case_id=case_id)
 
 
 def submit_family_status(case_id: str, status: str, summary: str) -> dict:

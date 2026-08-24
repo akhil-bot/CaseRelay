@@ -19,8 +19,9 @@ def get_authorized_context(case_id: str) -> dict:
     return authorized_context(case_id, "check_appointment_status")
 
 
-def query_clinic(referral_id: str) -> dict:
-    return sim.clinic_status(referral_id)
+def query_clinic(referral_id: str, case_id: str | None = None) -> dict:
+    """Call the clinic system. Behaviour is determined by the case's scenario configuration."""
+    return sim.clinic_status(referral_id, case_id=case_id)
 
 
 def submit_appointment_status(case_id: str, status: str, summary: str) -> dict:
