@@ -1,3 +1,4 @@
+import threading
 from datetime import datetime, timezone
 from typing import Any
 from uuid import uuid4
@@ -21,6 +22,13 @@ class Workspace:
     The dicts are this process's view. When Firestore is enabled they act as a read-through /
     write-through cache: `load` pulls the aggregate before a read and every mutator persists
     immediately, so an agent on another host sees the same grants and commitments.
+
+    Thread safety: concurrent access to a single case's containers (commitments, grants, etc.)
+    is guarded by a per-case RLock. This is necessary because `load()` replaces the container
+    lists wholesale — without the lock, a concurrent thread could be iterating or mutating a
+    list that another thread's `load()` discards. The lock serialises load-then-mutate sequences
+    while still allowing different cases to be processed in parallel. RLock is used because
+    methods like `set_commitment` call `load()` internally (reentrant).
     """
 
     def __init__(self) -> None:
@@ -34,19 +42,30 @@ class Workspace:
         self._case_workflows: dict[str, str] = {}
         self.memory: dict[str, dict[str, dict[str, Any]]] = {}
         self.runs: dict[str, dict[str, Any]] = {}
+        self._case_locks: dict[str, threading.RLock] = {}
+        self._locks_lock = threading.Lock()
+
+    def _lock_for(self, case_id: str) -> threading.RLock:
+        """Return (creating if needed) the per-case RLock for the given case."""
+        lock = self._case_locks.get(case_id)
+        if lock is not None:
+            return lock
+        with self._locks_lock:
+            return self._case_locks.setdefault(case_id, threading.RLock())
 
     def reset(self, case_id: str) -> None:
-        store.delete_case(case_id)
-        self.cases.pop(case_id, None)
-        self.commitments.pop(case_id, None)
-        self.grants.pop(case_id, None)
-        self.updates.pop(case_id, None)
-        self.approvals.pop(case_id, None)
-        self._audit_log.pop(case_id, None)
-        self.memory.pop(case_id, None)
-        wf_id = self._case_workflows.pop(case_id, None)
-        if wf_id:
-            self.checkpoints.pop(wf_id, None)
+        with self._lock_for(case_id):
+            store.delete_case(case_id)
+            self.cases.pop(case_id, None)
+            self.commitments.pop(case_id, None)
+            self.grants.pop(case_id, None)
+            self.updates.pop(case_id, None)
+            self.approvals.pop(case_id, None)
+            self._audit_log.pop(case_id, None)
+            self.memory.pop(case_id, None)
+            wf_id = self._case_workflows.pop(case_id, None)
+            if wf_id:
+                self.checkpoints.pop(wf_id, None)
 
     def load(self, case_id: str) -> None:
         """Refresh this process's view from shared state. No-op when running in-memory.
@@ -54,6 +73,10 @@ class Workspace:
         Deployed instances are long-lived and serve many requests, so a cached view goes stale
         as soon as another agent writes. Reads therefore always re-sync rather than only
         populating when empty.
+
+        Must be called under the per-case lock (which all public accessors acquire) because it
+        replaces container lists wholesale. Without the lock, a concurrent thread iterating or
+        mutating a container could be operating on a reference that `load()` just discarded.
         """
         if not store.enabled():
             return
@@ -70,11 +93,12 @@ class Workspace:
 
     def get_case(self, case_id: str) -> dict[str, Any]:
         """The case as it exists in the store. Agents read cases; they never invent one."""
-        if case_id not in self.cases:
-            self.load(case_id)
-        if case_id not in self.cases:
-            raise CaseNotFound(f"case {case_id} has not been ingested")
-        return self.cases[case_id]
+        with self._lock_for(case_id):
+            if case_id not in self.cases:
+                self.load(case_id)
+            if case_id not in self.cases:
+                raise CaseNotFound(f"case {case_id} has not been ingested")
+            return self.cases[case_id]
 
     def create_case(self, case_id: str, packet: dict[str, Any]) -> dict[str, Any]:
         """Ingest a referral packet as a new draft case.
@@ -135,63 +159,69 @@ class Workspace:
         return case
 
     def grant_for(self, case_id: str, identity: str, purpose: str) -> dict[str, Any] | None:
-        self.load(case_id)
-        for grant in self.grants.get(case_id, []):
-            target = grant.get("granted_to") or grant.get("identity") or grant.get("agent")
-            grant_purpose = grant.get("purpose") or grant.get("authorized_purpose")
-            if (
-                target == identity
-                and grant_purpose == purpose
-                and grant.get("status") == "granted"
-                and not grant.get("revoked")
-            ):
-                return grant
-        return None
+        with self._lock_for(case_id):
+            self.load(case_id)
+            for grant in self.grants.get(case_id, []):
+                target = grant.get("granted_to") or grant.get("identity") or grant.get("agent")
+                grant_purpose = grant.get("purpose") or grant.get("authorized_purpose")
+                if (
+                    target == identity
+                    and grant_purpose == purpose
+                    and grant.get("status") == "granted"
+                    and not grant.get("revoked")
+                ):
+                    return grant
+            return None
 
     def set_commitment(self, case_id: str, commitment_id: str, status: str) -> None:
         if status not in COMMITMENT_STATES:
             raise ValueError(f"status must be one of {sorted(COMMITMENT_STATES)}, got {status!r}")
-        self.load(case_id)
-        prefix_types = {"edu": "education", "hlth": "health", "leg": "legal", "shl": "shelter", "fam": "family_services"}
-        want = next((t for p, t in prefix_types.items() if f"-{p}-" in commitment_id), None)
-        for row in self.commitments.get(case_id, []):
-            if (
-                row.get("commitment_id") == commitment_id
-                or row.get("type") == commitment_id
-                or (want and row.get("type") == want)
-            ):
-                row["status"] = status
-                row["last_update"] = _now().isoformat()
-                store.append_row(case_id, "commitments", row, str(row["commitment_id"]))
-                return
-        raise ValueError(
-            f"no commitment matching {commitment_id!r} in case {case_id}"
-        )
+        with self._lock_for(case_id):
+            self.load(case_id)
+            prefix_types = {"edu": "education", "hlth": "health", "leg": "legal", "shl": "shelter", "fam": "family_services"}
+            want = next((t for p, t in prefix_types.items() if f"-{p}-" in commitment_id), None)
+            for row in self.commitments.get(case_id, []):
+                if (
+                    row.get("commitment_id") == commitment_id
+                    or row.get("type") == commitment_id
+                    or (want and row.get("type") == want)
+                ):
+                    row["status"] = status
+                    row["last_update"] = _now().isoformat()
+                    store.append_row(case_id, "commitments", row, str(row["commitment_id"]))
+                    return
+            raise ValueError(
+                f"no commitment matching {commitment_id!r} in case {case_id}"
+            )
 
     def commitment_states(self, case_id: str) -> dict[str, str]:
-        self.load(case_id)
-        return {row["type"]: row["status"] for row in self.commitments.get(case_id, [])}
+        with self._lock_for(case_id):
+            self.load(case_id)
+            return {row["type"]: row["status"] for row in self.commitments.get(case_id, [])}
 
     def add_approval(self, case_id: str, approval: dict[str, Any]) -> dict[str, Any]:
-        self.load(case_id)
-        self.approvals.setdefault(case_id, []).append(approval)
-        store.append_row(case_id, "human_approvals", approval, str(approval["approval_id"]))
-        return approval
+        with self._lock_for(case_id):
+            self.load(case_id)
+            self.approvals.setdefault(case_id, []).append(approval)
+            store.append_row(case_id, "human_approvals", approval, str(approval["approval_id"]))
+            return approval
 
     def decide_approval(self, case_id: str, decision: str, decided_by: str) -> dict[str, Any]:
-        self.load(case_id)
-        pending = [a for a in self.approvals.get(case_id, []) if a.get("decision") == "pending"]
-        if not pending:
-            return {"decision": "none"}
-        approval = pending[-1]
-        approval["decision"] = decision
-        approval["decided_by"] = decided_by
-        store.append_row(case_id, "human_approvals", approval, str(approval["approval_id"]))
-        return approval
+        with self._lock_for(case_id):
+            self.load(case_id)
+            pending = [a for a in self.approvals.get(case_id, []) if a.get("decision") == "pending"]
+            if not pending:
+                return {"decision": "none"}
+            approval = pending[-1]
+            approval["decision"] = decision
+            approval["decided_by"] = decided_by
+            store.append_row(case_id, "human_approvals", approval, str(approval["approval_id"]))
+            return approval
 
     def list_approvals(self, case_id: str) -> list[dict[str, Any]]:
-        self.load(case_id)
-        return self.approvals.get(case_id, [])
+        with self._lock_for(case_id):
+            self.load(case_id)
+            return self.approvals.get(case_id, [])
 
     def put_checkpoint(self, workflow_id: str, body: dict[str, Any]) -> None:
         self.checkpoints[workflow_id] = body
@@ -214,8 +244,9 @@ class Workspace:
             store.save_checkpoint(workflow_id, cp)
 
     def set_memory(self, case_id: str, purpose: str, cleaned: dict[str, Any]) -> None:
-        self.memory.setdefault(case_id, {})[purpose] = cleaned
-        store.save_case(case_id, self.cases.get(case_id, {"case_id": case_id}), self.memory[case_id])
+        with self._lock_for(case_id):
+            self.memory.setdefault(case_id, {})[purpose] = cleaned
+            store.save_case(case_id, self.cases.get(case_id, {"case_id": case_id}), self.memory[case_id])
 
     def append_audit(self, case_id: str, event: dict[str, Any]) -> str:
         """Append an audit event.
@@ -231,21 +262,23 @@ class Workspace:
         event.setdefault("trace_id", _ctx().trace_id)
         event.setdefault("timestamp", _now().isoformat())
 
-        existing_ids = {e.get("event_id") for e in self._audit_log.get(case_id, [])}
-        if event_id in existing_ids:
-            raise AuditMutationRejected(f"audit event {event_id} already exists")
+        with self._lock_for(case_id):
+            existing_ids = {e.get("event_id") for e in self._audit_log.get(case_id, [])}
+            if event_id in existing_ids:
+                raise AuditMutationRejected(f"audit event {event_id} already exists")
 
-        self._audit_log.setdefault(case_id, []).append(event)
-        if store.enabled():
-            _write_audit_event(case_id, event)
-        else:
-            store.append_row(case_id, "audit_events", event, event_id)
+            self._audit_log.setdefault(case_id, []).append(event)
+            if store.enabled():
+                _write_audit_event(case_id, event)
+            else:
+                store.append_row(case_id, "audit_events", event, event_id)
 
         return f"cases/{case_id}/audit_events/{event_id}"
 
     def list_audit(self, case_id: str) -> list[dict[str, Any]]:
-        self.load(case_id)
-        return self._audit_log.get(case_id, [])
+        with self._lock_for(case_id):
+            self.load(case_id)
+            return self._audit_log.get(case_id, [])
 
     def audit_events(self, case_id: str) -> list[dict[str, Any]]:
         return self.list_audit(case_id)
@@ -255,11 +288,12 @@ class Workspace:
         if store.enabled():
             from backend.infra.idempotency import claim
             return claim(case_id, key, lambda: payload)
-        bucket = self.updates.setdefault(case_id, {})
-        if key in bucket:
-            return bucket[key], True
-        bucket[key] = payload
-        return payload, False
+        with self._lock_for(case_id):
+            bucket = self.updates.setdefault(case_id, {})
+            if key in bucket:
+                return bucket[key], True
+            bucket[key] = payload
+            return payload, False
 
     # -- run state -----------------------------------------------------------------
 
