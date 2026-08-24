@@ -714,7 +714,7 @@
     "/v1/runs/{run_id}/events": {
       "get": {
         "summary": "Stream Run Events",
-        "description": "SSE stream of run events.\n\nYields all accumulated events then polls briefly for new ones. When the run\nreaches a terminal state the stream closes with a stream_end event. Non-terminal\nruns close after a short poll window; the client reconnects per the SSE spec\n(the retry field controls the interval).",
+        "description": "SSE stream of run events. Lasts as long as the run does.\n\nThe stream terminates when the run reaches a terminal state (completed,\nfailed, partial_failure). Heartbeat comments are sent every 15 s to keep\nthe connection alive through proxies. A 30-minute safety valve prevents\nleaked connections; if it fires, an explicit stream_timeout event is sent.\n\nClient disconnect is handled at the ASGI layer: uvicorn cancels the response\ntask (raising CancelledError in asyncio.sleep), cleanly stopping the generator.\nStarlette's Request.is_disconnected() is not used because it deadlocks under\nanyio-shielded cancel scopes in TestClient and older Starlette builds.",
         "operationId": "stream_run_events_v1_runs__run_id__events_get",
         "parameters": [
           {
