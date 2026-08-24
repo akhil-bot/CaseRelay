@@ -331,11 +331,32 @@ def delete_case(case_id: str) -> dict:
 
 def _run_background(run_id: str, case_id: str) -> None:
     """Drive the real agent fleet end-to-end: intake, then orchestrator through PHASES."""
+    import logging
+    import warnings
+
     from backend.agents.intake.agent import root_agent as intake_agent
     from backend.agents.orchestrator.agent import root_agent as orchestrator_agent
     from backend.runtime.context import bind as _bind
     from backend.runtime.fleet import PHASES
     from backend.runtime.invoke import run_agent
+
+    # google.adk.workflow._node_runner and google.adk.runners emit
+    # logger.exception() on every agent failure. Those tracebacks are
+    # redundant: we capture the error in the run state and surface it
+    # via the API. Silence only the ADK logger, only during agent calls,
+    # and restore afterward.
+    _adk_logger = logging.getLogger("google.adk")
+
+    def _quiet_run_agent(*args, **kwargs):
+        prev = _adk_logger.level
+        _adk_logger.setLevel(logging.CRITICAL)
+        with warnings.catch_warnings():
+            # ADK emits UserWarning for experimental features during execution
+            warnings.filterwarnings("ignore", module=r"google\.adk")
+            try:
+                return run_agent(*args, **kwargs)
+            finally:
+                _adk_logger.setLevel(prev)
 
     with _bind(case_id=case_id, run_id=run_id):
         try:
@@ -344,7 +365,7 @@ def _run_background(run_id: str, case_id: str) -> None:
                 "event": "run_started", "run_id": run_id, "case_id": case_id,
             })
 
-            intake_text = run_agent(
+            intake_text = _quiet_run_agent(
                 intake_agent,
                 f"Process the referral packet for case {case_id}. Extract commitments and propose grants.",
                 app_name="intake_authority",
@@ -372,7 +393,7 @@ def _run_background(run_id: str, case_id: str) -> None:
                     "event": "phase_started", "run_id": run_id, "phase": label,
                 })
                 try:
-                    orch_text = run_agent(orchestrator_agent, prompt, app_name="continuity_orchestrator")
+                    orch_text = _quiet_run_agent(orchestrator_agent, prompt, app_name="continuity_orchestrator")
                 except Exception as phase_exc:  # noqa: BLE001
                     phase_failures += 1
                     failed_phases.append(label)
