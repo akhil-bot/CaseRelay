@@ -9,11 +9,11 @@
       ]
     },
     {
-      "collectionGroup": "partner_updates",
+      "collectionGroup": "workflow_checkpoints",
       "queryScope": "COLLECTION",
       "fields": [
-        { "fieldPath": "idempotency_key", "order": "ASCENDING" },
-        { "fieldPath": "received_at", "order": "DESCENDING" }
+        { "fieldPath": "state", "order": "ASCENDING" },
+        { "fieldPath": "due_at", "order": "ASCENDING" }
       ]
     },
     {

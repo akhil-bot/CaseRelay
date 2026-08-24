@@ -21,9 +21,9 @@ def get_authorized_context(case_id: str) -> dict:
     return authorized_context(case_id, "verify_school_enrollment")
 
 
-def query_school(referral_id: str, variant: str = "status") -> dict:
-    """Call the school SIS. variant: status | poison | enroll."""
-    return sim.school_callback(referral_id, variant)
+def query_school(referral_id: str, case_id: str | None = None) -> dict:
+    """Call the school SIS. Behaviour is determined by the case's scenario configuration."""
+    return sim.school_callback(referral_id, case_id=case_id)
 
 
 def submit_enrollment_status(case_id: str, status: str, summary: str) -> dict:

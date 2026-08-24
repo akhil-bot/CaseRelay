@@ -1,9 +1,8 @@
 """Firestore persistence for the case aggregate.
 
-Local runs keep everything in one process, so the in-memory workspace is enough. Once the eight
-agents are separate endpoints they no longer share memory: the authority grants the orchestrator
-writes must be readable by the education agent on another host. Every function here is a no-op
-unless CASERELAY_STATE=firestore, which keeps the local path fast and offline.
+Firestore is the default backend. Set CASERELAY_STATE=memory to run fully offline —
+this is the opt-out, not the opt-in, so a misconfigured production deployment persists
+correctly rather than silently discarding writes.
 """
 
 import os
@@ -11,9 +10,12 @@ from typing import Any
 
 CASES = "cases"
 
+_state_env = os.environ.get("CASERELAY_STATE", "").lower()
+BACKEND: str = "memory" if _state_env == "memory" else "firestore"
+
 
 def enabled() -> bool:
-    return os.environ.get("CASERELAY_STATE", "").lower() == "firestore"
+    return BACKEND == "firestore"
 
 
 def _db():
@@ -102,3 +104,17 @@ def load_checkpoint(workflow_id: str) -> dict[str, Any] | None:
         return None
     doc = _db().collection("workflow_checkpoints").document(workflow_id).get()
     return doc.to_dict() if doc.exists else None
+
+
+def query_due_checkpoints(now_ts) -> list[dict[str, Any]]:
+    """Find waiting checkpoints where due_at <= now. Firestore mode only."""
+    if not enabled():
+        return []
+    docs = (
+        _db()
+        .collection("workflow_checkpoints")
+        .where("state", "==", "waiting")
+        .where("due_at", "<=", now_ts)
+        .stream()
+    )
+    return [d.to_dict() for d in docs if d.to_dict()]

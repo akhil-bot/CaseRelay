@@ -21,7 +21,7 @@ from backend.state import synthetic
 from backend.state.fixtures import referral_packet
 
 
-def create_case(case_id: str | None = None, source: str = "synthetic") -> str:
+def create_case(case_id: str | None = None, source: str = "synthetic", scenario: str | None = None) -> str:
     """Ingest a referral packet as a draft case and return its id.
 
     Commitments and grants are deliberately not written here: deriving those from the packet is
@@ -33,7 +33,7 @@ def create_case(case_id: str | None = None, source: str = "synthetic") -> str:
         packet = {**packet, "case_id": case_id}
     elif source == "synthetic":
         case_id = case_id or synthetic.new_case_id()
-        packet = synthetic.build_packet(case_id)
+        packet = synthetic.build_packet(case_id, scenario=scenario)
     else:
         raise ValueError(f"source must be 'fixture' or 'synthetic', got {source!r}")
 
@@ -63,9 +63,9 @@ def grant_authority(case_id: str) -> dict[str, Any]:
 
 
 @contextmanager
-def temporary_case(case_id: str | None = None, source: str = "synthetic") -> Iterator[str]:
+def temporary_case(case_id: str | None = None, source: str = "synthetic", scenario: str | None = None) -> Iterator[str]:
     """Create a case, yield its id, and delete it even if the test fails."""
-    created = create_case(case_id, source)
+    created = create_case(case_id, source, scenario=scenario)
     try:
         yield created
     finally:

@@ -2,8 +2,6 @@ import json
 from datetime import datetime, timezone
 from typing import Any
 
-TRACE_ID = "trace-7821"
-
 
 def _clip(value: Any, limit: int = 220) -> str:
     text = value if isinstance(value, str) else json.dumps(value, default=str)
@@ -23,9 +21,11 @@ class TraceLog:
         self.echo = echo
 
     def add(self, kind: str, agent: str, detail: str, payload: Any = None) -> None:
+        from backend.runtime.context import current as _current_ctx
+
         hop = {
             "seq": len(self.hops) + 1,
-            "trace_id": TRACE_ID,
+            "trace_id": _current_ctx().trace_id,
             "at": datetime.now(timezone.utc).strftime("%H:%M:%S"),
             "kind": kind,
             "agent": agent,

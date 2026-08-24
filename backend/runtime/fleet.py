@@ -102,8 +102,9 @@ def run_maya(case_id: str = "CR-1042", echo: bool = False) -> dict:
         orch_text = run_agent(orchestrator_agent, prompt, app_name="continuity_orchestrator")
         said.append({"phase": label, "said": orch_text})
 
+    from backend.runtime.context import current as _ctx
     return {
-        "trace_id": "trace-7821",
+        "trace_id": _ctx().trace_id,
         "intake_text": intake_text,
         "orchestrator_text": orch_text,
         "phases": said,

@@ -14,7 +14,8 @@ from backend.workflows.durable import resume_wake, write_checkpoint
 
 # Each specialist is a separately deployed endpoint. The env var holds its base URL; when it is
 # absent the orchestrator falls back to an in-process copy so local runs need no cloud.
-# The folder is the A2A route segment ADK mounts the card under.
+# In control-plane mode (CASERELAY_CONTROL_PLANE=1) the fallback is disabled and a missing
+# endpoint raises so the deployed fleet is never silently bypassed.
 SPECIALIST_MODULES = {
     "education_liaison": (education, "CASERELAY_URL_EDUCATION", "education"),
     "health_coordination": (health, "CASERELAY_URL_HEALTH", "health"),
@@ -78,14 +79,28 @@ def approve_escalation(case_id: str) -> dict:
     return workspace.decide_approval(case_id, "approved", "supervisor-001")
 
 
-def _specialists() -> tuple[list, list]:
-    """Split specialists into in-process sub_agents and remote tools.
+def resolve_specialists() -> tuple[list, list]:
+    """Resolve specialist endpoints, raising when the control plane has no endpoints configured.
 
-    A local specialist is single_turn, so ADK exposes it as a tool that returns control here.
-    A RemoteA2aAgent has no such mode and would be reached by transfer_to_agent, which hands the
-    turn away and never comes back — so wrap it in AgentTool to keep the same call-and-return
-    shape the phase driver depends on.
+    In control-plane mode (CASERELAY_CONTROL_PLANE=1) every specialist must be reachable via
+    its CASERELAY_URL_* env var or the registry. Falling back to in-process sub_agents is a
+    silent bypass of the multi-agent architecture and is not permitted.
     """
+    control_plane = os.environ.get("CASERELAY_CONTROL_PLANE", "").strip() == "1"
+    missing = [
+        name for name, (_, env_var, _) in SPECIALIST_MODULES.items()
+        if not os.environ.get(env_var, "").strip()
+    ]
+    if control_plane and missing:
+        raise RuntimeError(
+            f"control plane requires specialist endpoints but none are reachable: "
+            f"{missing}. Set CASERELAY_URL_* env vars or configure the registry."
+        )
+    return _specialists()
+
+
+def _specialists() -> tuple[list, list]:
+    """Split specialists into in-process sub_agents and remote tools."""
     from google.adk.agents.remote_a2a_agent import RemoteA2aAgent
     from google.adk.tools.agent_tool import AgentTool
 

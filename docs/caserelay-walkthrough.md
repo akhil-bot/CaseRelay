@@ -461,9 +461,30 @@ with dataset.temporary_case() as case_id:
 
 Two things to check in that output: the shelter agent never sees Maya's name, and the partner reply contains no placement ranking.
 
-### Two other local entry points
+### Control-plane API (v1)
 
-`backend/api/main.py` is a small FastAPI wrapper over the same driver: `POST /demo/maya`, `GET /demo/trace`, `GET /demo/maya/{case_id}` for a snapshot, `POST /wake`, `GET /health`.
+`backend/api/main.py` is the versioned control plane. All routes are under `/v1`:
+
+```
+GET  /v1/cases                          → inbox rows
+GET  /v1/cases/{case_id}                → case, commitments, grants, timeline
+GET  /v1/cases/{case_id}/audit          → audit events (filterable by trace_id, event_type)
+GET  /v1/cases/{case_id}/memory         → memory scopes by purpose
+GET  /v1/approvals                      → pending approvals across cases
+GET  /v1/registry                       → agent roster
+GET  /v1/traces/{trace_id}              → correlated hops + Cloud Trace deep link
+POST /v1/cases                          → ingest a referral packet, or create from scenario
+POST /v1/cases/{case_id}/activate       → supervisor gate
+POST /v1/cases/{case_id}/runs           → 202 {run_id}, background agent execution
+GET  /v1/runs/{run_id}                  → run state
+GET  /v1/runs/{run_id}/events           → SSE stream of trace hops
+POST /v1/approvals/{id}/decide          → {approve|reject, decided_by, note}
+POST /v1/workflows/sweep                → fire all due checkpoints
+POST /v1/workflows/{workflow_id}/wake   → resume a specific workflow
+GET  /v1/scenarios                      → named scenario specs grouped by complexity
+DELETE /v1/cases/{case_id}              → test_case-only; refuses real cases
+GET  /health                            → liveness probe
+```
 
 ```bash
 PYTHONPATH=. GOOGLE_CLOUD_PROJECT=caserelay GOOGLE_CLOUD_LOCATION=global \

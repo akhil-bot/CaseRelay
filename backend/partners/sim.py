@@ -1,9 +1,41 @@
-"""Simulated partner systems — not agents. Agents must interpret these replies."""
+"""Simulated partner systems — not agents. Agents must interpret these replies.
 
-from backend.state.fixtures import enrollment_callback, poisoned_school_payload
+Behaviour is determined by reading the `partner_behaviour` field on the referral row in the
+case packet, set at case-creation time by the scenario factory. This means the simulator
+produces the correct reply for any case without the calling agent needing to know what scenario
+is running — the same mechanism that makes scenario cases indistinguishable from real ones.
+"""
+
+from backend.runtime.workspace import workspace
 
 
-def school_status(referral_id: str) -> dict:
+def _behaviour(case_id: str, service: str) -> str:
+    """Look up the partner behaviour configured on this case for this service type."""
+    try:
+        packet = workspace.packet(case_id)
+        for ref in packet.get("referrals", []):
+            if ref.get("type") == service:
+                return ref.get("partner_behaviour", "normal") or "normal"
+    except Exception:  # noqa: BLE001
+        pass
+    return "normal"
+
+
+def school_status(referral_id: str, case_id: str | None = None) -> dict:
+    behaviour = _behaviour(case_id, "education") if case_id else "normal"
+    if behaviour == "timeout":
+        raise TimeoutError(f"school SIS timed out for {referral_id}")
+    if behaviour == "malformed":
+        return {"error": "malformed", "raw": "!!!INVALID!!!"}
+    if behaviour == "hallucinate":
+        # Returns a convincing-looking reply that conflicts with the real SIS state.
+        return {
+            "system": "lincoln_unified_sis",
+            "referral_id": referral_id,
+            "enrollment_found": True,
+            "school_name": "Lincoln High School",
+            "note": "Seat confirmed.",
+        }
     return {
         "system": "lincoln_unified_sis",
         "referral_id": referral_id,
@@ -13,23 +45,34 @@ def school_status(referral_id: str) -> dict:
     }
 
 
-def school_callback(referral_id: str, variant: str = "status") -> dict:
-    if variant == "poison":
+def school_callback(referral_id: str, case_id: str | None = None) -> dict:
+    behaviour = _behaviour(case_id, "education") if case_id else "normal"
+    if behaviour in ("inject", "poison"):
+        from backend.state.fixtures import poisoned_school_payload
         return {
             "system": "lincoln_unified_sis",
             "referral_id": referral_id,
             "raw": poisoned_school_payload()["payload"],
         }
-    if variant == "enroll":
+    if behaviour == "enroll":
+        from backend.state.fixtures import enrollment_callback
         return {
             "system": "lincoln_unified_sis",
             "referral_id": referral_id,
             "raw": enrollment_callback()["payload"],
         }
-    return school_status(referral_id)
+    return school_status(referral_id, case_id)
 
 
-def clinic_status(referral_id: str) -> dict:
+def clinic_status(referral_id: str, case_id: str | None = None) -> dict:
+    behaviour = _behaviour(case_id, "health") if case_id else "normal"
+    if behaviour == "timeout":
+        raise TimeoutError(f"clinic timed out for {referral_id}")
+    if behaviour == "malformed":
+        return {"error": "malformed", "raw": "!!!INVALID!!!"}
+    if behaviour == "duplicate":
+        # Returns a normal response — caller is responsible for idempotency checking.
+        pass
     return {
         "system": "harbor_pediatric",
         "referral_id": referral_id,
@@ -39,7 +82,12 @@ def clinic_status(referral_id: str) -> dict:
     }
 
 
-def legal_status(referral_id: str) -> dict:
+def legal_status(referral_id: str, case_id: str | None = None) -> dict:
+    behaviour = _behaviour(case_id, "legal") if case_id else "normal"
+    if behaviour == "timeout":
+        raise TimeoutError(f"legal aid timed out for {referral_id}")
+    if behaviour == "malformed":
+        return {"error": "malformed", "raw": "!!!INVALID!!!"}
     return {
         "system": "county_legal_aid",
         "referral_id": referral_id,
@@ -51,7 +99,12 @@ def legal_status(referral_id: str) -> dict:
     }
 
 
-def shelter_status(referral_id: str) -> dict:
+def shelter_status(referral_id: str, case_id: str | None = None) -> dict:
+    behaviour = _behaviour(case_id, "shelter") if case_id else "normal"
+    if behaviour == "timeout":
+        raise TimeoutError(f"shelter timed out for {referral_id}")
+    if behaviour == "malformed":
+        return {"error": "malformed", "raw": "!!!INVALID!!!"}
     return {
         "system": "safe_harbor",
         "referral_id": referral_id,
@@ -60,7 +113,12 @@ def shelter_status(referral_id: str) -> dict:
     }
 
 
-def family_status(referral_id: str) -> dict:
+def family_status(referral_id: str, case_id: str | None = None) -> dict:
+    behaviour = _behaviour(case_id, "family_services") if case_id else "normal"
+    if behaviour == "timeout":
+        raise TimeoutError(f"family services timed out for {referral_id}")
+    if behaviour == "malformed":
+        return {"error": "malformed", "raw": "!!!INVALID!!!"}
     return {
         "system": "county_family_services",
         "referral_id": referral_id,

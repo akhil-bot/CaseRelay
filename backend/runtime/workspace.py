@@ -2,10 +2,9 @@ from datetime import datetime, timezone
 from typing import Any
 from uuid import uuid4
 
+from backend.audit.writer import AuditMutationRejected, append_event as _write_audit_event
 from backend.state import store
 from backend.state.case_machine import COMMITMENT_STATES, assert_transition
-
-TRACE_ID = "trace-7821"
 
 
 def _now() -> datetime:
@@ -30,9 +29,11 @@ class Workspace:
         self.grants: dict[str, list[dict[str, Any]]] = {}
         self.updates: dict[str, dict[str, dict[str, Any]]] = {}
         self.approvals: dict[str, list[dict[str, Any]]] = {}
-        self.audit: dict[str, list[dict[str, Any]]] = {}
+        self._audit_log: dict[str, list[dict[str, Any]]] = {}
         self.checkpoints: dict[str, dict[str, Any]] = {}
+        self._case_workflows: dict[str, str] = {}
         self.memory: dict[str, dict[str, dict[str, Any]]] = {}
+        self.runs: dict[str, dict[str, Any]] = {}
 
     def reset(self, case_id: str) -> None:
         store.delete_case(case_id)
@@ -41,9 +42,11 @@ class Workspace:
         self.grants.pop(case_id, None)
         self.updates.pop(case_id, None)
         self.approvals.pop(case_id, None)
-        self.audit.pop(case_id, None)
+        self._audit_log.pop(case_id, None)
         self.memory.pop(case_id, None)
-        self.checkpoints.pop("wf-school-enrollment", None)
+        wf_id = self._case_workflows.pop(case_id, None)
+        if wf_id:
+            self.checkpoints.pop(wf_id, None)
 
     def load(self, case_id: str) -> None:
         """Refresh this process's view from shared state. No-op when running in-memory.
@@ -61,7 +64,7 @@ class Workspace:
         self.commitments[case_id] = remote["commitments"]
         self.grants[case_id] = remote["grants"]
         self.approvals[case_id] = remote["approvals"]
-        self.audit[case_id] = remote["audit"]
+        self._audit_log[case_id] = remote["audit"]
         self.memory[case_id] = remote["memory"]
         self.updates.setdefault(case_id, {})
 
@@ -81,20 +84,21 @@ class Workspace:
         """
         self.cases[case_id] = {
             "case_id": case_id,
-            "child_name": packet["child"]["name"],
-            "dob": packet["child"]["dob"],
+            "child_name": packet.get("child", {}).get("name", packet.get("child_name", "")),
+            "dob": packet.get("child", {}).get("dob", packet.get("dob", "")),
             "status": "draft",
-            "volunteer_id": packet["volunteer_id"],
-            "supervisor_id": packet["supervisor_id"],
+            "volunteer_id": packet.get("volunteer_id", ""),
+            "supervisor_id": packet.get("supervisor_id", ""),
             "created_at": _now().isoformat(),
             "activated_at": None,
             "referral_packet": packet,
+            "test_case": packet.get("test_case", False),
         }
         self.commitments.setdefault(case_id, [])
         self.grants.setdefault(case_id, [])
         self.updates.setdefault(case_id, {})
         self.approvals.setdefault(case_id, [])
-        self.audit.setdefault(case_id, [])
+        self._audit_log.setdefault(case_id, [])
         self.memory.setdefault(case_id, {})
         store.save_case(case_id, self.cases[case_id])
         return self.cases[case_id]
@@ -148,7 +152,6 @@ class Workspace:
         if status not in COMMITMENT_STATES:
             raise ValueError(f"status must be one of {sorted(COMMITMENT_STATES)}, got {status!r}")
         self.load(case_id)
-        # Specialists identify their commitment by service type; ids vary per case.
         prefix_types = {"edu": "education", "hlth": "health", "leg": "legal", "shl": "shelter", "fam": "family_services"}
         want = next((t for p, t in prefix_types.items() if f"-{p}-" in commitment_id), None)
         for row in self.commitments.get(case_id, []):
@@ -189,27 +192,60 @@ class Workspace:
 
     def put_checkpoint(self, workflow_id: str, body: dict[str, Any]) -> None:
         self.checkpoints[workflow_id] = body
+        case_id = body.get("case_id", "")
+        if case_id:
+            self._case_workflows[case_id] = workflow_id
         store.save_checkpoint(workflow_id, body)
 
     def get_checkpoint(self, workflow_id: str) -> dict[str, Any] | None:
         return self.checkpoints.get(workflow_id) or store.load_checkpoint(workflow_id)
+
+    def list_checkpoints(self) -> list[dict[str, Any]]:
+        """All checkpoints held in memory — used by find_due in memory mode."""
+        return list(self.checkpoints.values())
+
+    def update_checkpoint_state(self, workflow_id: str, state: str) -> None:
+        cp = self.checkpoints.get(workflow_id)
+        if cp is not None:
+            cp["state"] = state
+            store.save_checkpoint(workflow_id, cp)
 
     def set_memory(self, case_id: str, purpose: str, cleaned: dict[str, Any]) -> None:
         self.memory.setdefault(case_id, {})[purpose] = cleaned
         store.save_case(case_id, self.cases.get(case_id, {"case_id": case_id}), self.memory[case_id])
 
     def append_audit(self, case_id: str, event: dict[str, Any]) -> str:
+        """Append an audit event.
+
+        Raises AuditMutationRejected if the event_id was already recorded. In Firestore mode
+        the immutable writer enforces this at the database level; in memory mode the local list
+        is the source of truth.
+        """
+        from backend.runtime.context import current as _ctx
+
         event_id = event.get("event_id") or f"evt-{uuid4().hex[:8]}"
         event["event_id"] = event_id
-        event.setdefault("trace_id", TRACE_ID)
+        event.setdefault("trace_id", _ctx().trace_id)
         event.setdefault("timestamp", _now().isoformat())
-        self.audit.setdefault(case_id, []).append(event)
-        store.append_row(case_id, "audit_events", event, event_id)
+
+        existing_ids = {e.get("event_id") for e in self._audit_log.get(case_id, [])}
+        if event_id in existing_ids:
+            raise AuditMutationRejected(f"audit event {event_id} already exists")
+
+        self._audit_log.setdefault(case_id, []).append(event)
+        if store.enabled():
+            _write_audit_event(case_id, event)
+        else:
+            store.append_row(case_id, "audit_events", event, event_id)
+
         return f"cases/{case_id}/audit_events/{event_id}"
 
     def list_audit(self, case_id: str) -> list[dict[str, Any]]:
         self.load(case_id)
-        return self.audit.get(case_id, [])
+        return self._audit_log.get(case_id, [])
+
+    def audit_events(self, case_id: str) -> list[dict[str, Any]]:
+        return self.list_audit(case_id)
 
     def claim_update(self, case_id: str, key: str, payload: dict[str, Any]) -> tuple[dict[str, Any], bool]:
         bucket = self.updates.setdefault(case_id, {})
@@ -217,6 +253,36 @@ class Workspace:
             return bucket[key], True
         bucket[key] = payload
         return payload, False
+
+    # -- run state -----------------------------------------------------------------
+
+    def create_run(self, run_id: str, case_id: str) -> dict[str, Any]:
+        run = {
+            "run_id": run_id,
+            "case_id": case_id,
+            "state": "queued",
+            "current_phase": None,
+            "commitment_states": {},
+            "trace_id": "",
+            "created_at": _now().isoformat(),
+            "events": [],
+        }
+        self.runs[run_id] = run
+        return run
+
+    def get_run(self, run_id: str) -> dict[str, Any] | None:
+        return self.runs.get(run_id)
+
+    def update_run(self, run_id: str, **kwargs) -> dict[str, Any] | None:
+        run = self.runs.get(run_id)
+        if run:
+            run.update(kwargs)
+        return run
+
+    def push_run_event(self, run_id: str, event: dict[str, Any]) -> None:
+        run = self.runs.get(run_id)
+        if run is not None:
+            run.setdefault("events", []).append(event)
 
 
 workspace = Workspace()
