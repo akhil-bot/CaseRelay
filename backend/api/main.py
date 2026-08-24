@@ -29,6 +29,10 @@ app = FastAPI(
     description="Versioned HTTP control plane for the CaseRelay multi-agent fleet.",
 )
 
+from backend.api.agui import agui_app
+
+app.mount("/agui", agui_app)
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[

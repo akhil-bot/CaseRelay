@@ -15,13 +15,15 @@ import random
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
+from backend.identity.registry import AGENT_IDENTITIES
+
 # type -> (referral prefix, grant prefix, identity, purpose, allowed fields, legal basis)
 SERVICES: list[tuple[str, str, str, str, str, list[str], str]] = [
     (
         "education",
         "edu",
         "edu",
-        "education-agent@caserelay.iam",
+        AGENT_IDENTITIES["education"],
         "verify_school_enrollment",
         ["child_name", "dob", "referral_id"],
         "ferpa_court_order",
@@ -30,7 +32,7 @@ SERVICES: list[tuple[str, str, str, str, str, list[str], str]] = [
         "health",
         "hlth",
         "hlth",
-        "health-agent@caserelay.iam",
+        AGENT_IDENTITIES["health"],
         "check_appointment_status",
         ["appointment_status", "provider_name", "appointment_date"],
         "hipaa_signed_authorization",
@@ -39,7 +41,7 @@ SERVICES: list[tuple[str, str, str, str, str, list[str], str]] = [
         "legal",
         "leg",
         "leg",
-        "legal-agent@caserelay.iam",
+        AGENT_IDENTITIES["legal"],
         "check_referral_status",
         ["case_reference", "deadline"],
         "state_juvenile_court_order",
@@ -48,7 +50,7 @@ SERVICES: list[tuple[str, str, str, str, str, list[str], str]] = [
         "shelter",
         "shl",
         "shl",
-        "shelter-agent@caserelay.iam",
+        AGENT_IDENTITIES["shelter"],
         "check_availability",
         ["referral_id", "scheduling"],
         "state_juvenile_court_order",
@@ -57,7 +59,7 @@ SERVICES: list[tuple[str, str, str, str, str, list[str], str]] = [
         "family_services",
         "fam",
         "fam",
-        "family-agent@caserelay.iam",
+        AGENT_IDENTITIES["family_services"],
         "check_assessment_schedule",
         ["assessment_scheduling"],
         "state_juvenile_court_order",

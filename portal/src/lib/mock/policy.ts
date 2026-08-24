@@ -214,9 +214,9 @@ export const CAPABILITY_PROOFS: CapabilityProof[] = [
   {
     key: "identity",
     label: "Agent Identity",
-    managedProduct: "Agent Identity (OIDC principals)",
+    managedProduct: "Agent Identity (platform-managed principals)",
     status: "callable",
-    evidence: "8 principals · 1 denied cross-scope request recorded at evt-2052",
+    evidence: "",
     provenAtStep: 4,
   },
   {

@@ -1,15 +1,50 @@
+import logging
 from typing import Any
 from uuid import uuid4
 
 from opentelemetry import trace as _otel_trace
 
-from backend.identity.registry import IdentityDenied, PURPOSE_TO_IDENTITY, assert_scope, verify
+from backend.identity.registry import IdentityDenied, assert_scope, verify
 from backend.memory import bank as memory
 from backend.policy.projection import project
 from backend.runtime import context as _ctx_mod
 from backend.runtime.workspace import workspace
 
 _tracer = _otel_trace.get_tracer("caserelay.gateway")
+_log = logging.getLogger(__name__)
+
+
+def _resolve_caller_principal() -> str:
+    """Resolve the authenticated principal of the calling agent.
+
+    Deployed Agent Runtime engines with --agent-identity: google.auth.default() returns
+    credentials bound to the engine's managed identity. We mint an ID token and verify it
+    against Google's public keys — the verified email claim is the principal.
+
+    In-process agents (fleet runner, gate tests): the RunContext carries the identity set
+    by the calling agent module. No cryptographic verification is possible for same-process
+    calls; the security boundary is the deployment model, not in-process isolation.
+    """
+    try:
+        import google.auth
+        import google.auth.transport.requests
+        from google.oauth2 import id_token
+
+        request = google.auth.transport.requests.Request()
+        token = id_token.fetch_id_token(request, audience="caserelay-gateway")
+        claims = id_token.verify_oauth2_token(token, request, audience="caserelay-gateway")
+        email = claims.get("email")
+        if email:
+            _log.debug("principal resolved from verified ID token: %s", email)
+            return email
+    except Exception:
+        pass
+
+    ctx = _ctx_mod.current()
+    if ctx.agent_identity:
+        return ctx.agent_identity
+
+    return ""
 
 
 def authorized_context(case_id: str, purpose: str) -> dict[str, Any]:
@@ -20,11 +55,57 @@ def authorized_context(case_id: str, purpose: str) -> dict[str, Any]:
         span.set_attribute("caserelay.commitment_type", purpose)
         span.set_attribute("caserelay.workflow_id", ctx.workflow_id or "")
 
-        target = PURPOSE_TO_IDENTITY[purpose]
-        verify(target)
-        grant = workspace.grant_for(case_id, target, purpose)
+        caller = _resolve_caller_principal()
+        if not caller:
+            workspace.append_audit(
+                case_id,
+                {
+                    "event_id": f"evt-{uuid4().hex[:8]}",
+                    "trace_id": ctx.trace_id,
+                    "event_type": "denial",
+                    "agent_identity": "",
+                    "purpose": purpose,
+                    "verdict": "deny",
+                    "explanation": "no authenticated principal presented",
+                },
+            )
+            raise IdentityDenied("no authenticated principal: caller must present credentials or context identity")
+
+        verify(caller)
+        grant = workspace.grant_for(case_id, caller, purpose)
         if not grant:
-            raise IdentityDenied(f"no granted authority for {target} / {purpose}")
+            workspace.append_audit(
+                case_id,
+                {
+                    "event_id": f"evt-{uuid4().hex[:8]}",
+                    "trace_id": ctx.trace_id,
+                    "event_type": "denial",
+                    "agent_identity": caller,
+                    "purpose": purpose,
+                    "verdict": "deny",
+                    "explanation": f"no granted authority for {caller} / {purpose}",
+                },
+            )
+            raise IdentityDenied(f"no granted authority for {caller} / {purpose}")
+
+        if grant["granted_to"] != caller:
+            workspace.append_audit(
+                case_id,
+                {
+                    "event_id": f"evt-{uuid4().hex[:8]}",
+                    "trace_id": ctx.trace_id,
+                    "event_type": "denial",
+                    "agent_identity": caller,
+                    "purpose": purpose,
+                    "expected_principal": grant["granted_to"],
+                    "verdict": "deny",
+                    "explanation": f"principal mismatch: caller {caller} does not match grant subject {grant['granted_to']}",
+                },
+            )
+            raise IdentityDenied(
+                f"principal mismatch: caller {caller} does not match grant subject {grant['granted_to']}"
+            )
+
         packet = workspace.packet(case_id)
         referral_id = fat_referral(purpose, packet)
         due = next((r["due_date"] for r in packet["referrals"] if r["referral_id"] == referral_id), None)
@@ -48,7 +129,7 @@ def authorized_context(case_id: str, purpose: str) -> dict[str, Any]:
 
         for field in disclosed:
             try:
-                assert_scope(target, field)
+                assert_scope(caller, field)
             except IdentityDenied:
                 workspace.append_audit(
                     case_id,
@@ -56,11 +137,11 @@ def authorized_context(case_id: str, purpose: str) -> dict[str, Any]:
                         "event_id": f"evt-{uuid4().hex[:8]}",
                         "trace_id": _ctx_mod.current().trace_id,
                         "event_type": "denial",
-                        "agent_identity": target,
+                        "agent_identity": caller,
                         "purpose": purpose,
                         "denied_field": field,
                         "verdict": "deny",
-                        "explanation": f"{target} denied access to {field} by scope policy",
+                        "explanation": f"{caller} denied access to {field} by scope policy",
                     },
                 )
                 raise
@@ -69,20 +150,17 @@ def authorized_context(case_id: str, purpose: str) -> dict[str, Any]:
 
         tracer.add(
             "gateway",
-            target,
+            caller,
             f"{purpose} — disclosed {disclosed}",
             {"withheld": withheld, "legal_basis": grant.get("legal_basis")},
         )
-        # Every disclosure is recorded, not just the ones that trip a policy. The audit trail is
-        # the artifact a supervisor or judge is shown, so it has to answer "what did this agent see,
-        # under what authority" for each access — the in-process trace does not survive the request.
         audit_ref = workspace.append_audit(
             case_id,
             {
                 "event_id": f"evt-{uuid4().hex[:8]}",
                 "trace_id": _ctx_mod.current().trace_id,
                 "event_type": "disclosure",
-                "agent_identity": target,
+                "agent_identity": caller,
                 "purpose": purpose,
                 "legal_basis": grant.get("legal_basis"),
                 "disclosed_fields": disclosed,
@@ -103,7 +181,7 @@ def authorized_context(case_id: str, purpose: str) -> dict[str, Any]:
         )
         return {
             "audit_ref": audit_ref,
-            "identity": target,
+            "identity": caller,
             "purpose": purpose,
             "legal_basis": grant.get("legal_basis"),
             "referral_id": referral_id,

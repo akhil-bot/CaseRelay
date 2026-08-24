@@ -120,33 +120,35 @@ def finalize_intake(case_id: str) -> dict[str, Any]:
     }
 
 
+from backend.identity.registry import AGENT_IDENTITIES
+
 CANONICAL_GRANTS = {
     "education": {
-        "granted_to": "education-agent@caserelay.iam",
+        "granted_to": AGENT_IDENTITIES["education"],
         "purpose": "verify_school_enrollment",
         "allowed_fields": ["child_name", "dob", "referral_id"],
         "legal_basis": "ferpa_court_order",
     },
     "health": {
-        "granted_to": "health-agent@caserelay.iam",
+        "granted_to": AGENT_IDENTITIES["health"],
         "purpose": "check_appointment_status",
         "allowed_fields": ["appointment_status", "provider_name", "appointment_date"],
         "legal_basis": "hipaa_signed_authorization",
     },
     "legal": {
-        "granted_to": "legal-agent@caserelay.iam",
+        "granted_to": AGENT_IDENTITIES["legal"],
         "purpose": "check_referral_status",
         "allowed_fields": ["case_reference", "deadline"],
         "legal_basis": "state_juvenile_court_order",
     },
     "shelter": {
-        "granted_to": "shelter-agent@caserelay.iam",
+        "granted_to": AGENT_IDENTITIES["shelter"],
         "purpose": "check_availability",
         "allowed_fields": ["referral_id", "scheduling"],
         "legal_basis": "state_juvenile_court_order",
     },
     "family_services": {
-        "granted_to": "family-agent@caserelay.iam",
+        "granted_to": AGENT_IDENTITIES["family_services"],
         "purpose": "check_assessment_schedule",
         "allowed_fields": ["assessment_scheduling"],
         "legal_basis": "state_juvenile_court_order",

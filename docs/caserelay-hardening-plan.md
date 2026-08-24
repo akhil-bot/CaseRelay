@@ -176,8 +176,8 @@ When this plan is complete:
 | Agent Registry | JSON fixture | Live registry resolution at orchestrator startup (Step 20) |
 | Agent Runtime | Real deploy, fake durability | Real deploy + Vertex Sessions + Cloud Scheduler wake (Steps 11, 18) |
 | Memory Bank | Firestore dict | `VertexAiMemoryBankService` + `PreloadMemoryTool` (Step 17) |
-| Agent Identity | String compare on fake emails | ID-token verification against the grant subject (Step 15) |
-| Agent Gateway | In-process function | Same function, but caller-authenticated and deny-by-default (Step 15) |
+| Agent Identity | ~~String compare on fake emails~~ | **Done.** `--agent-identity` on all eight engines; `google.oauth2.id_token` verification in deployed mode. |
+| Agent Gateway | ~~In-process function~~ | **Done.** Caller-authenticated and deny-by-default; `PURPOSE_TO_IDENTITY` deleted. |
 | Model Armor | 15-line regex | `google-cloud-modelarmor` as an ADK plugin (Step 16) |
 | Agent Observability | Hardcoded `trace-7821` | Real OTel context exported to Cloud Trace (Steps 4, 19) |
 
@@ -838,9 +838,11 @@ Your teammate is unblocked when all of these hold:
 Cut these from the docs rather than building them. Each is a day or more and none moves a scored
 criterion as far as the video does.
 
-- Managed Agent Gateway with PSC/IAP, mTLS and DPoP. Step 15 captures most of the credit for a
-  fraction of the cost, and `--agent-identity` must be set at create time, meaning all eight
-  engines would have to be recreated.
+- ~~Managed Agent Gateway with PSC/IAP, mTLS and DPoP~~ **Delivered:** all eight engines recreated
+  with `--agent-identity` (GEAP's `IdentityType.AGENT_IDENTITY`). The gateway now verifies the
+  caller principal from GCP credentials (`google.oauth2.id_token`) in deployed engines and rejects
+  any caller whose principal does not match the grant subject. The old `PURPOSE_TO_IDENTITY` lookup
+  (which derived identity from the purpose argument) is deleted.
 - The conflicting-updates, identity-revocation and case-closure scenarios (S11–S13).
 - Fixing the Gemini Enterprise UI `NOT_FOUND` documented at `walkthrough:572-584`.
 - Rebuilding the whole portal. The API contract is what matters; screens can follow.

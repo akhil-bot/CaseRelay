@@ -67,20 +67,19 @@ pick up the token colour of whatever they sit in.
 
 The chat panel is wired with [CopilotKit](https://copilotkit.ai), which speaks
 [AG-UI](https://docs.ag-ui.com/) — the same protocol Google ADK exposes through the `ag_ui_adk`
-middleware. Two modes share one interface:
+middleware.
 
-| Mode             | When                                                      | Path                                                             |
-| ---------------- | --------------------------------------------------------- | ---------------------------------------------------------------- |
-| **ADK**          | `NEXT_PUBLIC_ADK_AGENT_URL` set                           | Browser → `/api/copilotkit` → `HttpAgent` → the ADK FastAPI app  |
-| **Built-in**     | `GOOGLE_API_KEY` + `NEXT_PUBLIC_COPILOT_RUNTIME=true` set | Browser → `/api/copilotkit` → `BuiltInAgent` (gemini-3.5-flash)  |
-| **Unconfigured** | Neither set                                               | Disabled indicator; no input box, no agent                        |
+| Mode             | When                            | Path                                                             |
+| ---------------- | ------------------------------- | ---------------------------------------------------------------- |
+| **ADK**          | `NEXT_PUBLIC_ADK_AGENT_URL` set | Browser → `/api/copilotkit` → `HttpAgent` → the control plane's `/agui` endpoint |
+| **Unconfigured** | Not set                         | Disabled indicator; no input box, no agent                        |
 
-- `src/lib/copilot/config.ts` — agent id and which mode is active
-- `src/app/api/copilotkit/route.ts` — `CopilotRuntime` forwarding to the ADK endpoint or running the built-in Gemini agent
+- `src/lib/copilot/config.ts` — agent id and whether the runtime is available
+- `src/app/api/copilotkit/route.ts` — `CopilotRuntime` forwarding to the ADK endpoint
 - `src/components/copilot/` — the provider, the sidebar, and the slot overrides
 
 To connect the backend, copy `.env.local.example` to `.env.local` and set
-`NEXT_PUBLIC_ADK_AGENT_URL` (preferred) or `GOOGLE_API_KEY` + `NEXT_PUBLIC_COPILOT_RUNTIME=true`.
+`NEXT_PUBLIC_ADK_AGENT_URL` to the control plane's `/agui` endpoint. No API key required.
 
 What the agent can see is deliberately narrow. `useAgentContext` publishes three one-way values —
 the current route and role, a caseload count summary, and the scenario clock position — so a

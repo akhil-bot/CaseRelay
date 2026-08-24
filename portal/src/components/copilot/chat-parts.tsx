@@ -103,12 +103,8 @@ export const AssistantMessage =
   AssistantMessageView as unknown as typeof CopilotChatAssistantMessage;
 
 /**
- * Presence, and which agent is behind it: the deployed ADK fleet, or the
- * built-in Gemini fallback. Held in the header as standing chrome — the
- * alternative is a line the assistant repeats in every single reply.
- *
- * The dot is the product's one green, which the palette rule reserves for
- * exactly this.
+ * Presence indicator in the chat header. The dot is the product's one green,
+ * which the palette rule reserves for exactly this.
  */
 function StatusPill() {
   return (

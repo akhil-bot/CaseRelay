@@ -1,8 +1,12 @@
 from google.adk.agents import Agent
 
 from backend.gateway.gateway import authorized_context
+from backend.identity.registry import AGENT_IDENTITIES
 from backend.partners import sim
+from backend.runtime.context import bind as _bind
 from backend.runtime.workspace import workspace
+
+AGENT_IDENTITY = AGENT_IDENTITIES["education"]
 
 INSTRUCTION = (
     "You are the Education Liaison for a school district. Never ask the requester anything "
@@ -18,7 +22,8 @@ INSTRUCTION = (
 
 def get_authorized_context(case_id: str) -> dict:
     """Only fields the Gateway allowlists for enrollment checks."""
-    return authorized_context(case_id, "verify_school_enrollment")
+    with _bind(agent_identity=AGENT_IDENTITY):
+        return authorized_context(case_id, "verify_school_enrollment")
 
 
 def query_school(referral_id: str, case_id: str | None = None) -> dict:

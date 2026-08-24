@@ -19,8 +19,7 @@ import { useViewer } from "@/lib/viewer";
 
 /**
  * Entry point: renders the connected chat when an agent is configured, or a
- * calm disabled indicator when neither `NEXT_PUBLIC_ADK_AGENT_URL` nor
- * `GOOGLE_API_KEY` is set.
+ * calm disabled indicator when `NEXT_PUBLIC_ADK_AGENT_URL` is not set.
  */
 export function CaseRelayCopilot() {
   if (!isRuntimeAvailable) return <UnconfiguredChat />;
@@ -58,10 +57,7 @@ function UnconfiguredChat() {
         <p className="mt-1 text-[11.5px] leading-relaxed text-ink-muted">
           Set{" "}
           <code className="font-mono text-[10.5px]">NEXT_PUBLIC_ADK_AGENT_URL</code>{" "}
-          for the ADK agent, or{" "}
-          <code className="font-mono text-[10.5px]">GOOGLE_API_KEY</code> +{" "}
-          <code className="font-mono text-[10.5px]">NEXT_PUBLIC_COPILOT_RUNTIME=true</code>{" "}
-          for the built-in Gemini agent.
+          to the control plane&apos;s <code className="font-mono text-[10.5px]">/agui</code> endpoint.
         </p>
       </div>
     </div>

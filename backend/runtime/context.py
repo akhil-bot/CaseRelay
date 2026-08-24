@@ -36,6 +36,7 @@ class RunContext:
     case_id: str = ""
     workflow_id: str = ""
     trace_id: str = field(default_factory=_new_id)
+    agent_identity: str = ""
 
 
 _ctx: contextvars.ContextVar[RunContext] = contextvars.ContextVar("caserelay_run_context")
@@ -61,6 +62,7 @@ def current() -> RunContext:
                     case_id=base.case_id,
                     workflow_id=base.workflow_id,
                     trace_id=otel_tid,
+                    agent_identity=base.agent_identity,
                 )
     except Exception:  # noqa: BLE001 — OTel not installed or not configured
         pass
@@ -79,6 +81,7 @@ def bind(**kwargs):
         case_id=kwargs.get("case_id", base.case_id),
         workflow_id=kwargs.get("workflow_id", base.workflow_id),
         trace_id=kwargs.get("trace_id", base.trace_id),
+        agent_identity=kwargs.get("agent_identity", base.agent_identity),
     )
     token = _ctx.set(merged)
     try:

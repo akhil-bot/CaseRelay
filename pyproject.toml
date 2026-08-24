@@ -16,6 +16,7 @@ dependencies = [
     "sse-starlette",
     "httpx2>=2.12.0",
     "google-cloud-modelarmor",
+    "ag-ui-adk>=0.7.0",
 ]
 
 [tool.hatch.build.targets.wheel]

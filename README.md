@@ -105,8 +105,8 @@ Eight agents, each with a distinct Google service-account identity and a scoped 
 - **Agent Registry** — versioned cards and live discovery for all eight agents
 - **Agent Runtime** — durable execution with checkpoint, sleep, and deadline-triggered resume
 - **Memory Bank** — scoped cross-session operational memory keyed by case and purpose
-- **Agent Identity** — distinct service account per organizational agent; cross-scope request denied
-- **Agent Gateway** — caller authentication, registry routing, purpose-bound field projection
+- **Agent Identity** — platform-managed identity per agent (`--agent-identity`); verified caller principal; cross-scope denial
+- **Agent Gateway** — caller-authenticated, deny-by-default, purpose-bound field projection
 - **Model Armor** — prompt-injection quarantine and safe retry on poisoned partner payload
 - **Agent Observability** — one trace ID connects Registry, Runtime, Memory, Identity, Gateway, Model Armor, approval, and completion
 

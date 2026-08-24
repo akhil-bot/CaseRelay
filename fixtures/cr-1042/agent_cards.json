@@ -8,7 +8,7 @@
     "tools": ["validate_packet", "extract_commitments", "propose_grants"],
     "allowed_data_scopes": ["referral_packet", "authority_grants"],
     "denied_data_scopes": ["clinical_notes", "legal_strategy"],
-    "identity": "intake-agent@caserelay.iam",
+    "identity": "caserelay-intake@agent.caserelay.dev",
     "health_status": "healthy"
   },
   {
@@ -20,7 +20,7 @@
     "tools": ["dispatch_task", "read_checkpoint", "write_checkpoint", "schedule_wake", "request_approval"],
     "allowed_data_scopes": ["commitment_status"],
     "denied_data_scopes": ["raw_partner_records"],
-    "identity": "orchestrator-agent@caserelay.iam",
+    "identity": "caserelay-orchestrator@agent.caserelay.dev",
     "health_status": "healthy"
   },
   {
@@ -32,7 +32,7 @@
     "tools": ["check_enrollment", "request_status", "report_callback"],
     "allowed_data_scopes": ["child_name", "dob", "referral_id"],
     "denied_data_scopes": ["health", "legal", "shelter", "family"],
-    "identity": "education-agent@caserelay.iam",
+    "identity": "caserelay-education@agent.caserelay.dev",
     "health_status": "healthy"
   },
   {
@@ -44,7 +44,7 @@
     "tools": ["check_appointment", "report_callback"],
     "allowed_data_scopes": ["appointment_status", "provider_name", "appointment_date"],
     "denied_data_scopes": ["diagnosis", "medication", "clinical_notes"],
-    "identity": "health-agent@caserelay.iam",
+    "identity": "caserelay-health@agent.caserelay.dev",
     "health_status": "healthy"
   },
   {
@@ -56,7 +56,7 @@
     "tools": ["check_referral_status", "report_callback"],
     "allowed_data_scopes": ["case_reference", "deadline"],
     "denied_data_scopes": ["legal_strategy"],
-    "identity": "legal-agent@caserelay.iam",
+    "identity": "caserelay-legal@agent.caserelay.dev",
     "health_status": "healthy"
   },
   {
@@ -68,7 +68,7 @@
     "tools": ["check_availability", "report_callback"],
     "allowed_data_scopes": ["referral_id", "scheduling"],
     "denied_data_scopes": ["placement_rankings"],
-    "identity": "shelter-agent@caserelay.iam",
+    "identity": "caserelay-shelter@agent.caserelay.dev",
     "health_status": "healthy"
   },
   {
@@ -80,7 +80,7 @@
     "tools": ["check_assessment", "report_callback"],
     "allowed_data_scopes": ["assessment_scheduling"],
     "denied_data_scopes": ["risk_scores", "findings"],
-    "identity": "family-agent@caserelay.iam",
+    "identity": "caserelay-family@agent.caserelay.dev",
     "health_status": "healthy"
   },
   {
@@ -92,7 +92,7 @@
     "tools": ["evaluate_policy", "quarantine_response", "generate_safe_retry", "write_audit"],
     "allowed_data_scopes": ["policy_rules"],
     "denied_data_scopes": ["raw_case_data"],
-    "identity": "verifier-agent@caserelay.iam",
+    "identity": "caserelay-verifier@agent.caserelay.dev",
     "health_status": "healthy"
   }
 ]

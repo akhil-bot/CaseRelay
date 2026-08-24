@@ -1,3 +1,3 @@
-from backend.identity.registry import IdentityDenied, verify
+from backend.identity.registry import AGENT_IDENTITIES, IdentityDenied, verify
 
-__all__ = ["IdentityDenied", "verify"]
+__all__ = ["AGENT_IDENTITIES", "IdentityDenied", "verify"]

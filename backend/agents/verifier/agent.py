@@ -3,8 +3,11 @@ from uuid import uuid4
 from google.adk.agents import Agent
 
 from backend.gateway.armor import screen
+from backend.identity.registry import AGENT_IDENTITIES
 from backend.partners import sim
 from backend.runtime.workspace import workspace
+
+AGENT_IDENTITY = AGENT_IDENTITIES["verifier"]
 
 INSTRUCTION = (
     "You are the Safeguarding Verifier. Never ask the requester anything.\n"
@@ -40,7 +43,7 @@ def open_escalation(case_id: str, reason: str) -> dict:
         case_id,
         {
             "event_type": "quarantine",
-            "agent_identity": "verifier-agent@caserelay.iam",
+            "agent_identity": AGENT_IDENTITY,
             "verdict": "quarantine",
             "explanation": reason,
         },

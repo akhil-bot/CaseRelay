@@ -395,11 +395,14 @@ def _(c: Ctx) -> None:
         trace.set_tracer_provider(provider)
 
         from backend.gateway import gateway
+        from backend.runtime.context import bind as _bind
+        from backend.identity.registry import AGENT_IDENTITIES
 
         case_id = make_case("GATE-T44")
         dataset.grant_authority(case_id)
         try:
-            gateway.authorized_context(case_id, "verify_school_enrollment")
+            with _bind(agent_identity=AGENT_IDENTITIES["education"]):
+                gateway.authorized_context(case_id, "verify_school_enrollment")
         except Exception as e:
             print("disclosure call failed:", type(e).__name__, e)
 

@@ -12,7 +12,7 @@ import type { ReactNode } from "react";
  * exposes, `CopilotThreadsDrawer` renders an upgrade prompt without a licence
  * key, and reopening a stored thread runs through `connectAgent`, whose replay
  * is documented as a no-op for non-Intelligence transports. Neither CaseRelay
- * wiring — ADK over AG-UI, or the built-in Gemini agent — can replay a
+ * wiring — ADK over AG-UI — cannot replay a
  * transcript, so the panel keeps its own.
  *
  * It keeps them in memory and nowhere else. A transcript here is a child's

@@ -1,8 +1,12 @@
 from google.adk.agents import Agent
 
 from backend.gateway.gateway import authorized_context
+from backend.identity.registry import AGENT_IDENTITIES
 from backend.partners import sim
+from backend.runtime.context import bind as _bind
 from backend.runtime.workspace import workspace
+
+AGENT_IDENTITY = AGENT_IDENTITIES["shelter"]
 
 INSTRUCTION = (
     "You are the Shelter liaison. Never ask the requester anything — you decide the status "
@@ -17,7 +21,8 @@ INSTRUCTION = (
 
 
 def get_authorized_context(case_id: str) -> dict:
-    return authorized_context(case_id, "check_availability")
+    with _bind(agent_identity=AGENT_IDENTITY):
+        return authorized_context(case_id, "check_availability")
 
 
 def query_shelter(referral_id: str, case_id: str | None = None) -> dict:
