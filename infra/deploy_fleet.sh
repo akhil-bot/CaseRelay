@@ -127,7 +127,7 @@ _deploy_one() {
   local self_url_var="CASERELAY_URL_$(echo "$key" | tr '[:lower:]' '[:upper:]')"
   local self_url="${!self_url_var:-}"
   if [ -n "$self_url" ]; then
-    extra=",CASERELAY_PUBLIC_URL=${self_url}"
+    extra+=",CASERELAY_PUBLIC_URL=${self_url}"
   fi
   if [ "$key" = "orchestrator" ]; then
     extra+=",CASERELAY_URL_EDUCATION=${CASERELAY_URL_EDUCATION:-}"
@@ -137,6 +137,16 @@ _deploy_one() {
     extra+=",CASERELAY_URL_FAMILY=${CASERELAY_URL_FAMILY:-}"
     extra+=",CASERELAY_URL_VERIFIER=${CASERELAY_URL_VERIFIER:-}"
   fi
+  # Every engine needs the identity registry (cross-agent verification)
+  for id_var in CASERELAY_IDENTITY_EDUCATION CASERELAY_IDENTITY_HEALTH \
+                CASERELAY_IDENTITY_LEGAL CASERELAY_IDENTITY_SHELTER \
+                CASERELAY_IDENTITY_FAMILY CASERELAY_IDENTITY_INTAKE \
+                CASERELAY_IDENTITY_ORCHESTRATOR CASERELAY_IDENTITY_VERIFIER; do
+    local id_val="${!id_var:-}"
+    if [ -n "$id_val" ]; then
+      extra+=",${id_var}=${id_val}"
+    fi
+  done
 
   local attempt=0 backoff=5 max_backoff=60
   local deploy_rc=1
@@ -153,7 +163,7 @@ _deploy_one() {
       --no-confirm-project \
       --agent-identity \
       --service-name "$svc" \
-      --update-env-vars "CASERELAY_AGENT=${agent},CASERELAY_STATE=firestore,CASERELAY_PROJECT_ID=${PROJECT},GOOGLE_CLOUD_PROJECT=${PROJECT},GOOGLE_CLOUD_LOCATION=global,GOOGLE_GENAI_USE_VERTEXAI=true,PYTHONPATH=/app${extra}" \
+      --update-env-vars "CASERELAY_AGENT=${agent},CASERELAY_STATE=firestore,CASERELAY_PROJECT_ID=${PROJECT},GOOGLE_CLOUD_PROJECT=${PROJECT},GOOGLE_CLOUD_LOCATION=global,GOOGLE_GENAI_USE_VERTEXAI=true,GOOGLE_API_USE_CLIENT_CERTIFICATE=true,PYTHONPATH=/app${extra}" \
       --cpu 1 --memory 2Gi --min-instances 1 --max-instances 2 \
       >> "$log" 2>&1
     deploy_rc=$?
@@ -302,6 +312,19 @@ for entry in "${AGENTS[@]}"; do
     registry_fail=$((registry_fail + 1))
   fi
 done
+
+# --- Grant IAM roles that --agent-identity does not provision ---
+echo ""
+echo "=== granting fleet IAM roles (Firestore, Service Usage) ==="
+if [ ${#created_configured[@]} -gt 0 ] || [ ${#created_iam_aborted[@]} -gt 0 ]; then
+  bash "$(dirname "$0")/grant_fleet_iam.sh" ${created_configured[*]:-} ${created_iam_aborted[*]:-}
+  grant_rc=$?
+  if [ $grant_rc -ne 0 ]; then
+    echo "  WARNING: some IAM grants failed — agents may not be able to access Firestore"
+  fi
+else
+  echo "  SKIP: no engines were deployed this run"
+fi
 
 # --- Final summary ---
 echo ""
