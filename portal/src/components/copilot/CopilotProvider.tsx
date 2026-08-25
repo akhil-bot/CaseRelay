@@ -17,6 +17,7 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
     <CopilotChatConfigurationProvider isModalDefaultOpen={false}>
       <CopilotKit
         runtimeUrl={COPILOT_RUNTIME_URL}
+        useSingleEndpoint
         enableInspector={false}
         showDevConsole={false}
       >
