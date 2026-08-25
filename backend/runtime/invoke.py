@@ -18,19 +18,22 @@ def run_agent(agent, message: str, app_name: str | None = None, user_id: str | N
     return asyncio.run(_run(agent, message, name, caller))
 
 
-def finalize_run_memory(run_id: str, case_id: str) -> None:
+def finalize_run_memory(run_id: str, case_id: str) -> int:
     """Extract one memory from the entire wake's accumulated orchestrator events.
 
     Called once at end of _run_background. Builds a synthetic session from all
     orchestrator phases' events and runs a single synchronous extraction.
+
+    Returns the number of session events fed into extraction, or 0 if nothing was committed.
     """
     if not memory_bank_enabled():
-        return
+        return 0
     with _run_buffers_lock:
         events = _run_buffers.pop(run_id, [])
     if not events:
-        return
+        return 0
     asyncio.run(_extract_run(case_id, events))
+    return len(events)
 
 
 async def _extract_run(case_id: str, events: list) -> None:

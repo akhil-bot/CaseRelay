@@ -508,7 +508,8 @@ def _narrate(event: str, phase: str, *, summary: str = "", commitment_states: di
 
 
 def _build_summary(case_id: str, run_id: str, child_name: str,
-                   commitment_states: dict[str, str], outcome: str) -> dict:
+                   commitment_states: dict[str, str], outcome: str,
+                   *, recall_count: int = 0, wrote_memory: bool = False) -> dict:
     """Build a structured closing summary with per-commitment status and next actions.
 
     Next actions are derived exclusively from real case state: pending approvals,
@@ -582,7 +583,7 @@ def _build_summary(case_id: str, run_id: str, child_name: str,
     else:
         message = f"Finished processing {child}'s case."
 
-    return {
+    result: dict = {
         "event": "run_summary",
         "run_id": run_id,
         "case_id": case_id,
@@ -592,6 +593,9 @@ def _build_summary(case_id: str, run_id: str, child_name: str,
         "commitments": commitments,
         "next_actions": next_actions,
     }
+    if recall_count > 0 or wrote_memory:
+        result["memory"] = {"recalled": recall_count, "wrote": wrote_memory}
+    return result
 
 
 def _run_background(run_id: str, case_id: str) -> None:
@@ -616,6 +620,7 @@ def _run_background(run_id: str, case_id: str) -> None:
 
     from backend.agents.intake.agent import root_agent as intake_agent
     from backend.agents.orchestrator.agent import build_for_run as _build_orchestrator
+    from backend.memory.platform import enabled as _mb_enabled, search_sync as _mb_search
     from backend.runtime.context import bind as _bind
     from backend.runtime.fleet import PHASES, SPECIALISTS
     from backend.runtime.invoke import finalize_run_memory, run_agent
@@ -680,6 +685,25 @@ def _run_background(run_id: str, case_id: str) -> None:
                 "event": "run_started", "run_id": run_id, "case_id": case_id,
                 "message": _narrate("run_started", "intake", case_id=case_id, child_name=child_name),
             })
+
+            recall_count = 0
+            if _mb_enabled():
+                child = child_name or "the child"
+                try:
+                    recalled = _mb_search(case_id, f"coordination history and outcomes for case {case_id}")
+                    recall_count = len(recalled)
+                    if recall_count > 0:
+                        _push_event({
+                            "event": "memory_recall", "run_id": run_id, "case_id": case_id,
+                            "memory_count": recall_count,
+                            "previews": [m[:150] for m in recalled[:3]],
+                            "message": (
+                                f"Recalled {recall_count} note{'s' if recall_count != 1 else ''} "
+                                f"from earlier work on {child}'s case."
+                            ),
+                        })
+                except Exception:  # noqa: BLE001
+                    pass
 
             intake_text = _quiet_run_agent(
                 intake_agent,
@@ -810,7 +834,17 @@ def _run_background(run_id: str, case_id: str) -> None:
                 })
 
             commitments = workspace.commitment_states(case_id)
-            finalize_run_memory(run_id, case_id)
+            wrote_events = finalize_run_memory(run_id, case_id)
+            if wrote_events > 0:
+                child = child_name or "the child"
+                _push_event({
+                    "event": "memory_write", "run_id": run_id, "case_id": case_id,
+                    "events_committed": wrote_events,
+                    "message": (
+                        f"Saved notes from this session to {child}'s file — "
+                        f"partner contacts, shortcuts, and strategies will be available next time."
+                    ),
+                })
 
             # A run where specialists silently failed (no Python exception, but their
             # commitments stayed "pending") must not report "completed". Phase-level
@@ -826,7 +860,10 @@ def _run_background(run_id: str, case_id: str) -> None:
             else:
                 outcome = "completed"
 
-            summary_event = _build_summary(case_id, run_id, child_name, commitments, outcome)
+            summary_event = _build_summary(
+                case_id, run_id, child_name, commitments, outcome,
+                recall_count=recall_count, wrote_memory=wrote_events > 0,
+            )
             summary_event["timestamp"] = datetime.now(timezone.utc).isoformat()
             _push_event(summary_event)
 

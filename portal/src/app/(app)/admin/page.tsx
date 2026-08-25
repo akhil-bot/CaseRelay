@@ -399,6 +399,10 @@ function _isEscalation(ev: RunEvent): boolean {
   return (ev.phase ?? "").includes("approve");
 }
 
+function _isMemory(ev: RunEvent): boolean {
+  return ev.event === "memory_recall" || ev.event === "memory_write";
+}
+
 interface AdminSummaryCommitment {
   domain: string;
   label: string;
@@ -455,6 +459,19 @@ function AdminSummaryCard({ ev }: { ev: RunEvent }) {
           </ul>
         </div>
       )}
+      {ev.memory != null && (() => {
+        const mem = ev.memory as { recalled: number; wrote: boolean };
+        const parts: string[] = [];
+        if (mem.recalled > 0) parts.push(`Recalled ${mem.recalled} note${mem.recalled !== 1 ? "s" : ""} from earlier work`);
+        if (mem.wrote) parts.push("Saved notes for next time");
+        if (parts.length === 0) return null;
+        return (
+          <div className="mt-3 flex items-center gap-2 border-t border-line pt-3 text-[12px] text-ink-muted">
+            <Icon name="memory" size={13} className="shrink-0 text-accent" />
+            <span>{parts.join(" · ")}</span>
+          </div>
+        );
+      })()}
     </li>
   );
 }
@@ -487,7 +504,8 @@ function EventLog({ events, streaming }: { events: RunEvent[]; streaming: boolea
 
           const quarantine = _isQuarantine(ev);
           const escalation = _isEscalation(ev);
-          const highlight = quarantine || escalation;
+          const memory = _isMemory(ev);
+          const highlight = quarantine || escalation || memory;
 
           return (
             <li
@@ -497,7 +515,9 @@ function EventLog({ events, streaming }: { events: RunEvent[]; streaming: boolea
                 highlight
                   ? quarantine
                     ? "border-l-2 border-l-danger bg-danger/5"
-                    : "border-l-2 border-l-warn bg-warn-soft/50"
+                    : escalation
+                      ? "border-l-2 border-l-warn bg-warn-soft/50"
+                      : "border-l-2 border-l-accent/30 bg-accent-soft/20"
                   : row.hover,
               )}
             >
@@ -511,11 +531,25 @@ function EventLog({ events, streaming }: { events: RunEvent[]; streaming: boolea
                     )}>
                       {String(ev.message)}
                     </p>
-                    {(quarantine || escalation) && (
+                    {(quarantine || escalation || memory) && (
                       <div className="mt-0.5 flex flex-wrap items-center gap-2">
                         {quarantine && <Badge variant="danger" icon="shield">Flagged for review</Badge>}
                         {escalation && <Badge variant="warn" icon="user">Supervisor review</Badge>}
+                        {memory && (
+                          <Badge variant="accent" icon="memory">
+                            {ev.event === "memory_recall" ? "Remembered" : "Saved"}
+                          </Badge>
+                        )}
                       </div>
+                    )}
+                    {ev.event === "memory_recall" && Array.isArray(ev.previews) && ev.previews.length > 0 && (
+                      <ul className="mt-1.5 space-y-0.5">
+                        {(ev.previews as string[]).slice(0, 3).map((p, idx) => (
+                          <li key={idx} className="truncate text-[12px] italic text-ink-muted">
+                            &ldquo;{String(p)}&rdquo;
+                          </li>
+                        ))}
+                      </ul>
                     )}
                   </>
                 ) : (
@@ -556,7 +590,9 @@ function EventIcon({ event }: { event: string }) {
                   ? "close"
                   : event === "run_summary"
                     ? "list"
-                    : "activity";
+                    : event === "memory_recall" || event === "memory_write"
+                      ? "memory"
+                      : "activity";
   const color =
     event === "run_failed" || event === "phase_error"
       ? "text-danger"
@@ -564,6 +600,8 @@ function EventIcon({ event }: { event: string }) {
         ? "text-warn"
         : event === "run_completed" || event === "phase_complete"
           ? "text-brand"
-          : "text-ink-muted";
+          : event === "memory_recall" || event === "memory_write"
+            ? "text-accent-deep"
+            : "text-ink-muted";
   return <Icon name={name as "play"} size={16} className={cx("mt-0.5 shrink-0", color)} />;
 }

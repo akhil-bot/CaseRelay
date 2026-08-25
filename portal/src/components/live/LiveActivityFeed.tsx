@@ -27,9 +27,16 @@ function eventIcon(event: string): { name: IconName; color: string } {
       return { name: "close", color: "text-danger" };
     case "run_summary":
       return { name: "list", color: "text-brand" };
+    case "memory_recall":
+    case "memory_write":
+      return { name: "memory", color: "text-accent-deep" };
     default:
       return { name: "activity", color: "text-ink-muted" };
   }
+}
+
+function isMemoryEvent(ev: RunEvent): boolean {
+  return ev.event === "memory_recall" || ev.event === "memory_write";
 }
 
 function isQuarantineEvent(ev: RunEvent): boolean {
@@ -130,6 +137,20 @@ function SummaryCard({ ev }: { ev: RunEvent }) {
               </ul>
             </div>
           )}
+
+          {ev.memory != null && (() => {
+            const mem = ev.memory as { recalled: number; wrote: boolean };
+            const parts: string[] = [];
+            if (mem.recalled > 0) parts.push(`Recalled ${mem.recalled} note${mem.recalled !== 1 ? "s" : ""} from earlier work`);
+            if (mem.wrote) parts.push("Saved notes for next time");
+            if (parts.length === 0) return null;
+            return (
+              <div className="mt-3 flex items-center gap-2 border-t border-line pt-3 text-[12px] text-ink-muted">
+                <Icon name="memory" size={13} className="shrink-0 text-accent" />
+                <span>{parts.join(" · ")}</span>
+              </div>
+            );
+          })()}
         </div>
       </div>
     </li>
@@ -198,7 +219,8 @@ export function LiveActivityFeed({ run }: { run: LiveRunState }) {
               const { name, color } = eventIcon(ev.event);
               const quarantine = isQuarantineEvent(ev);
               const escalation = isEscalationEvent(ev);
-              const highlight = quarantine || escalation;
+              const memory = isMemoryEvent(ev);
+              const highlight = quarantine || escalation || memory;
 
               return (
                 <li
@@ -208,7 +230,9 @@ export function LiveActivityFeed({ run }: { run: LiveRunState }) {
                     highlight
                       ? quarantine
                         ? "border-l-2 border-l-danger bg-danger/5"
-                        : "border-l-2 border-l-warn bg-warn-soft/50"
+                        : escalation
+                          ? "border-l-2 border-l-warn bg-warn-soft/50"
+                          : "border-l-2 border-l-accent/30 bg-accent-soft/20"
                       : row.hover,
                   )}
                 >
@@ -222,7 +246,7 @@ export function LiveActivityFeed({ run }: { run: LiveRunState }) {
                         )}>
                           {String(ev.message)}
                         </p>
-                        {(quarantine || escalation) && (
+                        {(quarantine || escalation || memory) && (
                           <div className="mt-0.5 flex flex-wrap items-center gap-2">
                             {quarantine && (
                               <Badge variant="danger" icon="shield">Flagged for review</Badge>
@@ -230,7 +254,21 @@ export function LiveActivityFeed({ run }: { run: LiveRunState }) {
                             {escalation && (
                               <Badge variant="warn" icon="user">Supervisor review</Badge>
                             )}
+                            {memory && (
+                              <Badge variant="accent" icon="memory">
+                                {ev.event === "memory_recall" ? "Remembered" : "Saved"}
+                              </Badge>
+                            )}
                           </div>
+                        )}
+                        {ev.event === "memory_recall" && Array.isArray(ev.previews) && ev.previews.length > 0 && (
+                          <ul className="mt-1.5 space-y-0.5">
+                            {(ev.previews as string[]).slice(0, 3).map((p, idx) => (
+                              <li key={idx} className="truncate text-[12px] italic text-ink-muted">
+                                &ldquo;{String(p)}&rdquo;
+                              </li>
+                            ))}
+                          </ul>
                         )}
                       </>
                     ) : (
