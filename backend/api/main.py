@@ -414,6 +414,8 @@ def _narrate(event: str, phase: str, *, summary: str = "", commitment_states: di
     if event == "phase_complete":
         if phase == "intake":
             return "Intake complete; commitments extracted and grants proposed."
+        if "activate" in phase:
+            return "Grants activated; the case is now in monitoring."
         if specialist:
             nice = _SPECIALIST_LABELS.get(specialist, specialist.replace("_", " "))
             states = commitment_states or {}
