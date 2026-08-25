@@ -1,8 +1,11 @@
+import logging
 from uuid import uuid4
 
 from google.adk.agents import Agent
 
-from backend.gateway.armor import screen
+_log = logging.getLogger(__name__)
+
+from backend.gateway.armor import ScreeningUnavailable, screen
 from backend.identity.registry import AGENT_IDENTITIES
 from backend.partners import sim
 from backend.runtime.workspace import workspace
@@ -28,12 +31,22 @@ INSTRUCTION = (
 
 def inspect_school_callback(case_id: str) -> dict:
     """Screen the school's callback for this case. If the verdict is quarantine
-    you MUST call open_escalation next — do not finish without doing so."""
+    you MUST call open_escalation next — do not finish without doing so.
+
+    Fails closed: if content screening cannot execute (API unreachable,
+    template missing, library absent), the callback is quarantined rather
+    than silently allowed.
+    """
     edu_referral = next(
         r for r in workspace.packet(case_id)["referrals"] if r["type"] == "education"
     )
     raw = sim.school_callback(edu_referral["referral_id"], case_id=case_id)
-    verdict, rules = screen(raw)
+    try:
+        verdict, rules = screen(raw)
+    except ScreeningUnavailable as exc:
+        verdict, rules = "quarantine", ["screening_unavailable"]
+        _log.error("Content screening unavailable — failing closed: %s", exc)
+
     result: dict = {"verdict": verdict, "rules": rules}
     if verdict == "quarantine":
         result["required_action"] = (
