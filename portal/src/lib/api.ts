@@ -1,11 +1,12 @@
 /**
- * Live API client for the CaseRelay control plane.
+ * API client for the CaseRelay control plane.
  *
- * Base URL is read from NEXT_PUBLIC_API_BASE_URL. All functions throw on
- * non-2xx responses with the response body as the error message.
+ * All calls go through the same-origin BFF proxy at /api/control-plane,
+ * which attaches a Google-signed ID token server-side. No credential is
+ * shipped to the browser.
  */
 
-const BASE = process.env.NEXT_PUBLIC_API_BASE_URL ?? "https://caserelay-control-plane-6nwo7o4bbq-uc.a.run.app";
+const BASE = "/api/control-plane";
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`${BASE}${path}`, {
@@ -99,8 +100,8 @@ export async function listCases(): Promise<Record<string, unknown>[]> {
 }
 
 /**
- * Opens an SSE connection to the run events stream. Returns an EventSource.
- * The caller is responsible for closing it.
+ * Opens an SSE connection to the run-events stream via the BFF proxy.
+ * The caller is responsible for closing the returned EventSource.
  */
 export function streamRunEvents(runId: string): EventSource {
   return new EventSource(`${BASE}/v1/runs/${runId}/events`);

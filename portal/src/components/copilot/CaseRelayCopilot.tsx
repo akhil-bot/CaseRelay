@@ -19,7 +19,7 @@ import { useViewer } from "@/lib/viewer";
 
 /**
  * Entry point: renders the connected chat when an agent is configured, or a
- * calm disabled indicator when `NEXT_PUBLIC_ADK_AGENT_URL` is not set.
+ * calm disabled indicator when the copilot runtime is not enabled.
  */
 export function CaseRelayCopilot() {
   if (!isRuntimeAvailable) return <UnconfiguredChat />;
@@ -56,8 +56,8 @@ function UnconfiguredChat() {
         <p className="text-[12.5px] font-medium text-ink">Chat unavailable</p>
         <p className="mt-1 text-[11.5px] leading-relaxed text-ink-muted">
           Set{" "}
-          <code className="font-mono text-[10.5px]">NEXT_PUBLIC_ADK_AGENT_URL</code>{" "}
-          to the control plane&apos;s <code className="font-mono text-[10.5px]">/agui</code> endpoint.
+          <code className="font-mono text-[10.5px]">CONTROL_PLANE_URL</code>{" "}
+          and <code className="font-mono text-[10.5px]">NEXT_PUBLIC_COPILOT_ENABLED=true</code>.
         </p>
       </div>
     </div>

@@ -3,17 +3,31 @@ import {
   CopilotRuntime,
   createCopilotRuntimeHandler,
 } from "@copilotkit/runtime/v2";
-import { ADK_AGENT_URL, CASERELAY_AGENT_ID, COPILOT_RUNTIME_URL } from "@/lib/copilot/config";
+import { controlPlaneAuthHeaders } from "@/lib/control-plane-token";
+import { CASERELAY_AGENT_ID, COPILOT_RUNTIME_URL } from "@/lib/copilot/config";
 
 export const dynamic = "force-dynamic";
 
 function buildHandler() {
-  if (!ADK_AGENT_URL) return null;
+  const base = process.env.CONTROL_PLANE_URL;
+  if (!base) return null;
+
+  const agentUrl = `${base}/agui/`;
+
+  const authenticatedFetch: typeof globalThis.fetch = async (input, init) => {
+    const auth = await controlPlaneAuthHeaders();
+    const existing = new Headers(init?.headers);
+    for (const [k, v] of Object.entries(auth)) existing.set(k, v);
+    return globalThis.fetch(input, { ...init, headers: existing });
+  };
 
   return createCopilotRuntimeHandler({
     runtime: new CopilotRuntime({
       agents: {
-        [CASERELAY_AGENT_ID]: new HttpAgent({ url: ADK_AGENT_URL }),
+        [CASERELAY_AGENT_ID]: new HttpAgent({
+          url: agentUrl,
+          fetch: authenticatedFetch,
+        }),
       },
     }),
     basePath: COPILOT_RUNTIME_URL,
@@ -27,7 +41,7 @@ function notConfigured() {
     {
       error: "No agent backend configured.",
       detail:
-        "Set NEXT_PUBLIC_ADK_AGENT_URL to the control plane's /agui endpoint.",
+        "Set CONTROL_PLANE_URL to the control plane's base URL.",
     },
     { status: 503 },
   );
