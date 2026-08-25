@@ -65,6 +65,9 @@ node_modules/
 tmp/
 .cache/
 
+# ── Infrastructure build output ──────────────────────────────────────────────
+infra/deploy_logs/
+
 # ── Cursor ───────────────────────────────────────────────────────────────────
 # Rules are project configuration: they tell whoever works here next how this
 # repo expects to be treated, so they are committed like any other convention.

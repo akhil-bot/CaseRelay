@@ -1,8 +1,14 @@
 #!/usr/bin/env bash
 # Deploy the CaseRelay fleet to GEAP Agent Runtime with agent identity enabled.
 #
-# agents-cli deploy --no-wait hangs indefinitely when --agent-identity is used (v1.4.0).
-# Each invocation is wrapped in `timeout`; after a timeout the REST API determines success.
+# Each `agents-cli deploy` packages source, uploads it, and builds a container image.
+# A full build takes 10-20 minutes per engine. The timeout (default 1800s / 30 min)
+# is a safety net, not a speed gate — a killed CLI leaves an empty resource stub with
+# no running instances.
+#
+# Readiness signal: the A2A agent card at the engine's /api passthrough returning HTTP 200.
+# Resource existence alone means nothing — an engine without sourceCodeSpec/deploymentSpec
+# is an empty shell that will 400 on every request.
 #
 # The --agent-identity flag triggers a read-modify-write on the project IAM policy.
 # Concurrent deploys race on that one resource and all but one lose with 409 ABORTED.
@@ -16,7 +22,7 @@ set -uo pipefail
 PROJECT="${CASERELAY_PROJECT:-caserelay}"
 REGION="${CASERELAY_REGION:-us-central1}"
 PROJECT_NUMBER="${CASERELAY_PROJECT_NUMBER:-189353698936}"
-DEPLOY_TIMEOUT="${CASERELAY_DEPLOY_TIMEOUT:-600}"
+DEPLOY_TIMEOUT="${CASERELAY_DEPLOY_TIMEOUT:-1800}"
 MAX_PARALLEL="${CASERELAY_MAX_PARALLEL:-2}"
 MAX_IAM_RETRIES="${CASERELAY_MAX_IAM_RETRIES:-5}"
 LOG_DIR="$(dirname "$0")/deploy_logs"
@@ -54,35 +60,25 @@ sys.exit(1)
 " 2>/dev/null
 }
 
-_api_engine_has_code() {
-  local display_name="$1"
+_a2a_card_ready() {
+  local engine_id="$1" a2a_folder="$2"
   local token
   token="$(_get_token)" || return 1
-  curl -sf -H "Authorization: Bearer ${token}" \
-    "https://${REGION}-aiplatform.googleapis.com/v1beta1/projects/${PROJECT}/locations/${REGION}/reasoningEngines" |
-    python3 -c "
-import json, sys
-for e in json.load(sys.stdin).get('reasoningEngines', []):
-    if e.get('displayName') == '${display_name}':
-        spec = e.get('spec', {})
-        deploy = spec.get('deploymentSpec', {})
-        env = {v.get('name'): v.get('value') for v in deploy.get('env', []) or []}
-        pkg = spec.get('packageSpec', {})
-        has_code = bool(pkg.get('cloudStorageUri', '') or pkg.get('pythonPackageUri', ''))
-        has_agent = bool(env.get('CASERELAY_AGENT', ''))
-        sys.exit(0 if (has_code and has_agent) else 1)
-sys.exit(1)
-" 2>/dev/null
+  local url="https://${REGION}-aiplatform.googleapis.com/reasoningEngines/v1/projects/${PROJECT_NUMBER}/locations/${REGION}/reasoningEngines/${engine_id}/api/a2a/${a2a_folder}/.well-known/agent-card.json"
+  local http_code
+  http_code=$(curl -sf -o /dev/null -w "%{http_code}" -H "Authorization: Bearer ${token}" "$url" 2>/dev/null) || true
+  [ "$http_code" = "200" ]
 }
 
-_poll_engine_code() {
-  local display_name="$1"
-  local attempts="${2:-12}"
-  local interval="${3:-15}"
+_poll_a2a_ready() {
+  local engine_id="$1" a2a_folder="$2"
+  local attempts="${3:-40}"
+  local interval="${4:-30}"
   for ((i=1; i<=attempts; i++)); do
-    if _api_engine_has_code "$display_name"; then
+    if _a2a_card_ready "$engine_id" "$a2a_folder"; then
       return 0
     fi
+    echo "[$(date +%H:%M:%S)]   readiness poll ${i}/${attempts}: not yet serving" >&2
     sleep "$interval"
   done
   return 1
@@ -164,17 +160,20 @@ _deploy_one() {
 
     if [ "$deploy_rc" -eq 0 ]; then
       echo "[$(date +%H:%M:%S)] CLI returned success" >> "$log"
-      final_status="CREATED_AND_CONFIGURED"
-      break
-    elif [ "$deploy_rc" -eq 124 ]; then
-      echo "[$(date +%H:%M:%S)] CLI hung (timeout ${DEPLOY_TIMEOUT}s)" >> "$log"
-      if _poll_engine_code "$svc" 6 15; then
-        echo "[$(date +%H:%M:%S)] engine has code despite CLI hang" >> "$log"
+      # CLI success is necessary but not sufficient — verify real readiness.
+      local eid
+      eid=$(_api_engine_id "$svc" 2>/dev/null || true)
+      if [ -n "$eid" ] && _poll_a2a_ready "$eid" "$a2a_folder" 20 15 2>>"$log"; then
+        echo "[$(date +%H:%M:%S)] A2A agent card returns 200 — engine is serving" >> "$log"
         final_status="CREATED_AND_CONFIGURED"
       else
-        echo "[$(date +%H:%M:%S)] engine exists but no code after polling" >> "$log"
-        final_status="CREATED_IAM_OK_NO_CODE"
+        echo "[$(date +%H:%M:%S)] CLI succeeded but engine not serving after polling" >> "$log"
+        final_status="CLI_OK_NOT_SERVING"
       fi
+      break
+    elif [ "$deploy_rc" -eq 124 ]; then
+      echo "[$(date +%H:%M:%S)] CLI killed by timeout (${DEPLOY_TIMEOUT}s) — build was likely still running" >> "$log"
+      final_status="TIMEOUT_BUILD_KILLED"
       break
     elif grep -q "concurrent policy changes\|ABORTED" "$log"; then
       echo "[$(date +%H:%M:%S)] 409 IAM race detected, will retry" >> "$log"
@@ -239,8 +238,7 @@ echo ""
 echo "=== fleet deploy results ==="
 created_configured=()
 created_iam_aborted=()
-created_no_code=()
-not_created=()
+failed=()
 
 for entry in "${AGENTS[@]}"; do
   IFS='|' read -r key agent a2a_folder <<<"$entry"
@@ -252,22 +250,26 @@ for entry in "${AGENTS[@]}"; do
   case "$result" in
     CREATED_AND_CONFIGURED)
       created_configured+=("$key")
-      echo "  PASS: ${key} — engine created and fully configured"
+      echo "  PASS: ${key} — deployed and A2A agent card returns 200"
       ;;
     CREATED_IAM_ABORTED)
       created_iam_aborted+=("$key")
-      echo "  WARN: ${key} — engine created but IAM grant aborted (needs manual repair)"
+      echo "  WARN: ${key} — IAM grant aborted after retries (needs manual repair)"
       ;;
-    CREATED_IAM_OK_NO_CODE)
-      created_no_code+=("$key")
-      echo "  WARN: ${key} — engine created, IAM OK, but code not deployed"
+    CLI_OK_NOT_SERVING)
+      failed+=("$key")
+      echo "  FAIL: ${key} — CLI returned 0 but engine not serving (see ${LOG_DIR}/${key}.log)"
+      ;;
+    TIMEOUT_BUILD_KILLED)
+      failed+=("$key")
+      echo "  FAIL: ${key} — timeout killed the build at ${DEPLOY_TIMEOUT}s (see ${LOG_DIR}/${key}.log)"
       ;;
     NOT_CREATED)
-      not_created+=("$key")
+      failed+=("$key")
       echo "  FAIL: ${key} — engine not created (see ${LOG_DIR}/${key}.log)"
       ;;
     *)
-      not_created+=("$key")
+      failed+=("$key")
       echo "  FAIL: ${key} — unknown status '${result}' (see ${LOG_DIR}/${key}.log)"
       ;;
   esac
@@ -304,10 +306,9 @@ done
 # --- Final summary ---
 echo ""
 echo "=== final summary ==="
-echo "  Fully configured:    ${created_configured[*]:-none}"
+echo "  Deployed and serving: ${created_configured[*]:-none}"
 echo "  IAM grant aborted:   ${created_iam_aborted[*]:-none}"
-echo "  No code deployed:    ${created_no_code[*]:-none}"
-echo "  Not created at all:  ${not_created[*]:-none}"
+echo "  Failed:              ${failed[*]:-none}"
 echo "  Registry updates:    ${registry_ok} OK, ${registry_fail} failed"
 
 if [ ${#created_iam_aborted[@]} -gt 0 ]; then
@@ -316,7 +317,7 @@ if [ ${#created_iam_aborted[@]} -gt 0 ]; then
   echo "    bash infra/repair_iam.sh ${created_iam_aborted[*]}"
 fi
 
-if [ ${#not_created[@]} -gt 0 ] || [ ${#created_iam_aborted[@]} -gt 0 ] || [ "$registry_fail" -gt 0 ]; then
+if [ ${#failed[@]} -gt 0 ] || [ ${#created_iam_aborted[@]} -gt 0 ] || [ "$registry_fail" -gt 0 ]; then
   exit 1
 fi
 echo "  all engines deployed, configured, and registered successfully"
