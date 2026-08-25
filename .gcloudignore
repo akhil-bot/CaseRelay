@@ -1,0 +1,25 @@
+# agents-cli respects .gcloudignore for source packaging.
+# Without this, the 2.8GB project (including node_modules and .venv) makes
+# tarball creation take 10+ minutes and the upload even longer.
+
+.git
+.venv
+__pycache__
+*.pyc
+.pytest_cache
+.mypy_cache
+
+# Portal (Next.js frontend) - not deployed to Agent Runtime
+portal/
+docs/
+
+# Infra scripts (not needed at runtime)
+infra/deploy_logs/
+
+# OS files
+.DS_Store
+*.swp
+
+# Test and dev artifacts
+harness/
+.cursor/

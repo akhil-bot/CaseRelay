@@ -1,0 +1,1009 @@
+<!DOCTYPE html>
+<!-- Architecture-diagram: CaseRelay multi-agent system. Zero dependencies.
+     Four panels: A2A mesh, gateway governance, dormancy, full stack.
+     Solid chips = implemented in backend code. Dashed chips = infra/config only. -->
+<html lang="en" data-theme="light">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>CaseRelay — Multi-Agent System Architecture</title>
+  <style>
+    :root {
+      --bg-1: #eef1f8; --bg-2: #f8fafc;
+      --panel: rgba(255,255,255,0.72); --panel-solid: #ffffff;
+      --ink: #16192b; --muted: #5b6478; --faint: #8a93a6; --line: #dfe3ec;
+      --accent: #4f46e5;
+      --shadow: 0 8px 24px rgba(24,28,48,.08);
+      --frontend: #0891b2; --frontend-soft: #cffafe;
+      --backend:  #059669; --backend-soft:  #d1fae5;
+      --database: #7c3aed; --database-soft: #ede9fe;
+      --cloud:    #d97706; --cloud-soft:    #fef3c7;
+      --security: #e11d48; --security-soft: #ffe4e6;
+      --bus:      #ea580c; --bus-soft:      #ffedd5;
+      --external: #475569; --external-soft: #e2e8f0;
+      --a2a:      #2563eb; --a2a-soft:      #dbeafe;
+    }
+    [data-theme="dark"] {
+      --bg-1: #0b0f1a; --bg-2: #131826;
+      --panel: rgba(24,30,46,0.72); --panel-solid: #181e2e;
+      --ink: #e8edf7; --muted: #9aa6bd; --faint: #7b869c; --line: #2a3244;
+      --accent: #a5b4fc;
+      --shadow: 0 8px 24px rgba(0,0,0,.35);
+      --frontend: #22d3ee; --frontend-soft: #083344;
+      --backend:  #34d399; --backend-soft:  #0f3d2e;
+      --database: #a78bfa; --database-soft: #2e1065;
+      --cloud:    #fbbf24; --cloud-soft:    #3d2f0f;
+      --security: #fb7185; --security-soft: #4c0519;
+      --bus:      #fb923c; --bus-soft:      #431407;
+      --external: #94a3b8; --external-soft: #1e293b;
+      --a2a:      #60a5fa; --a2a-soft:      #12243f;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; min-height: 100vh; color: var(--ink);
+      font-family: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background: radial-gradient(1200px 600px at 15% -10%, var(--bg-2), var(--bg-1));
+      transition: background .3s, color .3s;
+    }
+    header {
+      display: flex; align-items: flex-end; justify-content: space-between;
+      padding: 14px 32px 0; gap: 20px; flex-wrap: wrap;
+    }
+    .title h1 { margin: 0; font-size: 19px; font-weight: 750; letter-spacing: -0.02em; }
+    .title p  { margin: 3px 0 0; color: var(--muted); font-size: 11.5px; }
+    .toggle {
+      border: 1px solid var(--line); background: var(--panel-solid); color: var(--ink);
+      border-radius: 999px; padding: 6px 13px; cursor: pointer; font-size: 12px; font-weight: 550;
+      display: inline-flex; gap: 7px; align-items: center; box-shadow: var(--shadow);
+    }
+    .toggle:hover { border-color: var(--accent); }
+    .toggle svg { width: 13px; height: 13px; }
+
+    main { padding: 6px 32px 8px; display: flex; justify-content: center; }
+    .board { width: 100%; max-width: 1240px; }
+
+    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+
+    /* ── Panel scaffolding ── */
+    .panel { margin-top: 16px; }
+    .panel-head {
+      display: flex; align-items: baseline; gap: 9px; flex-wrap: wrap;
+      margin: 0 2px 6px;
+    }
+    .panel-head .n {
+      width: 17px; height: 17px; border-radius: 5px; flex-shrink: 0;
+      background: var(--accent); color: #fff; font-size: 10px; font-weight: 750;
+      display: grid; place-items: center; align-self: center;
+    }
+    .panel-head h2 {
+      margin: 0; font-size: 12.5px; font-weight: 750; letter-spacing: .04em; text-transform: uppercase;
+    }
+    .panel-head p { margin: 0; color: var(--muted); font-size: 10.5px; }
+    .canvas {
+      background: var(--panel); backdrop-filter: blur(8px);
+      border: 1px solid var(--line); border-radius: 14px;
+      box-shadow: var(--shadow); padding: 8px 10px;
+    }
+    .canvas svg { display: block; width: 100%; height: auto; }
+
+    /* ── SVG shared type ── */
+    svg text { font-family: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+    .t-name { font-size: 12.5px; font-weight: 700; fill: var(--ink); }
+    .t-sub  { font-size: 9px;  fill: var(--muted); }
+    .t-tiny { font-size: 8.5px; fill: var(--faint); }
+    .t-hop  { font-size: 9px; font-weight: 600; fill: var(--muted); }
+    .t-lane {
+      font-size: 9px; font-weight: 700; fill: var(--faint);
+      letter-spacing: .12em; text-transform: uppercase;
+    }
+    .t-mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 8.5px; fill: var(--muted); }
+    .t-danger { fill: var(--security); }
+    .t-a2a { fill: var(--a2a); }
+    .t-ok { fill: var(--backend); }
+
+    /* ── SVG shapes ── */
+    .hex-spec { fill: var(--database-soft); stroke: var(--database); stroke-width: 1.5; }
+    .hex-verif { fill: var(--security-soft); stroke: var(--security); stroke-width: 1.5; }
+    .hex-core { fill: var(--backend-soft); stroke: var(--backend); stroke-width: 1.75; }
+    .box      { fill: var(--panel-solid); stroke: var(--line); stroke-width: 1.25; }
+    .box-ext  { fill: var(--external-soft); stroke: var(--external); stroke-width: 1.25; }
+    .box-hitl { fill: var(--cloud-soft); stroke: var(--cloud); stroke-width: 1.5; }
+    .box-sim  { fill: var(--panel-solid); stroke: var(--external); stroke-width: 1.25; stroke-dasharray: 5 3; }
+    .box-a2a  { fill: var(--a2a-soft); stroke: var(--a2a); stroke-width: 1.75; }
+    .box-data { fill: var(--panel-solid); stroke: var(--database); stroke-width: 1.25; }
+    .box-note { fill: none; stroke: var(--line); stroke-width: 1; stroke-dasharray: 4 3; }
+
+    .link      { fill: none; stroke: var(--muted); stroke-width: 1.5; }
+    .link-a2a  { fill: none; stroke: var(--a2a); stroke-width: 1.75; }
+    .link-soft { fill: none; stroke: var(--muted); stroke-width: 1.4; stroke-dasharray: 5 4; }
+    .link-deny { fill: none; stroke: var(--security); stroke-width: 1.4; stroke-dasharray: 4 3; }
+    .link-ok   { fill: none; stroke: var(--backend); stroke-width: 1.5; }
+    .axis      { fill: none; stroke: var(--line); stroke-width: 2; }
+
+    .ah   { fill: var(--muted); }
+    .ah-a { fill: var(--a2a); }
+    .ah-d { fill: var(--security); }
+    .ah-g { fill: var(--backend); }
+
+    /* Numbered hop badge, haloed so it stays legible over connector lines */
+    .badge circle { fill: var(--accent); stroke: var(--panel-solid); stroke-width: 2.5; }
+    .badge text { font-size: 10px; font-weight: 750; fill: #fff; }
+    .badge.gate circle { fill: var(--security); }
+    /* Dark accents are light, so badge numerals invert to stay legible */
+    [data-theme="dark"] .badge text { fill: #0b0f1a; }
+    [data-theme="dark"] .panel-head .n { color: #0b0f1a; }
+
+    /* ── HTML bands (panel 4) ── */
+    .lane-label {
+      display: flex; align-items: center; gap: 7px;
+      font-size: 9.5px; font-weight: 700; letter-spacing: .13em; text-transform: uppercase;
+      color: var(--muted); margin: 7px 4px 3px;
+    }
+    .lane-label .dot { width: 6px; height: 6px; border-radius: 999px; flex-shrink: 0; }
+    .row { display: flex; align-items: stretch; gap: 8px; flex-wrap: nowrap; }
+
+    .node {
+      flex: 1; min-width: 0; background: var(--panel-solid);
+      border: 1px solid var(--line); border-radius: 11px; padding: 8px 10px;
+      display: flex; flex-direction: column; gap: 3px;
+    }
+    .node h3 { margin: 0; font-size: 11.5px; font-weight: 700; letter-spacing: -0.01em; }
+    .node span { color: var(--muted); font-size: 9.5px; line-height: 1.35; }
+
+    .chips { display: flex; flex-wrap: wrap; gap: 3px; margin-top: auto; padding-top: 3px; }
+    .chip {
+      font-size: 8px; font-weight: 600; line-height: 1; padding: 3px 6px; border-radius: 999px;
+      white-space: nowrap; border: 1px solid var(--line); color: var(--muted); background: var(--panel-solid);
+    }
+    .chip.accent  { color: var(--accent);   border-color: var(--accent); }
+    .chip.warn    { color: var(--cloud);    border-color: var(--cloud);   background: var(--cloud-soft); }
+    .chip.ok      { color: var(--backend);  border-color: var(--backend); background: var(--backend-soft); }
+    .chip.danger  { color: var(--security); border-color: var(--security); background: var(--security-soft); }
+    .chip.a2a     { color: var(--a2a);      border-color: var(--a2a);     background: var(--a2a-soft); }
+    /* Dashed = present in infra/config only, no application handler in Python */
+    .chip.planned { border-style: dashed; background: transparent; color: var(--faint); border-color: var(--faint); }
+
+    .band {
+      margin-top: 6px; border: 1.5px dashed var(--backend); border-radius: 14px;
+      background: linear-gradient(180deg, var(--backend-soft), transparent 90%);
+      padding: 7px 10px 9px;
+    }
+    .band .cap {
+      display: inline-flex; align-items: center; gap: 6px; color: var(--backend);
+      font-weight: 700; font-size: 10px; letter-spacing: .05em; text-transform: uppercase;
+      margin: 0 4px 6px;
+    }
+    .band.gov  { border-color: var(--security); background: linear-gradient(180deg, var(--security-soft), transparent 90%); }
+    .band.gov .cap { color: var(--security); }
+    .band.ai   { border-color: var(--database); background: linear-gradient(180deg, var(--database-soft), transparent 90%); }
+    .band.ai .cap { color: var(--database); }
+    .band.data { border-color: var(--cloud); background: linear-gradient(180deg, var(--cloud-soft), transparent 90%); }
+    .band.data .cap { color: var(--cloud); }
+    .band.bus  { border-color: var(--bus); background: linear-gradient(180deg, var(--bus-soft), transparent 90%); }
+    .band.bus .cap { color: var(--bus); }
+    .band.ext  { border-color: var(--external); background: linear-gradient(180deg, var(--external-soft), transparent 90%); }
+    .band.ext .cap { color: var(--external); }
+
+    .vconn { display: flex; justify-content: center; align-items: center; gap: 7px; padding: 5px 0 2px; }
+    .vconn svg { width: 15px; height: 15px; color: var(--accent); }
+    .vconn .tag {
+      font-size: 9.5px; color: var(--muted); background: var(--panel-solid);
+      border: 1px solid var(--line); padding: 3px 9px; border-radius: 999px;
+    }
+
+    /* ── Grant table ── */
+    table.grants { width: 100%; border-collapse: collapse; margin-top: 8px; }
+    table.grants th {
+      text-align: left; font-size: 8.5px; font-weight: 700; color: var(--faint);
+      letter-spacing: .1em; text-transform: uppercase;
+      padding: 5px 8px; border-bottom: 1px solid var(--line); white-space: nowrap;
+    }
+    table.grants td {
+      font-size: 9.5px; color: var(--ink); padding: 5px 8px;
+      border-bottom: 1px solid var(--line); vertical-align: middle;
+    }
+    table.grants tr:last-child td { border-bottom: none; }
+    table.grants td.f { color: var(--backend); font-weight: 600; }
+    table.grants td.b { color: var(--muted); }
+
+    /* ── Comparison cards (panel 3) ── */
+    .compare { display: flex; gap: 10px; align-items: stretch; }
+    .card {
+      flex: 1; border-radius: 12px; padding: 9px 11px;
+      border: 1.5px solid var(--line); background: var(--panel-solid);
+    }
+    .card.bad  { border-color: var(--security); background: linear-gradient(180deg, var(--security-soft), transparent 85%); }
+    .card.good { border-color: var(--backend);  background: linear-gradient(180deg, var(--backend-soft),  transparent 85%); }
+    .card h4 { margin: 0 0 2px; font-size: 11.5px; font-weight: 750; }
+    .card .kicker { font-size: 8.5px; font-weight: 700; letter-spacing: .1em; text-transform: uppercase; }
+    .card.bad  .kicker { color: var(--security); }
+    .card.good .kicker { color: var(--backend); }
+    .card ul { margin: 6px 0 0; padding-left: 15px; }
+    .card li { font-size: 9.5px; color: var(--muted); line-height: 1.5; }
+
+    /* ── Benefits strip ── */
+    .benefits {
+      display: flex; gap: 10px; margin-top: 14px; padding-top: 12px;
+      border-top: 1px dashed var(--line);
+    }
+    .benefit { flex: 1; }
+    .benefit h5 {
+      margin: 0 0 3px; font-size: 11px; font-weight: 750; color: var(--accent);
+    }
+    .benefit p { margin: 0; font-size: 9.5px; color: var(--muted); line-height: 1.45; }
+
+    .legend {
+      display: flex; gap: 14px; flex-wrap: wrap; align-items: center;
+      margin-top: 12px; font-size: 9.5px; color: var(--muted);
+    }
+    .legend .swatch {
+      display: inline-flex; align-items: center; gap: 5px;
+    }
+    .legend .key { width: 20px; height: 0; border-top: 1.5px solid var(--muted); }
+    .legend .key.a2a { border-top-color: var(--a2a); border-top-width: 2px; }
+    .legend .key.dash { border-top-style: dashed; }
+
+    footer { text-align: center; color: var(--muted); font-size: 10px; padding: 12px 0 16px; }
+
+    @media (max-width: 900px) {
+      .row, .compare, .benefits { flex-wrap: wrap; }
+      .node, .card, .benefit { flex: 1 1 100%; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="title">
+      <h1>CaseRelay — Multi-Agent System Architecture</h1>
+      <p>8 ADK agents on Gemini <span class="mono">gemini-3.5-flash</span> · A2A JSON-RPC between deployed engines · synthetic case <span class="mono">CR-1042</span> · Maya</p>
+    </div>
+    <button class="toggle" id="themeBtn" aria-label="Toggle theme">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M21 12.8A9 9 0 1 1 11.2 3 7 7 0 0 0 21 12.8Z"/></svg>
+      <span>Dark</span>
+    </button>
+  </header>
+
+  <main>
+    <div class="board">
+
+      <!-- ══════════════════════════════════════════════════════════════
+           PANEL 1 — A2A AGENT MESH
+           ══════════════════════════════════════════════════════════════ -->
+      <section class="panel">
+        <div class="panel-head">
+          <span class="n">1</span>
+          <h2>Agent mesh &amp; delegation</h2>
+          <p>Control plane drives two separate ADK runs; the orchestrator reaches every specialist through one A2A hop</p>
+        </div>
+        <div class="canvas">
+          <svg viewBox="0 0 1400 660" role="img"
+               aria-label="CaseRelay agent mesh: portal and control plane on the left, intake and continuity orchestrator in the centre, six specialist agents reached over A2A on the right, each talking to a simulated partner system.">
+            <defs>
+              <marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+                <path class="ah" d="M0,0 L10,5 L0,10 z"/>
+              </marker>
+              <marker id="ahA2a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+                <path class="ah-a" d="M0,0 L10,5 L0,10 z"/>
+              </marker>
+              <marker id="ahGood" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+                <path class="ah-g" d="M0,0 L10,5 L0,10 z"/>
+              </marker>
+              <marker id="ahDeny1" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+                <path class="ah-d" d="M0,0 L10,5 L0,10 z"/>
+              </marker>
+              <!-- Pointy-left/right hexagons, centred on the origin -->
+              <polygon id="hexSpec" points="-95,0 -70,-36 70,-36 95,0 70,36 -70,36"/>
+              <polygon id="hexCore" points="-90,0 -64,-42 64,-42 90,0 64,42 -64,42"/>
+            </defs>
+
+            <!-- ─── Column lane labels ─── -->
+            <text class="t-lane" x="82"   y="128" text-anchor="middle">Entry</text>
+            <text class="t-lane" x="288"  y="128" text-anchor="middle">Intake</text>
+            <text class="t-lane" x="518"  y="128" text-anchor="middle">Orchestration</text>
+            <text class="t-lane" x="726"  y="128" text-anchor="middle">Transport</text>
+            <text class="t-lane" x="951"  y="12"  text-anchor="middle">Domain agents · distinct identity per agent</text>
+            <text class="t-lane" x="1238" y="12"  text-anchor="middle">Simulated partner systems</text>
+
+            <!-- ─── Entry column ─── -->
+            <rect class="box-ext" x="16" y="160" width="132" height="62" rx="10"/>
+            <text class="t-name" x="82" y="184" text-anchor="middle">Next.js Portal</text>
+            <text class="t-sub"  x="82" y="198" text-anchor="middle">volunteer + supervisor</text>
+            <text class="t-sub"  x="82" y="210" text-anchor="middle">AG-UI copilot</text>
+
+            <rect class="box" x="16" y="262" width="132" height="64" rx="10"/>
+            <text class="t-name" x="82" y="285" text-anchor="middle">Control plane</text>
+            <text class="t-sub"  x="82" y="299" text-anchor="middle">FastAPI on Cloud Run</text>
+            <text class="t-mono" x="82" y="313" text-anchor="middle">POST /v1/…/runs</text>
+
+            <path class="link" d="M82,222 L82,256" marker-end="url(#ah)"/>
+            <g class="badge"><circle cx="82" cy="239" r="11"/><text x="82" y="242.5" text-anchor="middle">1</text></g>
+
+            <!-- ─── Intake ─── -->
+            <use class="hex-core" href="#hexCore" x="288" y="294"/>
+            <text class="t-name" x="288" y="278" text-anchor="middle">Intake &amp; Authority</text>
+            <text class="t-mono" x="288" y="292" text-anchor="middle">intake_authority</text>
+            <text class="t-sub"  x="288" y="306" text-anchor="middle">5 commitments · 5 grants</text>
+            <text class="t-sub"  x="288" y="318" text-anchor="middle">cannot activate the case</text>
+
+            <path class="link" d="M148,294 L194,294" marker-end="url(#ah)"/>
+            <g class="badge"><circle cx="171" cy="294" r="11"/><text x="171" y="297.5" text-anchor="middle">2</text></g>
+
+            <!-- ─── Human authority gate ─── -->
+            <rect class="box-hitl" x="418" y="24" width="200" height="62" rx="10"/>
+            <text class="t-name" x="518" y="48" text-anchor="middle">Advocate Supervisor</text>
+            <text class="t-sub"  x="518" y="62" text-anchor="middle">only human who can activate</text>
+            <text class="t-mono" x="518" y="76" text-anchor="middle">proposed → granted</text>
+
+            <path class="link" d="M518,86 L518,246" marker-end="url(#ah)"/>
+            <g class="badge"><circle cx="518" cy="166" r="11"/><text x="518" y="169.5" text-anchor="middle">3</text></g>
+            <text class="t-hop" x="530" y="152">case draft → active · monitoring</text>
+
+            <!-- ─── Orchestrator ─── -->
+            <use class="hex-core" href="#hexCore" x="518" y="294"/>
+            <text class="t-name" x="518" y="276" text-anchor="middle">Continuity Orchestrator</text>
+            <text class="t-mono" x="518" y="290" text-anchor="middle">continuity_orchestrator</text>
+            <text class="t-sub"  x="518" y="304" text-anchor="middle">delegates · checkpoints · escalates</text>
+            <text class="t-sub"  x="518" y="316" text-anchor="middle">never sees raw partner records</text>
+
+            <path class="link-soft" d="M378,294 L424,294" marker-end="url(#ah)"/>
+            <g class="badge"><circle cx="401" cy="294" r="11"/><text x="401" y="297.5" text-anchor="middle">4</text></g>
+            <text class="t-hop" x="401" y="332" text-anchor="middle">separate ADK run</text>
+
+            <!-- ─── A2A transport ─── -->
+            <!-- Stack grows up and to the left so the right edge stays clean for the fan-out -->
+            <rect class="box-a2a" x="660" y="248" width="132" height="96" rx="10" opacity=".4" transform="translate(-14,-18)"/>
+            <rect class="box-a2a" x="660" y="248" width="132" height="96" rx="10" opacity=".7" transform="translate(-7,-9)"/>
+            <rect class="box-a2a" x="660" y="248" width="132" height="96" rx="10"/>
+            <text class="t-name t-a2a" x="726" y="272" text-anchor="middle">A2A</text>
+            <text class="t-sub"  x="726" y="288" text-anchor="middle">JSON-RPC 2.0 / HTTP</text>
+            <text class="t-mono t-a2a" x="726" y="302" text-anchor="middle">message/send</text>
+            <text class="t-sub"  x="726" y="318" text-anchor="middle">RemoteA2aAgent</text>
+            <text class="t-sub"  x="726" y="330" text-anchor="middle">wrapped as AgentTool</text>
+
+            <path class="link-a2a" d="M608,294 L640,294" marker-end="url(#ahA2a)"/>
+            <g class="badge"><circle cx="624" cy="294" r="11"/><text x="624" y="297.5" text-anchor="middle">5</text></g>
+
+            <!-- Dual-mode note, parked in the empty lower-left so it clears the fan-out -->
+            <rect class="box-note" x="16" y="372" width="290" height="104" rx="9"/>
+            <text class="t-lane" x="30" y="392">Two wiring modes, one codebase</text>
+            <text class="t-sub"  x="30" y="410">deployed · CASERELAY_URL_* set</text>
+            <text class="t-tiny" x="30" y="422">one reasoning engine per agent, A2A between them</text>
+            <text class="t-sub"  x="30" y="442">local · no URLs set</text>
+            <text class="t-tiny" x="30" y="454">the same agents run as in-process ADK sub-agents</text>
+            <text class="t-tiny" x="30" y="468">Calls carry a bearer token from ADC — no mTLS or DPoP yet.</text>
+
+            <!-- ─── Specialist fan-out (badge 6 sits at the fan origin) ─── -->
+            <path class="link-a2a" d="M792,294 C826,294 826,55  850,55"  marker-end="url(#ahA2a)"/>
+            <path class="link-a2a" d="M792,294 C826,294 826,150 850,150" marker-end="url(#ahA2a)"/>
+            <path class="link-a2a" d="M792,294 C820,294 822,245 850,245" marker-end="url(#ahA2a)"/>
+            <path class="link-a2a" d="M792,294 C820,294 822,340 850,340" marker-end="url(#ahA2a)"/>
+            <path class="link-a2a" d="M792,294 C826,294 826,435 850,435" marker-end="url(#ahA2a)"/>
+            <path class="link-a2a" d="M792,294 C826,294 826,530 850,530" marker-end="url(#ahA2a)"/>
+            <g class="badge"><circle cx="810" cy="294" r="11"/><text x="810" y="297.5" text-anchor="middle">6</text></g>
+
+            <!-- Row 1 · education -->
+            <use class="hex-spec" href="#hexSpec" x="951" y="55"/>
+            <text class="t-mono" x="951" y="43"  text-anchor="middle" style="font-size:10.5px;font-weight:700;fill:var(--ink)">education_liaison</text>
+            <text class="t-sub"  x="951" y="57"  text-anchor="middle">school enrollment status</text>
+            <text class="t-tiny" x="951" y="69"  text-anchor="middle">no health or legal data</text>
+            <rect class="box-sim" x="1092" y="27" width="270" height="56" rx="9"/>
+            <text class="t-name" x="1106" y="46" style="font-size:11px">Lincoln Unified School District</text>
+            <text class="t-mono" x="1106" y="59">lincoln_unified_sis</text>
+            <text class="t-tiny" x="1106" y="72">referral_id · enrollment flags · free-text notes</text>
+            <path class="link" d="M1046,55 L1086,55" marker-end="url(#ah)"/>
+            <g class="badge"><circle cx="1066" cy="55" r="11"/><text x="1066" y="58.5" text-anchor="middle">7</text></g>
+
+            <!-- Row 2 · health -->
+            <use class="hex-spec" href="#hexSpec" x="951" y="150"/>
+            <text class="t-mono" x="951" y="138" text-anchor="middle" style="font-size:10.5px;font-weight:700;fill:var(--ink)">health_coordination</text>
+            <text class="t-sub"  x="951" y="152" text-anchor="middle">appointment status</text>
+            <text class="t-tiny" x="951" y="164" text-anchor="middle">no diagnosis, meds or notes</text>
+            <rect class="box-sim" x="1092" y="122" width="270" height="56" rx="9"/>
+            <text class="t-name" x="1106" y="141" style="font-size:11px">Harbor Pediatric Clinic</text>
+            <text class="t-mono" x="1106" y="154">harbor_pediatric</text>
+            <text class="t-tiny" x="1106" y="167">appointment booleans and dates only</text>
+            <path class="link" d="M1046,150 L1086,150" marker-end="url(#ah)"/>
+
+            <!-- Row 3 · legal -->
+            <use class="hex-spec" href="#hexSpec" x="951" y="245"/>
+            <text class="t-mono" x="951" y="233" text-anchor="middle" style="font-size:10.5px;font-weight:700;fill:var(--ink)">legal_aid</text>
+            <text class="t-sub"  x="951" y="247" text-anchor="middle">referral acceptance status</text>
+            <text class="t-tiny" x="951" y="259" text-anchor="middle">no advice, no strategy</text>
+            <rect class="box-sim" x="1092" y="217" width="270" height="56" rx="9"/>
+            <text class="t-name" x="1106" y="236" style="font-size:11px">County Legal Aid</text>
+            <text class="t-mono" x="1106" y="249">county_legal_aid</text>
+            <text class="t-tiny" x="1106" y="262">acceptance · counsel assigned · deadline</text>
+            <path class="link" d="M1046,245 L1086,245" marker-end="url(#ah)"/>
+
+            <!-- Row 4 · shelter -->
+            <use class="hex-spec" href="#hexSpec" x="951" y="340"/>
+            <text class="t-mono" x="951" y="328" text-anchor="middle" style="font-size:10.5px;font-weight:700;fill:var(--ink)">shelter_status</text>
+            <text class="t-sub"  x="951" y="342" text-anchor="middle">bed availability</text>
+            <text class="t-tiny" x="951" y="354" text-anchor="middle">never ranks a placement</text>
+            <rect class="box-sim" x="1092" y="312" width="270" height="56" rx="9"/>
+            <text class="t-name" x="1106" y="331" style="font-size:11px">Safe Harbor Youth Shelter</text>
+            <text class="t-mono" x="1106" y="344">safe_harbor</text>
+            <text class="t-tiny" x="1106" y="357">bed_confirmed · scheduling notes</text>
+            <path class="link" d="M1046,340 L1086,340" marker-end="url(#ah)"/>
+
+            <!-- Row 5 · family -->
+            <use class="hex-spec" href="#hexSpec" x="951" y="435"/>
+            <text class="t-mono" x="951" y="423" text-anchor="middle" style="font-size:10.5px;font-weight:700;fill:var(--ink)">family_services</text>
+            <text class="t-sub"  x="951" y="437" text-anchor="middle">assessment schedule</text>
+            <text class="t-tiny" x="951" y="449" text-anchor="middle">no findings or risk scores</text>
+            <rect class="box-sim" x="1092" y="407" width="270" height="56" rx="9"/>
+            <text class="t-name" x="1106" y="426" style="font-size:11px">County Family Services</text>
+            <text class="t-mono" x="1106" y="439">county_family_services</text>
+            <text class="t-tiny" x="1106" y="452">assessment scheduling flags only</text>
+            <path class="link" d="M1046,435 L1086,435" marker-end="url(#ah)"/>
+
+            <!-- Row 6 · verifier -->
+            <use class="hex-verif" href="#hexSpec" x="951" y="530"/>
+            <text class="t-mono" x="951" y="518" text-anchor="middle" style="font-size:10.5px;font-weight:700;fill:var(--ink)">safeguarding_verifier</text>
+            <text class="t-sub"  x="951" y="532" text-anchor="middle">screens partner callbacks</text>
+            <text class="t-tiny" x="951" y="544" text-anchor="middle">allow · quarantine only</text>
+            <rect class="box-hitl" x="1092" y="502" width="270" height="56" rx="9"/>
+            <text class="t-name" x="1106" y="521" style="font-size:11px">Human escalation</text>
+            <text class="t-mono" x="1106" y="534">human_approvals · apr-xxxxxxxx</text>
+            <text class="t-tiny" x="1106" y="547">pending → approved | rejected</text>
+            <path class="link" d="M1046,530 L1086,530" marker-end="url(#ah)"/>
+
+            <!-- A poisoned school callback is routed to the verifier, not to the orchestrator.
+                 Routed through the right gutter and under row 6 so it crosses nothing. -->
+            <path class="link-deny" d="M1362,55 L1382,55 L1382,600 L951,600 L951,572" marker-end="url(#ahDeny1)"/>
+            <text class="t-tiny t-danger" x="1160" y="592" text-anchor="middle">a poisoned school reply goes to the verifier, never to the orchestrator</text>
+
+            <!-- ─── Shared case workspace ─── -->
+            <rect class="box-data" x="330" y="500" width="310" height="92" rx="11"/>
+            <text class="t-name" x="348" y="524">Case workspace</text>
+            <text class="t-sub"  x="348" y="540">Firestore aggregate · single source of truth</text>
+            <text class="t-mono" x="348" y="556">commitments · authority_grants</text>
+            <text class="t-mono" x="348" y="570">audit_events · human_approvals</text>
+            <text class="t-tiny" x="348" y="584">specialists write status; nobody writes another&apos;s</text>
+
+            <path class="link" d="M856,530 C770,566 706,548 646,548" marker-end="url(#ah)"/>
+            <g class="badge"><circle cx="752" cy="552" r="11"/><text x="752" y="555.5" text-anchor="middle">8</text></g>
+            <text class="t-hop" x="752" y="578" text-anchor="middle">commitment status</text>
+
+            <path class="link-ok" d="M500,500 L500,340" marker-end="url(#ahGood)"/>
+            <g class="badge"><circle cx="500" cy="420" r="11"/><text x="500" y="423.5" text-anchor="middle">9</text></g>
+            <text class="t-hop t-ok" x="514" y="406">get_commitment_states</text>
+            <text class="t-tiny" x="514" y="440">reads state, not prose</text>
+
+            <!-- ─── Footnote ─── -->
+            <text class="t-tiny" x="16" y="632">Specialists carry disallow_transfer_to_peers — no agent can hand a case sideways. Every partner above is simulated in backend/partners/sim.py; no request leaves the project.</text>
+            <text class="t-tiny" x="16" y="648">Step 4 is dashed because intake and the orchestrator are two separate ADK invocations driven by the control plane, not one agent calling the other.</text>
+          </svg>
+        </div>
+      </section>
+
+      <div class="vconn">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M6 13l6 6 6-6"/></svg>
+        <span class="tag">every specialist's first tool call enters <span class="mono">authorized_context(case_id, purpose)</span></span>
+      </div>
+
+      <!-- ══════════════════════════════════════════════════════════════
+           PANEL 2 — GOVERNANCE
+           ══════════════════════════════════════════════════════════════ -->
+      <section class="panel">
+        <div class="panel-head">
+          <span class="n">2</span>
+          <h2>The governance choke point</h2>
+          <p>One in-process function decides what each agent may see — seven ordered gates, then a deterministic allowlist strip</p>
+        </div>
+        <div class="canvas">
+          <svg viewBox="0 0 1400 400" role="img"
+               aria-label="Seven ordered governance gates inside authorized_context, followed by the fat payload being projected down to three fields for the education agent, and the armor screening block.">
+            <defs>
+              <marker id="ah2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+                <path class="ah" d="M0,0 L10,5 L0,10 z"/>
+              </marker>
+              <marker id="ahDeny" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+                <path class="ah-d" d="M0,0 L10,5 L0,10 z"/>
+              </marker>
+              <!-- Chevron gate, 184 x 74, origin at top-left -->
+              <polygon id="gate" points="0,0 170,0 184,37 170,74 0,74 14,37"/>
+            </defs>
+
+            <text class="t-lane" x="16" y="14">gateway.authorized_context() — in-process Python, not a network hop</text>
+
+            <!-- Seven gates -->
+            <g>
+              <use class="box" href="#gate" x="16" y="26"/>
+              <g class="badge gate"><circle cx="30" cy="26" r="10"/><text x="30" y="29.5" text-anchor="middle">1</text></g>
+              <text class="t-name" x="30" y="56" style="font-size:11px">resolve principal</text>
+              <text class="t-tiny" x="30" y="70">verified ID token, audience</text>
+              <text class="t-mono" x="30" y="82">caserelay-gateway</text>
+              <text class="t-tiny" x="30" y="94">or RunContext when in-process</text>
+            </g>
+            <g>
+              <use class="box" href="#gate" x="212" y="26"/>
+              <g class="badge gate"><circle cx="226" cy="26" r="10"/><text x="226" y="29.5" text-anchor="middle">2</text></g>
+              <text class="t-name" x="226" y="56" style="font-size:11px">verify(caller)</text>
+              <text class="t-tiny" x="226" y="70">identity must exist in the</text>
+              <text class="t-tiny" x="226" y="82">agent registry</text>
+              <text class="t-tiny" x="226" y="94">unknown caller stops here</text>
+            </g>
+            <g>
+              <use class="box" href="#gate" x="408" y="26"/>
+              <g class="badge gate"><circle cx="422" cy="26" r="10"/><text x="422" y="29.5" text-anchor="middle">3</text></g>
+              <text class="t-name" x="422" y="56" style="font-size:11px">grant_for(case, purpose)</text>
+              <text class="t-tiny" x="422" y="70">status must be</text>
+              <text class="t-mono" x="422" y="82">granted</text>
+              <text class="t-tiny" x="422" y="94">and not revoked</text>
+            </g>
+            <g>
+              <use class="box" href="#gate" x="604" y="26"/>
+              <g class="badge gate"><circle cx="618" cy="26" r="10"/><text x="618" y="29.5" text-anchor="middle">4</text></g>
+              <text class="t-name" x="618" y="56" style="font-size:11px">assemble fat payload</text>
+              <text class="t-tiny" x="618" y="70">14 case facts, four of them</text>
+              <text class="t-mono" x="618" y="82">"WITHHOLD"</text>
+              <text class="t-tiny" x="618" y="94">for every identity, every time</text>
+            </g>
+            <g>
+              <use class="box" href="#gate" x="800" y="26"/>
+              <g class="badge gate"><circle cx="814" cy="26" r="10"/><text x="814" y="29.5" text-anchor="middle">5</text></g>
+              <text class="t-name" x="814" y="56" style="font-size:11px">project(fat, allowed)</text>
+              <text class="t-tiny" x="814" y="70">fifteen lines, no model</text>
+              <text class="t-tiny" x="814" y="82">splits disclosed from withheld</text>
+              <text class="t-tiny" x="814" y="94">the strip happens in code</text>
+            </g>
+            <g>
+              <use class="box" href="#gate" x="996" y="26"/>
+              <g class="badge gate"><circle cx="1010" cy="26" r="10"/><text x="1010" y="29.5" text-anchor="middle">6</text></g>
+              <text class="t-name" x="1010" y="56" style="font-size:11px">assert_scope(field)</text>
+              <text class="t-tiny" x="1010" y="70">re-checks each disclosed field</text>
+              <text class="t-tiny" x="1010" y="82">against the caller&apos;s</text>
+              <text class="t-mono" x="1010" y="94">denied_data_scopes</text>
+            </g>
+            <g>
+              <use class="box" href="#gate" x="1192" y="26"/>
+              <g class="badge gate"><circle cx="1206" cy="26" r="10"/><text x="1206" y="29.5" text-anchor="middle">7</text></g>
+              <text class="t-name" x="1206" y="56" style="font-size:11px">audit + memory</text>
+              <text class="t-tiny" x="1206" y="70">a disclosure event on every</text>
+              <text class="t-tiny" x="1206" y="82">call, not only on refusals</text>
+              <text class="t-tiny" x="1206" y="94">plus a purpose-keyed note</text>
+            </g>
+
+            <!-- Deny paths -->
+            <path class="link-deny" d="M500,100 L500,128" marker-end="url(#ahDeny)"/>
+            <text class="t-tiny t-danger" x="512" y="124">no grant → IdentityDenied + denial audit</text>
+            <path class="link-deny" d="M1088,100 L1088,128" marker-end="url(#ahDeny)"/>
+            <text class="t-tiny t-danger" x="1076" y="124" text-anchor="end">out-of-scope field → IdentityDenied</text>
+
+            <!-- Fat payload -->
+            <rect class="box" x="16" y="158" width="430" height="222" rx="11"/>
+            <text class="t-lane" x="32" y="180">fat payload — never leaves the gateway</text>
+            <text class="t-mono" x="32" y="202">child_name</text>
+            <text class="t-mono" x="32" y="218">dob</text>
+            <text class="t-mono" x="32" y="234">referral_id</text>
+            <text class="t-mono" x="32" y="250">case_reference</text>
+            <text class="t-mono" x="32" y="266">deadline</text>
+            <text class="t-mono" x="32" y="282">appointment_status</text>
+            <text class="t-mono" x="32" y="298">provider_name</text>
+            <text class="t-mono" x="240" y="202">appointment_date</text>
+            <text class="t-mono" x="240" y="218">scheduling</text>
+            <text class="t-mono" x="240" y="234">assessment_scheduling</text>
+            <text class="t-mono t-danger" x="240" y="256">diagnosis</text>
+            <text class="t-mono t-danger" x="240" y="272">legal_strategy</text>
+            <text class="t-mono t-danger" x="240" y="288">family_notes</text>
+            <text class="t-mono t-danger" x="240" y="304">clinical_notes</text>
+            <text class="t-tiny t-danger" x="240" y="322">these four hold the literal string</text>
+            <text class="t-mono t-danger" x="240" y="334">"WITHHOLD"</text>
+            <text class="t-tiny" x="32" y="356">14 fields assembled fresh per call from the referral packet.</text>
+            <text class="t-tiny" x="32" y="370">No agent, prompt or tool can reach this dict.</text>
+
+            <path class="link" d="M452,266 L516,266" marker-end="url(#ah2)"/>
+            <text class="t-hop" x="484" y="252" text-anchor="middle">project()</text>
+            <text class="t-tiny" x="484" y="288" text-anchor="middle">allowlist,</text>
+            <text class="t-tiny" x="484" y="300" text-anchor="middle">not a prompt</text>
+
+            <!-- Projected payload -->
+            <rect class="box-data" x="522" y="158" width="404" height="222" rx="11"/>
+            <text class="t-lane" x="538" y="180">what education_liaison actually receives</text>
+            <text class="t-mono t-ok" x="538" y="206" style="font-size:11px">child_name: "Maya"</text>
+            <text class="t-mono t-ok" x="538" y="226" style="font-size:11px">dob: "2017-04-12"</text>
+            <text class="t-mono t-ok" x="538" y="246" style="font-size:11px">referral_id: "edu-1042"</text>
+            <text class="t-sub"  x="538" y="276">3 fields disclosed · 11 withheld</text>
+            <text class="t-tiny" x="538" y="294">legal basis recorded on the envelope:</text>
+            <text class="t-mono" x="538" y="308">ferpa_court_order</text>
+            <text class="t-tiny" x="538" y="332">There is no diagnosis key in this dict, so there is</text>
+            <text class="t-tiny" x="538" y="346">nothing for the model to leak, hallucinate around,</text>
+            <text class="t-tiny" x="538" y="360">or be talked into revealing by a poisoned payload.</text>
+
+            <!-- Armor -->
+            <rect class="box" x="946" y="158" width="438" height="222" rx="11" style="stroke:var(--security)"/>
+            <text class="t-lane" x="962" y="180">armor.screen(payload) — the return path</text>
+            <text class="t-sub"  x="962" y="202">Deterministic regex rules, always on:</text>
+            <text class="t-mono" x="962" y="220">block_cross_scope_request</text>
+            <text class="t-mono" x="962" y="236">block_prompt_injection</text>
+            <text class="t-mono" x="962" y="252">block_sensitive_data</text>
+            <text class="t-sub"  x="962" y="278">Verdict: <tspan class="t-ok" style="font-weight:700">allow</tspan> or <tspan class="t-danger" style="font-weight:700">quarantine</tspan></text>
+            <text class="t-tiny" x="962" y="296">Same payload always yields the same verdict, so a</text>
+            <text class="t-tiny" x="962" y="310">refusal can be replayed and audited after the fact.</text>
+            <text class="t-tiny" x="962" y="334">Google Model Armor is a second layer, reached only</text>
+            <text class="t-tiny" x="962" y="348">when MODEL_ARMOR_TEMPLATE is configured.</text>
+            <text class="t-tiny t-danger" x="962" y="370">A quarantine never changes a status — it opens a human gate.</text>
+          </svg>
+
+          <table class="grants">
+            <thead>
+              <tr>
+                <th>Agent identity</th>
+                <th>Purpose</th>
+                <th>allowed_fields — the entire view of the child</th>
+                <th>Legal basis</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td class="mono">caserelay-education</td>
+                <td class="mono">verify_school_enrollment</td>
+                <td class="f mono">child_name · dob · referral_id</td>
+                <td class="b mono">ferpa_court_order</td>
+              </tr>
+              <tr>
+                <td class="mono">caserelay-health</td>
+                <td class="mono">check_appointment_status</td>
+                <td class="f mono">appointment_status · provider_name · appointment_date</td>
+                <td class="b mono">hipaa_signed_authorization</td>
+              </tr>
+              <tr>
+                <td class="mono">caserelay-legal</td>
+                <td class="mono">check_referral_status</td>
+                <td class="f mono">case_reference · deadline</td>
+                <td class="b mono">state_juvenile_court_order</td>
+              </tr>
+              <tr>
+                <td class="mono">caserelay-shelter</td>
+                <td class="mono">check_availability</td>
+                <td class="f mono">referral_id · scheduling</td>
+                <td class="b mono">state_juvenile_court_order</td>
+              </tr>
+              <tr>
+                <td class="mono">caserelay-family</td>
+                <td class="mono">check_assessment_schedule</td>
+                <td class="f mono">assessment_scheduling</td>
+                <td class="b mono">state_juvenile_court_order</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <!-- ══════════════════════════════════════════════════════════════
+           PANEL 3 — DORMANCY
+           ══════════════════════════════════════════════════════════════ -->
+      <section class="panel">
+        <div class="panel-head">
+          <span class="n">3</span>
+          <h2>Surviving the gap between sessions</h2>
+          <p>A child's deadline is 17 days out; no chat session lives that long, so the case has to sleep in storage</p>
+        </div>
+        <div class="canvas">
+          <div class="compare">
+            <div class="card bad">
+              <span class="kicker">Session-scoped agent</span>
+              <h4>Nothing re-enters the case</h4>
+              <ul>
+                <li>Context dies with the run — day 17 arrives with no agent watching.</li>
+                <li>Replaying the whole history to catch up burns tokens and invites drift.</li>
+                <li>A stalled partner is indistinguishable from a partner nobody asked.</li>
+                <li>The volunteer becomes the only memory the system has.</li>
+              </ul>
+            </div>
+            <div class="card good">
+              <span class="kicker">Durable checkpoint</span>
+              <h4>The case waits in Firestore, not in a session</h4>
+              <ul>
+                <li>State is an explicit document, so a restart loses nothing.</li>
+                <li>A due date, not a conversation, decides when work resumes.</li>
+                <li>The resume writes audit events under its own scheduler identity.</li>
+                <li>Human approval can sit pending indefinitely without blocking anything.</li>
+              </ul>
+            </div>
+          </div>
+
+          <svg viewBox="0 0 1400 254" role="img" style="margin-top:10px"
+               aria-label="Timeline from day zero to day seventeen: checkpoint written, wake event published, sweep finds the due workflow, resume wake, then re-check, quarantine and human approval.">
+            <defs>
+              <marker id="ah3" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+                <path class="ah" d="M0,0 L10,5 L0,10 z"/>
+              </marker>
+            </defs>
+
+            <text class="t-lane" x="16" y="14">workflow_checkpoints / wf-CR-1042</text>
+
+            <!-- Axis -->
+            <path class="axis" d="M40,120 L1360,120"/>
+            <path class="link" d="M1330,120 L1364,120" marker-end="url(#ah3)"/>
+
+            <!-- Day markers sit tight under the axis so they clear the milestone cards -->
+            <text class="t-lane" x="140" y="140" text-anchor="middle">Day 0</text>
+            <text class="t-lane" x="1000" y="140" text-anchor="middle">Day 17 · court deadline</text>
+
+            <!-- Milestone 1 -->
+            <circle cx="140" cy="120" r="7" style="fill:var(--backend);stroke:var(--panel-solid);stroke-width:2.5"/>
+            <path class="link-soft" d="M140,113 L140,92"/>
+            <rect class="box" x="46" y="26" width="188" height="66" rx="9"/>
+            <text class="t-name" x="60" y="46" style="font-size:11px">write_checkpoint</text>
+            <text class="t-mono" x="60" y="60">state: waiting</text>
+            <text class="t-mono" x="60" y="73">current_step: sleeping</text>
+            <text class="t-mono" x="60" y="86">due_at: now + 17 days</text>
+
+            <!-- Milestone 2 -->
+            <circle cx="420" cy="120" r="7" style="fill:var(--bus);stroke:var(--panel-solid);stroke-width:2.5"/>
+            <path class="link-soft" d="M420,127 L420,156"/>
+            <rect class="box" x="326" y="156" width="188" height="68" rx="9" style="stroke:var(--bus)"/>
+            <text class="t-name" x="340" y="176" style="font-size:11px">publish wake event</text>
+            <text class="t-mono" x="340" y="190">caserelay-events</text>
+            <text class="t-tiny" x="340" y="203">event_type: workflow_wake</text>
+            <text class="t-tiny" x="340" y="215">skipped when state is in memory</text>
+
+            <!-- Milestone 3 -->
+            <circle cx="700" cy="120" r="7" style="fill:var(--muted);stroke:var(--panel-solid);stroke-width:2.5"/>
+            <path class="link-soft" d="M700,113 L700,92"/>
+            <rect class="box" x="606" y="26" width="188" height="66" rx="9"/>
+            <text class="t-name" x="620" y="46" style="font-size:11px">nothing happens</text>
+            <text class="t-tiny" x="620" y="60">No session, no agent, no polling</text>
+            <text class="t-tiny" x="620" y="73">loop. The case is a document with</text>
+            <text class="t-tiny" x="620" y="86">a date on it — that is the point.</text>
+
+            <!-- Milestone 4 -->
+            <circle cx="1000" cy="120" r="7" style="fill:var(--cloud);stroke:var(--panel-solid);stroke-width:2.5"/>
+            <path class="link-soft" d="M1000,113 L1000,92"/>
+            <rect class="box" x="906" y="26" width="188" height="66" rx="9" style="stroke:var(--cloud)"/>
+            <text class="t-name" x="920" y="46" style="font-size:11px">sweep finds it due</text>
+            <text class="t-mono" x="920" y="60">POST /v1/workflows/sweep</text>
+            <text class="t-tiny" x="920" y="73">queries state == waiting</text>
+            <text class="t-tiny" x="920" y="86">and due_at &lt;= now</text>
+
+            <!-- Milestone 5 -->
+            <circle cx="1180" cy="120" r="7" style="fill:var(--backend);stroke:var(--panel-solid);stroke-width:2.5"/>
+            <path class="link-soft" d="M1180,127 L1180,156"/>
+            <rect class="box" x="1086" y="156" width="188" height="68" rx="9" style="stroke:var(--backend)"/>
+            <text class="t-name" x="1100" y="176" style="font-size:11px">resume_wake</text>
+            <text class="t-mono" x="1100" y="190">state: running · awake</text>
+            <text class="t-tiny" x="1100" y="203">audited as caserelay-scheduler,</text>
+            <text class="t-tiny" x="1100" y="215">not as the volunteer</text>
+
+            <!-- Post-wake sequence -->
+            <circle cx="1310" cy="120" r="7" style="fill:var(--database);stroke:var(--panel-solid);stroke-width:2.5"/>
+            <path class="link-soft" d="M1310,113 L1310,92"/>
+            <rect class="box" x="1216" y="26" width="168" height="66" rx="9" style="stroke:var(--database)"/>
+            <text class="t-name" x="1230" y="46" style="font-size:11px">re-check</text>
+            <text class="t-tiny" x="1230" y="60">education re-queries the SIS,</text>
+            <text class="t-tiny" x="1230" y="73">verifier quarantines the poisoned</text>
+            <text class="t-tiny" x="1230" y="86">reply, supervisor approves.</text>
+          </svg>
+
+          <div class="chips" style="margin-top:10px">
+            <span class="chip ok">implemented · checkpoint write + sweep + resume</span>
+            <span class="chip ok">implemented · Pub/Sub publish of workflow_wake</span>
+            <span class="chip planned">config only · Cloud Tasks queue caserelay-wakes</span>
+            <span class="chip planned">config only · Cloud Scheduler job caserelay-sweep</span>
+            <span class="chip planned">not in repo · Pub/Sub subscriber for workflow_wake</span>
+          </div>
+        </div>
+      </section>
+
+      <!-- ══════════════════════════════════════════════════════════════
+           PANEL 4 — FULL STACK
+           ══════════════════════════════════════════════════════════════ -->
+      <section class="panel">
+        <div class="panel-head">
+          <span class="n">4</span>
+          <h2>The whole stack in one board</h2>
+          <p>Container level — what runs where, and which pieces are still configuration rather than code</p>
+        </div>
+        <div class="canvas">
+
+          <div class="lane-label"><span class="dot" style="background:var(--external)"></span> People &amp; entry</div>
+          <div class="row">
+            <div class="node">
+              <h3>CASA volunteer &amp; supervisor</h3>
+              <span>Elena watches Maya's timeline; the supervisor holds the only authority to activate a case or clear an escalation.</span>
+              <div class="chips"><span class="chip accent">human authority</span></div>
+            </div>
+            <div class="node">
+              <h3>Next.js portal</h3>
+              <span>Inbox, timeline, approval centre, registry and audit trace, with an AG-UI copilot backed by <span class="mono">caserelay_chat</span>.</span>
+              <div class="chips"><span class="chip">AG-UI · CopilotKit</span></div>
+            </div>
+            <div class="node">
+              <h3>FastAPI control plane</h3>
+              <span>Cloud Run service exposing the v1 case, approval, registry, run and workflow endpoints; drives every agent invocation.</span>
+              <div class="chips"><span class="chip ok">runs: queued → running → completed</span></div>
+            </div>
+          </div>
+
+          <div class="band ai">
+            <span class="cap">Agent fleet · Google ADK on Gemini · one identity per agent</span>
+            <div class="row">
+              <div class="node">
+                <h3>Intake &amp; Authority</h3>
+                <span>Turns a referral packet into five commitments and five narrow grant proposals. Cannot activate anything.</span>
+                <div class="chips"><span class="chip">task mode</span><span class="chip warn">approval_required</span></div>
+              </div>
+              <div class="node">
+                <h3>Continuity Orchestrator</h3>
+                <span>The only agent that delegates. Reads commitment state rather than trusting specialist prose.</span>
+                <div class="chips"><span class="chip">chat mode</span><span class="chip a2a">AgentTool per specialist</span></div>
+              </div>
+              <div class="node">
+                <h3>Five domain specialists</h3>
+                <span>Education, health, legal, shelter and family services — each with its own grant, scope and forbidden ground.</span>
+                <div class="chips"><span class="chip danger">disallow_transfer_to_peers</span></div>
+              </div>
+              <div class="node">
+                <h3>Safeguarding Verifier</h3>
+                <span>Screens partner callbacks and opens a human escalation on quarantine. Cannot move a commitment itself.</span>
+                <div class="chips"><span class="chip danger">allow · quarantine</span></div>
+              </div>
+              <div class="node">
+                <h3>Runtime</h3>
+                <span>Deployed as one Vertex AI reasoning engine per agent, discovered through published agent cards.</span>
+                <div class="chips"><span class="chip">gemini-3.5-flash</span><span class="chip a2a">A2A message/send</span><span class="chip">agent card 1.0.0</span></div>
+              </div>
+            </div>
+          </div>
+
+          <div class="band gov">
+            <span class="cap">Governance · in-process Python, imported by every agent</span>
+            <div class="row">
+              <div class="node">
+                <h3>Agent gateway</h3>
+                <span>The disclosure choke point. Resolves the caller, demands a matching grant, projects the payload, audits the result.</span>
+                <div class="chips"><span class="chip danger">no grant, no data</span></div>
+              </div>
+              <div class="node">
+                <h3>Policy projection</h3>
+                <span>Fifteen deterministic lines that split a payload into disclosed and withheld. No model involved.</span>
+                <div class="chips"><span class="chip ok">allowlist only</span></div>
+              </div>
+              <div class="node">
+                <h3>Identity registry</h3>
+                <span>Maps each agent to a service-account identity with declared scopes, and refuses fields outside them.</span>
+                <div class="chips"><span class="chip ok">OIDC service accounts</span><span class="chip planned">mTLS · DPoP</span></div>
+              </div>
+              <div class="node">
+                <h3>Model armor</h3>
+                <span>Regex rules screen every inspected partner payload for cross-scope asks, injection and sensitive content.</span>
+                <div class="chips"><span class="chip ok">deterministic rules</span><span class="chip planned">Model Armor API</span></div>
+              </div>
+              <div class="node">
+                <h3>Audit trail</h3>
+                <span>Create-only disclosure, denial and quarantine events carrying identity, purpose, legal basis and verdict.</span>
+                <div class="chips"><span class="chip ok">append-only</span></div>
+              </div>
+            </div>
+          </div>
+
+          <div class="band data">
+            <span class="cap">State &amp; data plane</span>
+            <div class="row">
+              <div class="node">
+                <h3>Firestore case aggregate</h3>
+                <span>The <span class="mono">cases</span> document with subcollections for commitments, authority grants, human approvals, audit events and partner updates.</span>
+                <div class="chips"><span class="chip">memory mode for local runs</span></div>
+              </div>
+              <div class="node">
+                <h3>Workflow checkpoints</h3>
+                <span>One document per case holding due date, state and current step — the thing that survives a 17-day gap.</span>
+                <div class="chips"><span class="chip warn">wf-CR-1042</span></div>
+              </div>
+              <div class="node">
+                <h3>Memory scopes</h3>
+                <span>Purpose-keyed notes written on every disclosure, so a later session recalls what was shared and why.</span>
+                <div class="chips"><span class="chip ok">Firestore-backed</span><span class="chip planned">Vertex Memory Bank</span></div>
+              </div>
+              <div class="node">
+                <h3>Idempotency keys</h3>
+                <span>Claim records exist to make a repeated partner update harmless, ready for the retry path to use.</span>
+                <div class="chips"><span class="chip planned">not yet called by agents</span></div>
+              </div>
+            </div>
+          </div>
+
+          <div class="band bus">
+            <span class="cap">Events &amp; observability</span>
+            <div class="row">
+              <div class="node">
+                <h3>Pub/Sub</h3>
+                <span>The control plane publishes <span class="mono">workflow_wake</span> to <span class="mono">caserelay-events</span> when a case goes to sleep.</span>
+                <div class="chips"><span class="chip ok">publisher</span><span class="chip planned">subscriber · dead-letter</span></div>
+              </div>
+              <div class="node">
+                <h3>Cloud Trace</h3>
+                <span>A <span class="mono">gateway.disclosure</span> span per access, tagged with case, commitment type and workflow, plus ADK traces from each engine.</span>
+                <div class="chips"><span class="chip">OpenTelemetry</span></div>
+              </div>
+              <div class="node">
+                <h3>One trace per case</h3>
+                <span>The same trace id follows intake, orchestration, gateway, specialist and verifier, so a disclosure can be explained after the fact.</span>
+                <div class="chips"><span class="chip accent">explainability</span></div>
+              </div>
+            </div>
+          </div>
+
+          <div class="band ext">
+            <span class="cap">Partner boundary · fully simulated</span>
+            <div class="row">
+              <div class="node">
+                <h3>Five partner simulators</h3>
+                <span>School district, clinic, legal aid, shelter and family services, each returning only its own status surface.</span>
+                <div class="chips"><span class="chip">no outbound network calls</span></div>
+              </div>
+              <div class="node">
+                <h3>Adversarial behaviours</h3>
+                <span>A referral can request a stalled, malformed, hallucinating, injecting, poisoned or cross-scope reply on demand.</span>
+                <div class="chips"><span class="chip danger">inject · poison · cross_scope</span><span class="chip warn">stalled · timeout</span></div>
+              </div>
+              <div class="node">
+                <h3>Why simulate</h3>
+                <span>The interesting failures are partner failures. Simulation makes them reproducible in a test rather than rare in production.</span>
+                <div class="chips"><span class="chip accent">reproducible</span></div>
+              </div>
+            </div>
+          </div>
+
+        </div>
+      </section>
+
+      <!-- ══════════════════════════════════════════════════════════════
+           WHY IT IS BUILT THIS WAY
+           ══════════════════════════════════════════════════════════════ -->
+      <div class="benefits">
+        <div class="benefit">
+          <h5>Least privilege in code, not in prompts</h5>
+          <p>The education agent receives three fields out of fourteen because a function removed the rest, not because an instruction asked it not to look.</p>
+        </div>
+        <div class="benefit">
+          <h5>Authority is always human</h5>
+          <p>Agents propose grants and open escalations; only a supervisor turns a proposal into a permission or clears a quarantine.</p>
+        </div>
+        <div class="benefit">
+          <h5>Deterministic where it must be</h5>
+          <p>Projection and screening are plain rules, so the same payload always produces the same verdict and any refusal can be replayed.</p>
+        </div>
+        <div class="benefit">
+          <h5>Built for elapsed time</h5>
+          <p>A case sleeps as a document with a due date, so a 17-day deadline survives restarts, redeploys and closed browser tabs.</p>
+        </div>
+      </div>
+
+      <div class="legend">
+        <span class="swatch"><span class="key a2a"></span> A2A JSON-RPC hop between deployed engines</span>
+        <span class="swatch"><span class="key"></span> in-process call or write</span>
+        <span class="swatch"><span class="key dash"></span> separate invocation or unwired path</span>
+        <span class="swatch"><span class="chip ok">solid chip</span> implemented in backend code</span>
+        <span class="swatch"><span class="chip planned">dashed chip</span> infrastructure or config only, no handler yet</span>
+      </div>
+
+    </div>
+  </main>
+
+  <footer>Self-contained HTML · toggle theme with T · container level · zero external dependencies · No child's next step should disappear between systems.</footer>
+
+  <script>
+    const btn = document.getElementById("themeBtn");
+    const root = document.documentElement;
+    const moon = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M21 12.8A9 9 0 1 1 11.2 3 7 7 0 0 0 21 12.8Z"/></svg><span>Dark</span>';
+    const sun  = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg><span>Light</span>';
+    function apply(theme) {
+      root.setAttribute("data-theme", theme);
+      btn.innerHTML = theme === "dark" ? sun : moon;
+    }
+    const urlTheme = new URLSearchParams(location.search).get("theme");
+    const saved    = localStorage.getItem("diagram-theme");
+    const osDark   = window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches;
+    apply(urlTheme || saved || (osDark ? "dark" : "light"));
+    function toggle() {
+      const next = root.getAttribute("data-theme") === "dark" ? "light" : "dark";
+      apply(next); localStorage.setItem("diagram-theme", next);
+    }
+    btn.addEventListener("click", toggle);
+    document.addEventListener("keydown", (e) => { if (e.key === "t" || e.key === "T") toggle(); });
+  </script>
+</body>
+</html>
