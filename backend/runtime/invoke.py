@@ -4,7 +4,7 @@ from google.adk.runners import Runner
 from google.adk.sessions import InMemorySessionService
 from google.genai import types
 
-from backend.memory.platform import commit_session_events, enabled as memory_bank_enabled
+from backend.memory.platform import APP_NAME as _MB_APP, commit_session_events, enabled as memory_bank_enabled
 from backend.runtime.trace import tracer
 
 
@@ -24,6 +24,16 @@ def _caller_id() -> str:
     except Exception:  # noqa: BLE001
         pass
     return "caserelay-system"
+
+
+def _case_id_from_context() -> str | None:
+    """Extract case_id from RunContext if bound (set by _run_background)."""
+    try:
+        from backend.runtime.context import current as _ctx
+        ctx = _ctx()
+        return ctx.case_id or None
+    except Exception:  # noqa: BLE001
+        return None
 
 
 async def _run(agent, message: str, app_name: str, user_id: str) -> str:
@@ -60,9 +70,15 @@ async def _run(agent, message: str, app_name: str, user_id: str) -> str:
                 chunks.append(part.text)
 
     if memory_bank_enabled():
-        completed = await sessions.get_session(
-            app_name=app_name, user_id=user_id, session_id=session.id
-        )
-        await commit_session_events(completed)
+        case_id = _case_id_from_context()
+        if case_id:
+            completed = await sessions.get_session(
+                app_name=app_name, user_id=user_id, session_id=session.id
+            )
+            # Remap scope for Memory Bank: all memories keyed by {caserelay, case_id}
+            # regardless of which agent app (intake, orchestrator, etc.) ran the session.
+            completed.app_name = _MB_APP
+            completed.user_id = case_id
+            await commit_session_events(completed)
 
     return "\n".join(chunks).strip()
