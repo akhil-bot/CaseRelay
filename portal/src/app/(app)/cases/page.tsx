@@ -16,6 +16,7 @@ import {
   cx,
 } from "@/components/ui/primitives";
 import { control, layout, row, surface, type as type_ } from "@/design/tokens";
+import { listCases } from "@/lib/api";
 import { useDemo } from "@/lib/demo-store";
 import { PRIMARY_CASE_ID, WORKFLOW_ID } from "@/lib/mock/cases";
 import { useViewer } from "@/lib/viewer";
@@ -92,10 +93,90 @@ export default function CasesPage() {
 }
 
 function CasesRoute() {
-  // Keyed on the handoff so a fresh search from the header starts a fresh list,
-  // even when we are already standing on this page.
   const handoff = useSearchParams().get("q") ?? "";
-  return <CasesView key={handoff} handoff={handoff} />;
+  return (
+    <div className={layout.stack}>
+      <LiveCasesSection />
+      <CasesView key={handoff} handoff={handoff} />
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Live cases from the control plane — shown above the mock caseload
+// ---------------------------------------------------------------------------
+
+function LiveCasesSection() {
+  const [liveCases, setLiveCases] = useState<Record<string, unknown>[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    listCases()
+      .then((cases) => {
+        setLiveCases(cases);
+        setLoading(false);
+      })
+      .catch((err: unknown) => {
+        setError(err instanceof Error ? err.message : String(err));
+        setLoading(false);
+      });
+  }, []);
+
+  if (loading || (liveCases.length === 0 && !error)) return null;
+
+  if (error) {
+    return (
+      <Card icon="activity" title="Live Cases">
+        <div className="flex items-start gap-3 rounded-control border border-danger/25 bg-danger/5 px-4 py-3">
+          <Icon name="alert" size={18} className="mt-0.5 shrink-0 text-danger" />
+          <p className={type_.small}>{error}</p>
+        </div>
+      </Card>
+    );
+  }
+
+  return (
+    <Card
+      icon="activity"
+      title="Live Cases"
+      subtitle={`${liveCases.length} case${liveCases.length === 1 ? "" : "s"} on the control plane`}
+      flush
+    >
+      <Rows>
+        {liveCases.map((c) => {
+          const id = String(c.case_id ?? "");
+          const name = String(c.child_name ?? id);
+          const status = String(c.status ?? "unknown");
+          return (
+            <li key={id}>
+              <Link
+                href={`/cases/${id}`}
+                className={cx(
+                  "flex items-center gap-3 border-l-2 border-l-accent",
+                  row.pad,
+                  row.hover,
+                )}
+              >
+                <Avatar name={name} size={36} variant="brand" />
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-baseline gap-2">
+                    <span className="truncate text-[13.5px] font-semibold text-ink">{name}</span>
+                    <span className="shrink-0 font-mono text-[11px] text-ink-muted">{id}</span>
+                  </div>
+                  <p className={cx("mt-0.5 truncate", type_.small)}>
+                    {String(c.scenario ?? "")} — {status}
+                  </p>
+                </div>
+                <Badge variant="accent" icon="activity">Live</Badge>
+                <Icon name="chevronRight" size={16} className="shrink-0 text-ink-muted" />
+              </Link>
+            </li>
+          );
+        })}
+      </Rows>
+    </Card>
+  );
 }
 
 function CasesView({ handoff }: { handoff: string }) {

@@ -2,8 +2,9 @@
 
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { Icon } from "@/components/icons";
+import { LiveActivityFeed } from "@/components/live/LiveActivityFeed";
 import {
   Avatar,
   Badge,
@@ -22,15 +23,372 @@ import {
 import { fieldLabel } from "@/design/copy";
 import { control, layout, row, surface, type as type_ } from "@/design/tokens";
 import { useDemo } from "@/lib/demo-store";
+import { submitRun, type RunEvent } from "@/lib/api";
+import { useLiveCase, useLiveRunEvents } from "@/lib/live-case";
 import { AGENTS_BY_ID } from "@/lib/mock/agents";
-import { AUTHORITY_GRANT, PRIMARY_CASE_ID } from "@/lib/mock/cases";
+import { AUTHORITY_GRANT, CASES, PRIMARY_CASE_ID } from "@/lib/mock/cases";
 import { EDUCATION_PROJECTION } from "@/lib/mock/policy";
 import { useViewer } from "@/lib/viewer";
 import type { Commitment } from "@/lib/types";
 
+// ---------------------------------------------------------------------------
+// Route decision: mock walkthrough vs live control-plane data
+//
+// The CASES array contains the hardcoded demo-store IDs (CR-1042, CR-1038,
+// etc.). If the URL's caseId is one of those, render the scripted walkthrough.
+// If it is NOT in that list, it is a real case created via /admin or the API —
+// fetch it from the control plane and render live data.
+//
+// There is NO silent fallback from one to the other. A broken live fetch
+// shows an error; it does not quietly swap in mock data.
+// ---------------------------------------------------------------------------
+
+const MOCK_CASE_IDS = new Set(CASES.map((c) => c.id));
+
 export default function CaseDetailPage() {
   const params = useParams<{ caseId: string }>();
   const caseId = params?.caseId ?? PRIMARY_CASE_ID;
+
+  if (MOCK_CASE_IDS.has(caseId)) {
+    return <MockCaseDetail caseId={caseId} />;
+  }
+  return <LiveCaseDetail caseId={caseId} />;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Live case detail — fetched from the control plane
+// ═══════════════════════════════════════════════════════════════════════════
+
+function LiveCaseDetail({ caseId }: { caseId: string }) {
+  const liveCase = useLiveCase(caseId);
+  const { showsTechnical } = useViewer();
+
+  const latestRunId = useMemo(() => {
+    if (liveCase.status !== "loaded") return null;
+    const activeRun = liveCase.runs.find(
+      (r) => r.state === "running" || r.state === "queued",
+    );
+    if (activeRun) return activeRun.run_id;
+    return liveCase.runs[0]?.run_id ?? null;
+  }, [liveCase]);
+
+  const runState = useLiveRunEvents(latestRunId);
+
+  const [submitting, setSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState<string | null>(null);
+  const [manualRunId, setManualRunId] = useState<string | null>(null);
+
+  const manualRunState = useLiveRunEvents(
+    manualRunId && manualRunId !== latestRunId ? manualRunId : null,
+  );
+
+  const activeRunState = manualRunId && manualRunId !== latestRunId
+    ? manualRunState
+    : runState;
+
+  const quarantineEvents = useMemo(() =>
+    activeRunState.events.filter((ev: RunEvent) => {
+      const phase = ev.phase ?? "";
+      return phase.includes("quarantine") || (ev.message ?? "").toLowerCase().includes("quarantine");
+    }),
+  [activeRunState.events]);
+
+  const escalationEvents = useMemo(() =>
+    activeRunState.events.filter((ev: RunEvent) => {
+      const phase = ev.phase ?? "";
+      return phase.includes("approve") || (ev.message ?? "").toLowerCase().includes("escalation");
+    }),
+  [activeRunState.events]);
+
+  const handleRun = async () => {
+    setSubmitting(true);
+    setSubmitError(null);
+    try {
+      const ref = await submitRun(caseId);
+      setManualRunId(ref.run_id);
+    } catch (err: unknown) {
+      setSubmitError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  if (liveCase.status === "loading") {
+    return (
+      <div className={layout.stack}>
+        <Breadcrumb label={caseId} />
+        <Card icon="cases" title={caseId}>
+          <div className="flex items-center gap-3 py-8">
+            <span className="inline-block size-4 animate-spin rounded-full border-2 border-brand border-t-transparent" />
+            <span className={type_.body}>Loading case from control plane…</span>
+          </div>
+        </Card>
+      </div>
+    );
+  }
+
+  if (liveCase.status === "not_found") {
+    return (
+      <div className={layout.stack}>
+        <Breadcrumb label={caseId} />
+        <Card icon="cases" title="Case not found">
+          <EmptyState
+            icon="search"
+            title={`Case ${caseId} does not exist on the control plane.`}
+            hint="Create it in /admin first, or check the case ID."
+          />
+          <div className="mt-4 flex justify-center">
+            <Link href="/admin" className={control.primary}>
+              Open Synthetic Data Lab
+            </Link>
+          </div>
+        </Card>
+      </div>
+    );
+  }
+
+  if (liveCase.status === "error") {
+    return (
+      <div className={layout.stack}>
+        <Breadcrumb label={caseId} />
+        <Card icon="alert" title="Control plane error">
+          <div className="flex items-start gap-3 rounded-control border border-danger/25 bg-danger/5 px-4 py-3">
+            <Icon name="alert" size={18} className="mt-0.5 shrink-0 text-danger" />
+            <div>
+              <p className="text-[13px] font-medium text-danger">
+                Failed to load case from the control plane
+              </p>
+              <p className={cx("mt-1", type_.small)}>{liveCase.message}</p>
+            </div>
+          </div>
+          <div className="mt-4 flex justify-center">
+            <Link href="/cases" className={control.secondary}>
+              Back to list
+            </Link>
+          </div>
+        </Card>
+      </div>
+    );
+  }
+
+  const { data, runs } = liveCase;
+  const caseData = data.case;
+  const childName = String(caseData.child_name ?? caseId);
+  const scenario = String(caseData.scenario ?? "");
+  const status = String(caseData.status ?? "unknown");
+  const commitmentStates = data.commitments;
+  const commitmentEntries = Object.entries(commitmentStates);
+  const closedCount = commitmentEntries.filter(([, v]) => v === "completed").length;
+  const hasActiveRun = runs.some((r) => r.state === "running" || r.state === "queued");
+  const isStreaming = activeRunState.streaming || hasActiveRun;
+
+  return (
+    <div className={layout.stack}>
+      <Breadcrumb label={showsTechnical ? caseId : childName} />
+
+      <section className={cx(surface.card, "overflow-hidden px-5 py-5")}>
+        <div className="flex flex-wrap items-start gap-4">
+          <Avatar name={childName} size={52} variant="brand" />
+          <div className="min-w-0 flex-1">
+            <div className="flex flex-wrap items-center gap-2">
+              <h2 className="text-[18px] font-semibold text-ink">
+                {showsTechnical ? caseId : childName}
+              </h2>
+              <Mono className="text-[12px]">
+                {showsTechnical ? childName : caseId}
+              </Mono>
+              <Badge variant="accent" icon="activity">Live</Badge>
+              {scenario && <Badge variant="neutral">{scenario}</Badge>}
+            </div>
+            <p className={cx("mt-1.5", layout.measure, type_.body)}>
+              {String(caseData.summary ?? `Case ${caseId} — scenario ${scenario}`)}
+            </p>
+          </div>
+          <Badge
+            variant={status === "closed" ? "brand" : status === "monitoring" ? "brand" : "neutral"}
+            icon={status === "closed" ? "checkCircle" : "activity"}
+          >
+            {status}
+          </Badge>
+        </div>
+
+        <dl className="mt-5 grid gap-4 border-t border-line pt-4 sm:grid-cols-2 xl:grid-cols-4">
+          <Field label="Case ID">
+            <Mono>{caseId}</Mono>
+          </Field>
+          <Field label="Scenario">
+            {scenario || "—"}
+          </Field>
+          <Field label="Status">
+            {status}
+          </Field>
+          <Field label="Commitments">
+            {closedCount} of {commitmentEntries.length} closed
+          </Field>
+        </dl>
+
+        {!hasActiveRun && !activeRunState.streaming && (
+          <div
+            className={cx(
+              "-mx-5 -mb-5 mt-5 flex flex-wrap items-center gap-3 border-t px-5 py-4",
+              "border-brand/25 bg-brand-soft text-brand",
+            )}
+          >
+            <Icon name="play" size={18} className="shrink-0" />
+            <div className="min-w-0 flex-1">
+              <p className="text-[13px] font-medium">
+                {runs.length === 0 ? "No runs yet" : "Start a new run"}
+              </p>
+              <p className="mt-0.5 text-[12px] text-ink-soft">
+                Run the agent fleet against this case to see live multi-agent execution.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={handleRun}
+              disabled={submitting}
+              className={control.primary}
+            >
+              <Icon name="play" size={15} />
+              {submitting ? "Starting…" : "Run the fleet"}
+            </button>
+          </div>
+        )}
+        {submitError && (
+          <p className="mt-2 text-[12px] text-danger">{submitError}</p>
+        )}
+      </section>
+
+      {/* Commitment states from backend */}
+      {commitmentEntries.length > 0 && (
+        <Card
+          icon="cases"
+          title="Commitments"
+          subtitle={`${closedCount} of ${commitmentEntries.length} closed`}
+          action={
+            <div className="flex w-40 items-center gap-3">
+              <ProgressBar value={closedCount} total={commitmentEntries.length} variant="seal" />
+            </div>
+          }
+          flush
+        >
+          <Rows as="ol">
+            {commitmentEntries.map(([type, commitmentStatus]) => (
+              <li key={type} className={cx("border-l-2", row.pad,
+                commitmentStatus === "completed" ? "border-l-seal" : "border-l-transparent",
+              )}>
+                <div className="flex items-center gap-3">
+                  <DomainIcon domain={type as "legal" | "education" | "healthcare" | "shelter" | "family"} size={32} />
+                  <div className="min-w-0 flex-1">
+                    <span className="text-[13.5px] font-medium text-ink capitalize">
+                      {type.replace("_", " ")}
+                    </span>
+                  </div>
+                  <StatusBadge status={commitmentStatus as "completed" | "pending" | "in_progress" | "unresolved"} />
+                </div>
+              </li>
+            ))}
+          </Rows>
+        </Card>
+      )}
+
+      {/* Quarantine / escalation highlight */}
+      {quarantineEvents.length > 0 && (
+        <Card icon="lock" title="Quarantine Event Detected">
+          <div className="rounded-control border border-danger/25 bg-danger/5 px-4 py-3">
+            <div className="flex items-start gap-3">
+              <Icon name="shield" size={20} className="mt-0.5 shrink-0 text-danger" />
+              <div>
+                <p className="text-[13px] font-medium text-danger">
+                  Cross-scope data exfiltration attempt quarantined
+                </p>
+                {quarantineEvents.map((ev, i) => (
+                  <p key={i} className="mt-1 text-[12.5px] text-ink-soft">
+                    {String(ev.message ?? ev.detail ?? ev.event)}
+                  </p>
+                ))}
+              </div>
+            </div>
+          </div>
+          {escalationEvents.length > 0 && (
+            <div className="mt-3 rounded-control border border-warn/25 bg-warn-soft px-4 py-3">
+              <div className="flex items-start gap-3">
+                <Icon name="user" size={20} className="mt-0.5 shrink-0 text-warn" />
+                <div>
+                  <p className="text-[13px] font-medium text-warn">
+                    Escalation to supervisor
+                  </p>
+                  {escalationEvents.map((ev, i) => (
+                    <p key={i} className="mt-1 text-[12.5px] text-ink-soft">
+                      {String(ev.message ?? ev.detail ?? ev.event)}
+                    </p>
+                  ))}
+                </div>
+              </div>
+            </div>
+          )}
+        </Card>
+      )}
+
+      {/* Live activity feed */}
+      {(isStreaming || activeRunState.events.length > 0) && (
+        <LiveActivityFeed run={activeRunState} />
+      )}
+
+      {/* Audit trail (from initial case fetch) */}
+      {data.timeline.length > 0 && (
+        <Card icon="audit" title="Audit Trail" subtitle={`${data.timeline.length} events`} flush>
+          <Rows>
+            {data.timeline.map((entry, i) => {
+              const e = entry as Record<string, string>;
+              return (
+                <li key={i} className={cx(row.pad, "flex items-start gap-3")}>
+                  <Icon name="document" size={14} className="mt-1 shrink-0 text-ink-muted" />
+                  <div className="min-w-0 flex-1">
+                    <span className="text-[12.5px] font-medium text-ink">
+                      {e.event_type ?? e.type ?? "event"}
+                    </span>
+                    {e.agent_identity && (
+                      <Mono className="ml-2 text-[11px] text-ink-muted">
+                        {e.agent_identity}
+                      </Mono>
+                    )}
+                    {e.detail && (
+                      <p className={cx("mt-0.5", type_.meta)}>{e.detail}</p>
+                    )}
+                  </div>
+                  {e.timestamp && (
+                    <span className="shrink-0 font-mono text-[10px] text-ink-muted">
+                      {e.timestamp}
+                    </span>
+                  )}
+                </li>
+              );
+            })}
+          </Rows>
+        </Card>
+      )}
+    </div>
+  );
+}
+
+function Breadcrumb({ label }: { label: string }) {
+  return (
+    <nav className="flex items-center gap-1.5 text-[12px] text-ink-muted">
+      <Link href="/cases" className="transition-colors hover:text-ink">
+        My cases
+      </Link>
+      <Icon name="chevronRight" size={13} />
+      <span className="text-ink-soft">{label}</span>
+    </nav>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Mock case detail — the scripted walkthrough (unchanged from before)
+// ═══════════════════════════════════════════════════════════════════════════
+
+function MockCaseDetail({ caseId }: { caseId: string }) {
   const { step, setStep, commitments, cases } = useDemo();
   const { copy, showsTechnical } = useViewer();
   const record = cases.find((item) => item.id === caseId);
@@ -66,7 +424,6 @@ export default function CaseDetailPage() {
         <span className="text-ink-soft">{showsTechnical ? record.id : record.childAlias}</span>
       </nav>
 
-      {/* Clipped so the action band below can bleed to the card's rounded edges. */}
       <section className={cx(surface.card, "overflow-hidden px-5 py-5")}>
         <div className="flex flex-wrap items-start gap-4">
           <Avatar name={record.childAlias} size={52} variant={activated ? "brand" : "neutral"} />
@@ -305,6 +662,10 @@ export default function CaseDetailPage() {
   );
 }
 
+// ═══════════════════════════════════════════════════════════════════════════
+// Shared sub-components
+// ═══════════════════════════════════════════════════════════════════════════
+
 function ActionBar({
   variant,
   icon,
@@ -325,8 +686,6 @@ function ActionBar({
       ? "border-warn/25 bg-warn-soft text-warn"
       : "border-accent/25 bg-accent-soft text-accent-deep";
   return (
-    // A band across the foot of the card rather than a bordered box inside it:
-    // the tint still marks it as needing a person, without a second outline.
     <div
       className={cx(
         "-mx-5 -mb-5 mt-5 flex flex-wrap items-center gap-3 border-t px-5 py-4",
@@ -360,8 +719,6 @@ function CommitmentRow({
   const overdue = (commitment.daysOverdue ?? 0) > 0;
 
   return (
-    // State reads off a rule down the leading edge instead of a fill and an
-    // outline. The transparent case keeps every row on the same text baseline.
     <li
       className={cx(
         "border-l-2",

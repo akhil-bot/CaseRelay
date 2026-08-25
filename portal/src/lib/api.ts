@@ -99,6 +99,28 @@ export async function listCases(): Promise<Record<string, unknown>[]> {
   return request("/v1/cases");
 }
 
+export interface LiveCaseDetail {
+  case: Record<string, unknown>;
+  commitments: Record<string, string>;
+  grants: Record<string, unknown>[];
+  timeline: Record<string, unknown>[];
+}
+
+export interface CaseRunSummary {
+  run_id: string;
+  state: string;
+  current_phase: string | null;
+  created_at: string;
+}
+
+export async function getCase(caseId: string): Promise<LiveCaseDetail> {
+  return request(`/v1/cases/${caseId}`);
+}
+
+export async function listCaseRuns(caseId: string): Promise<CaseRunSummary[]> {
+  return request(`/v1/cases/${caseId}/runs`);
+}
+
 /**
  * Opens an SSE connection to the run-events stream via the BFF proxy.
  * The caller is responsible for closing the returned EventSource.

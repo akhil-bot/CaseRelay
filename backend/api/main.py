@@ -40,6 +40,12 @@ try:
 except (ImportError, ModuleNotFoundError):
     pass
 
+try:
+    from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
+    FastAPIInstrumentor.instrument_app(app)
+except Exception:
+    pass
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
@@ -728,6 +734,27 @@ def submit_run(case_id: str) -> dict:
     t = threading.Thread(target=_run_background, args=(run_id, case_id), daemon=True)
     t.start()
     return {"run_id": run_id, "case_id": case_id, "state": "queued"}
+
+
+@app.get(
+    "/v1/cases/{case_id}/runs",
+    responses={404: {"description": "Case not found"}},
+)
+def list_case_runs(case_id: str) -> list[dict]:
+    """Return all runs associated with a case, newest first."""
+    workspace.get_case(case_id)  # raises CaseNotFound if absent
+    runs = [
+        {
+            "run_id": r["run_id"],
+            "state": r.get("state", "queued"),
+            "current_phase": r.get("current_phase"),
+            "created_at": r.get("created_at", ""),
+        }
+        for r in workspace.runs.values()
+        if r.get("case_id") == case_id
+    ]
+    runs.sort(key=lambda r: r.get("created_at", ""), reverse=True)
+    return runs
 
 
 @app.get(
