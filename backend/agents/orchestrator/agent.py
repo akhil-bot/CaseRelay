@@ -9,6 +9,7 @@ from backend.agents.legal import agent as legal
 from backend.agents.shelter import agent as shelter
 from backend.agents.verifier import agent as verifier
 from backend.memory.bank import preload
+from backend.memory.platform import enabled as memory_bank_enabled, search_sync as platform_search
 from backend.runtime.workspace import workspace
 from backend.workflows.durable import resume_wake, write_checkpoint
 
@@ -61,8 +62,14 @@ def wake_workflow(case_id: str) -> dict:
 
 
 def preload_memory(case_id: str) -> dict:
-    """Memory Bank: operational state only."""
-    return preload(case_id)
+    """Load operational state and platform Memory Bank recall for continuity across sessions."""
+    result = preload(case_id)
+    if memory_bank_enabled():
+        query = f"coordination history and outcomes for case {case_id}"
+        memories = platform_search(case_id, query)
+        if memories:
+            result["platform_memories"] = memories
+    return result
 
 
 def get_commitment_states(case_id: str) -> dict:

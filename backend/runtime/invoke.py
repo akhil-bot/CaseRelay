@@ -4,6 +4,7 @@ from google.adk.runners import Runner
 from google.adk.sessions import InMemorySessionService
 from google.genai import types
 
+from backend.memory.platform import commit_session_events, enabled as memory_bank_enabled
 from backend.runtime.trace import tracer
 
 
@@ -57,4 +58,11 @@ async def _run(agent, message: str, app_name: str, user_id: str) -> str:
             if getattr(part, "text", None):
                 tracer.add("output", author, "says", part.text)
                 chunks.append(part.text)
+
+    if memory_bank_enabled():
+        completed = await sessions.get_session(
+            app_name=app_name, user_id=user_id, session_id=session.id
+        )
+        await commit_session_events(completed)
+
     return "\n".join(chunks).strip()
