@@ -75,15 +75,15 @@ export function useAdminCopilotTools(callbacks: {
         try {
           const scenarios = await listScenarios();
           scenarioCache.current = scenarios;
-          return JSON.stringify(
-            scenarios.map((s) => ({
+          return JSON.stringify({
+            scenarios: scenarios.map((s) => ({
               id: s.id,
               child_name: s.child_name,
               complexity: s.complexity,
               title: s.title,
               expected_outcome: s.expected_outcome,
             })),
-          );
+          });
         } catch (err) {
           return `Error listing scenarios: ${err instanceof Error ? err.message : String(err)}`;
         }

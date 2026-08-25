@@ -49,7 +49,8 @@ function notConfigured() {
 }
 
 export async function POST(request: Request) {
-  return handler ? handler(request) : notConfigured();
+  if (!handler) return notConfigured();
+  return handler(request);
 }
 
 export async function GET(request: Request) {
