@@ -1,4 +1,5 @@
 import logging
+import os
 from typing import Any
 from uuid import uuid4
 
@@ -13,17 +14,18 @@ from backend.runtime.workspace import workspace
 _tracer = _otel_trace.get_tracer("caserelay.gateway")
 _log = logging.getLogger(__name__)
 
+_DEPLOYED_ENGINE = bool(os.environ.get("CASERELAY_AGENT"))
+
 
 def _resolve_caller_principal() -> str:
     """Resolve the authenticated principal of the calling agent.
 
-    Deployed Agent Runtime engines with --agent-identity: google.auth.default() returns
-    credentials bound to the engine's managed identity. We mint an ID token and verify it
-    against Google's public keys — the verified email claim is the principal.
+    Deployed engines (CASERELAY_AGENT set): the ONLY path is a verified ID token from the
+    engine's own GCP credentials. RunContext fallback is structurally blocked — a deployed
+    engine that cannot present a verified token is denied, never silently downgraded.
 
-    In-process agents (fleet runner, gate tests): the RunContext carries the identity set
-    by the calling agent module. No cryptographic verification is possible for same-process
-    calls; the security boundary is the deployment model, not in-process isolation.
+    In-process agents (fleet runner, gate tests): RunContext.agent_identity, set by the
+    calling agent module. No cryptographic verification is possible for same-process calls.
     """
     try:
         import google.auth
@@ -37,8 +39,14 @@ def _resolve_caller_principal() -> str:
         if email:
             _log.debug("principal resolved from verified ID token: %s", email)
             return email
-    except Exception:
-        pass
+    except Exception as exc:
+        if _DEPLOYED_ENGINE:
+            _log.error("deployed engine MUST present a verified ID token; verification failed: %s", exc)
+            return ""
+
+    if _DEPLOYED_ENGINE:
+        _log.error("deployed engine has no verified credential — RunContext fallback is structurally blocked")
+        return ""
 
     ctx = _ctx_mod.current()
     if ctx.agent_identity:

@@ -1,7 +1,10 @@
+import logging
 import os
 from typing import Any
 
 from backend.state.fixtures import agent_cards
+
+_log = logging.getLogger(__name__)
 
 _AGENT_ID_TO_KEY = {
     "education-liaison-v1": "education",
@@ -14,16 +17,25 @@ _AGENT_ID_TO_KEY = {
     "safeguarding-verifier-v1": "verifier",
 }
 
-AGENT_IDENTITIES: dict[str, str] = {
-    "education": os.environ.get("CASERELAY_IDENTITY_EDUCATION", "caserelay-education@agent.caserelay.dev"),
-    "health": os.environ.get("CASERELAY_IDENTITY_HEALTH", "caserelay-health@agent.caserelay.dev"),
-    "legal": os.environ.get("CASERELAY_IDENTITY_LEGAL", "caserelay-legal@agent.caserelay.dev"),
-    "shelter": os.environ.get("CASERELAY_IDENTITY_SHELTER", "caserelay-shelter@agent.caserelay.dev"),
-    "family_services": os.environ.get("CASERELAY_IDENTITY_FAMILY", "caserelay-family@agent.caserelay.dev"),
-    "intake": os.environ.get("CASERELAY_IDENTITY_INTAKE", "caserelay-intake@agent.caserelay.dev"),
-    "orchestrator": os.environ.get("CASERELAY_IDENTITY_ORCHESTRATOR", "caserelay-orchestrator@agent.caserelay.dev"),
-    "verifier": os.environ.get("CASERELAY_IDENTITY_VERIFIER", "caserelay-verifier@agent.caserelay.dev"),
-}
+_IDENTITY_ENV_VARS: list[tuple[str, str]] = [
+    ("education", "CASERELAY_IDENTITY_EDUCATION"),
+    ("health", "CASERELAY_IDENTITY_HEALTH"),
+    ("legal", "CASERELAY_IDENTITY_LEGAL"),
+    ("shelter", "CASERELAY_IDENTITY_SHELTER"),
+    ("family_services", "CASERELAY_IDENTITY_FAMILY"),
+    ("intake", "CASERELAY_IDENTITY_INTAKE"),
+    ("orchestrator", "CASERELAY_IDENTITY_ORCHESTRATOR"),
+    ("verifier", "CASERELAY_IDENTITY_VERIFIER"),
+]
+
+_DEV_DOMAIN = "@agent.caserelay.dev"
+
+AGENT_IDENTITIES: dict[str, str] = {}
+for _key, _env_var in _IDENTITY_ENV_VARS:
+    _val = os.environ.get(_env_var, "")
+    if not _val:
+        _val = f"caserelay-{_key.replace('_', '-')}@agent.caserelay.dev"
+    AGENT_IDENTITIES[_key] = _val
 
 IDENTITIES: dict[str, dict[str, Any]] = {}
 for _card in agent_cards():
@@ -37,6 +49,45 @@ for _card in agent_cards():
             "denied_data_scopes": list(_card["denied_data_scopes"]),
             "purpose": _card["purpose"],
         }
+
+# ---------------------------------------------------------------------------
+# Deployed engine: auto-register real principal from GCP credentials
+# ---------------------------------------------------------------------------
+# On Agent Runtime engines (CASERELAY_AGENT is set), the effective_identity assigned by the
+# platform is the principal that google.auth.default() returns. This may differ from the
+# env-var-based identity in AGENT_IDENTITIES, so we register it alongside the env-var entry
+# so verify() can find either.
+_ENGINE_AGENT = os.environ.get("CASERELAY_AGENT", "")
+if _ENGINE_AGENT:
+    _ENGINE_NAME_TO_KEY = {
+        "education_liaison": "education",
+        "health_coordination": "health",
+        "legal_aid": "legal",
+        "shelter_status": "shelter",
+        "family_services": "family_services",
+        "intake_authority": "intake",
+        "continuity_orchestrator": "orchestrator",
+        "safeguarding_verifier": "verifier",
+    }
+    _engine_key = _ENGINE_NAME_TO_KEY.get(_ENGINE_AGENT)
+    if _engine_key:
+        try:
+            import google.auth as _gauth
+
+            _creds, _ = _gauth.default()
+            _sa_email = getattr(_creds, "service_account_email", None) or ""
+            if _sa_email and _sa_email not in IDENTITIES:
+                _base = next(
+                    (v for v in IDENTITIES.values() if v.get("agent_key") == _engine_key),
+                    None,
+                )
+                if _base:
+                    IDENTITIES[_sa_email] = {**_base}
+                    _log.info(
+                        "auto-registered effective identity %s for %s", _sa_email, _ENGINE_AGENT
+                    )
+        except Exception as _exc:
+            _log.warning("could not auto-register engine identity: %s", _exc)
 
 
 class IdentityDenied(PermissionError):
@@ -54,3 +105,8 @@ def assert_scope(identity: str, field: str) -> None:
     card = verify(identity)
     if field in card["denied_data_scopes"]:
         raise IdentityDenied(f"{identity} denied field {field}")
+
+
+def is_dev_default(identity: str) -> bool:
+    """True if the identity is a fabricated dev-default, not a real platform principal."""
+    return identity.endswith(_DEV_DOMAIN)
