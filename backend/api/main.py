@@ -743,18 +743,15 @@ def submit_run(case_id: str) -> dict:
 def list_case_runs(case_id: str) -> list[dict]:
     """Return all runs associated with a case, newest first."""
     workspace.get_case(case_id)  # raises CaseNotFound if absent
-    runs = [
+    return [
         {
             "run_id": r["run_id"],
             "state": r.get("state", "queued"),
             "current_phase": r.get("current_phase"),
             "created_at": r.get("created_at", ""),
         }
-        for r in workspace.runs.values()
-        if r.get("case_id") == case_id
+        for r in workspace.list_runs_for_case(case_id)
     ]
-    runs.sort(key=lambda r: r.get("created_at", ""), reverse=True)
-    return runs
 
 
 @app.get(

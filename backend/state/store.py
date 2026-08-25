@@ -93,6 +93,42 @@ def delete_case(case_id: str) -> None:
     ref.delete()
 
 
+RUNS = "runs"
+
+
+def save_run(run_id: str, run: dict[str, Any]) -> None:
+    """Persist the run record (metadata only, not the transient event list)."""
+    if not enabled():
+        return
+    payload = {k: v for k, v in run.items() if k != "events"}
+    _db().collection(RUNS).document(run_id).set(payload, merge=True)
+
+
+def load_run(run_id: str) -> dict[str, Any] | None:
+    if not enabled():
+        return None
+    doc = _db().collection(RUNS).document(run_id).get()
+    if not doc.exists:
+        return None
+    data = doc.to_dict() or {}
+    data.setdefault("events", [])
+    return data
+
+
+def list_runs_for_case(case_id: str) -> list[dict[str, Any]]:
+    if not enabled():
+        return []
+    docs = _db().collection(RUNS).where("case_id", "==", case_id).stream()
+    return [d.to_dict() or {} for d in docs]
+
+
+def delete_runs_for_case(case_id: str) -> None:
+    if not enabled():
+        return
+    for doc in _db().collection(RUNS).where("case_id", "==", case_id).stream():
+        doc.reference.delete()
+
+
 def save_checkpoint(workflow_id: str, body: dict[str, Any]) -> None:
     if not enabled():
         return

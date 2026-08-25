@@ -665,6 +665,52 @@
             }
           }
         }
+      },
+      "get": {
+        "summary": "List Case Runs",
+        "description": "Return all runs associated with a case, newest first.",
+        "operationId": "list_case_runs_v1_cases__case_id__runs_get",
+        "parameters": [
+          {
+            "name": "case_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Case Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": true
+                  },
+                  "title": "Response List Case Runs V1 Cases  Case Id  Runs Get"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Case not found"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
       }
     },
     "/v1/runs/{run_id}": {

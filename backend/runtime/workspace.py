@@ -56,6 +56,7 @@ class Workspace:
     def reset(self, case_id: str) -> None:
         with self._lock_for(case_id):
             store.delete_case(case_id)
+            store.delete_runs_for_case(case_id)
             self.cases.pop(case_id, None)
             self.commitments.pop(case_id, None)
             self.grants.pop(case_id, None)
@@ -63,6 +64,9 @@ class Workspace:
             self.approvals.pop(case_id, None)
             self._audit_log.pop(case_id, None)
             self.memory.pop(case_id, None)
+            run_ids_to_remove = [rid for rid, r in self.runs.items() if r.get("case_id") == case_id]
+            for rid in run_ids_to_remove:
+                self.runs.pop(rid, None)
             wf_id = self._case_workflows.pop(case_id, None)
             if wf_id:
                 self.checkpoints.pop(wf_id, None)
@@ -317,21 +321,41 @@ class Workspace:
             "events": [],
         }
         self.runs[run_id] = run
+        store.save_run(run_id, run)
         return run
 
     def get_run(self, run_id: str) -> dict[str, Any] | None:
-        return self.runs.get(run_id)
+        run = self.runs.get(run_id)
+        if run is not None:
+            return run
+        remote = store.load_run(run_id)
+        if remote is not None:
+            self.runs[run_id] = remote
+        return remote
 
     def update_run(self, run_id: str, **kwargs) -> dict[str, Any] | None:
         run = self.runs.get(run_id)
         if run:
             run.update(kwargs)
+            store.save_run(run_id, run)
         return run
 
     def push_run_event(self, run_id: str, event: dict[str, Any]) -> None:
         run = self.runs.get(run_id)
         if run is not None:
             run.setdefault("events", []).append(event)
+
+    def list_runs_for_case(self, case_id: str) -> list[dict[str, Any]]:
+        """All runs for a case. Merges in-memory (live) with Firestore (durable)."""
+        known: dict[str, dict[str, Any]] = {}
+        for r in self.runs.values():
+            if r.get("case_id") == case_id:
+                known[r["run_id"]] = r
+        for r in store.list_runs_for_case(case_id):
+            rid = r.get("run_id", "")
+            if rid and rid not in known:
+                known[rid] = r
+        return sorted(known.values(), key=lambda r: r.get("created_at", ""), reverse=True)
 
 
 workspace = Workspace()
