@@ -29,7 +29,7 @@ import { AGENTS_BY_ID } from "@/lib/mock/agents";
 import { AUTHORITY_GRANT, CASES, PRIMARY_CASE_ID } from "@/lib/mock/cases";
 import { EDUCATION_PROJECTION } from "@/lib/mock/policy";
 import { useViewer } from "@/lib/viewer";
-import type { Commitment, CommitmentStatus } from "@/lib/types";
+import type { Commitment, CommitmentStatus, Domain } from "@/lib/types";
 
 // ---------------------------------------------------------------------------
 // Route decision: mock walkthrough vs live control-plane data
@@ -286,7 +286,7 @@ function LiveCaseDetail({ caseId }: { caseId: string }) {
                   : "border-l-transparent",
               )}>
                 <div className="flex items-center gap-3">
-                  <DomainIcon domain={type as "legal" | "education" | "healthcare" | "shelter" | "family"} size={32} />
+                  <DomainIcon domain={type as Domain} size={32} />
                   <div className="min-w-0 flex-1">
                     <span className="text-[13.5px] font-medium text-ink capitalize">
                       {type.replace("_", " ")}

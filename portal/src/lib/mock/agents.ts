@@ -85,7 +85,7 @@ export const AGENTS: AgentCard[] = [
     endpoint: "https://cr-partner-health-7g2h.a.run.app",
     health: "healthy",
     registeredOn: "Day 1",
-    domain: "healthcare",
+    domain: "health",
   },
   {
     id: "legal-aid",
@@ -136,7 +136,7 @@ export const AGENTS: AgentCard[] = [
     endpoint: "https://cr-partner-family-7g2h.a.run.app",
     health: "healthy",
     registeredOn: "Day 1",
-    domain: "family",
+    domain: "family_services",
   },
   {
     id: "safeguarding-verifier",

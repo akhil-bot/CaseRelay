@@ -1,9 +1,9 @@
 export type Domain =
   | "legal"
   | "education"
-  | "healthcare"
+  | "health"
   | "shelter"
-  | "family";
+  | "family_services";
 
 export type CommitmentStatus =
   | "proposed"

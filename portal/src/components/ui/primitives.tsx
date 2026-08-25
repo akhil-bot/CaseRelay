@@ -302,9 +302,9 @@ export const buttons = control;
 export const DOMAIN_META: Record<Domain, { label: string; icon: IconName; variant: Tone }> = {
   legal: { label: "Legal", icon: "legal", variant: "seal" },
   education: { label: "Education", icon: "school", variant: "brand" },
-  healthcare: { label: "Healthcare", icon: "health", variant: "accent" },
+  health: { label: "Healthcare", icon: "health", variant: "accent" },
   shelter: { label: "Shelter", icon: "shelter", variant: "warn" },
-  family: { label: "Family services", icon: "users", variant: "neutral" },
+  family_services: { label: "Family services", icon: "users", variant: "neutral" },
 };
 
 export function DomainIcon({ domain, size = 36 }: { domain: Domain; size?: number }) {

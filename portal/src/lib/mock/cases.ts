@@ -130,7 +130,7 @@ export const BASE_COMMITMENTS: Commitment[] = [
   },
   {
     id: "CM-02",
-    domain: "healthcare",
+    domain: "health",
     title: "Confirm pediatric wellness visit scheduled",
     ownerOrg: "Riverbend Community Health",
     ownerAgentId: "health-coordination",
@@ -190,7 +190,7 @@ export const BASE_COMMITMENTS: Commitment[] = [
   },
   {
     id: "CM-05",
-    domain: "family",
+    domain: "family_services",
     title: "Confirm family assessment appointment scheduled",
     ownerOrg: "Mesa County Family Services",
     ownerAgentId: "family-services",
