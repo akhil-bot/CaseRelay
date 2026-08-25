@@ -4,7 +4,8 @@ import { usePathname } from "next/navigation";
 import { Icon } from "@/components/icons";
 import { Notifications } from "@/components/shell/Notifications";
 import { ProfileMenu } from "@/components/shell/ProfileMenu";
-import { pageKeyFor } from "@/design/personas";
+import { COPY } from "@/design/copy";
+import { pageKeyFor, PLATFORM_ONLY_ROUTES } from "@/design/personas";
 import { chrome, control, cx, type as type_ } from "@/design/tokens";
 import { useViewer } from "@/lib/viewer";
 
@@ -19,7 +20,9 @@ export function Header({
 }) {
   const pathname = usePathname() ?? "/";
   const { copy, showsTechnical } = useViewer();
-  const heading = copy.pages[pageKeyFor(pathname)];
+  const key = pageKeyFor(pathname);
+  const isPlatformOnly = PLATFORM_ONLY_ROUTES.some((r) => pathname.startsWith(r));
+  const heading = isPlatformOnly ? COPY.platform.pages[key] : copy.pages[key];
 
   return (
     // The height sits on the element that carries the hairline, so the row is
