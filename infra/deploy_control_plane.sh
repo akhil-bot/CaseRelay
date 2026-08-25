@@ -74,9 +74,11 @@ CASERELAY_MEMORY_BANK_LOCATION=${REGION}" \
   --port=8080 \
   --memory=1Gi \
   --cpu=1 \
-  --min-instances=0 \
-  --max-instances=2 \
-  --timeout=300
+  --min-instances=1 \
+  --max-instances=1 \
+  --timeout=900 \
+  --no-cpu-throttling \
+  --execution-environment=gen2
 
 echo "=== granting run.invoker to portal SA ==="
 gcloud run services add-iam-policy-binding "$SERVICE" \
