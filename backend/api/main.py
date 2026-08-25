@@ -8,6 +8,7 @@ from __future__ import annotations
 import asyncio
 import contextvars
 import json
+import os
 import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta, timezone
@@ -22,6 +23,10 @@ from backend.identity.registry import IdentityDenied
 from backend.runtime.workspace import CaseNotFound, workspace
 from backend.state import dataset, scenarios as _scenarios_mod
 from backend.workflows import durable
+
+if os.environ.get("CASERELAY_CONTROL_PLANE", "").strip() == "1":
+    from backend.agents.orchestrator.agent import resolve_specialists
+    resolve_specialists()
 
 app = FastAPI(
     title="CaseRelay Control Plane",

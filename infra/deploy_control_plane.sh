@@ -16,6 +16,14 @@ SERVICE="caserelay-control-plane"
 #     --project="$PROJECT" --display-name="CaseRelay Portal BFF"
 PORTAL_SA="${CASERELAY_PORTAL_SA:-caserelay-portal@${PROJECT}.iam.gserviceaccount.com}"
 
+# Load fleet endpoints so the control plane can reach all deployed engines.
+FLEET_ENV="$(dirname "$0")/fleet_endpoints.env"
+if [ ! -f "$FLEET_ENV" ]; then
+  echo "ERROR: $FLEET_ENV not found — run infra/collect_endpoints.sh first" >&2
+  exit 1
+fi
+source "$FLEET_ENV"
+
 echo "=== building linux/amd64 image ==="
 docker buildx build --platform linux/amd64 \
   -f backend/Dockerfile \
@@ -35,8 +43,25 @@ CASERELAY_PROJECT_ID=${PROJECT},\
 GOOGLE_CLOUD_PROJECT=${PROJECT},\
 GOOGLE_GENAI_USE_VERTEXAI=true,\
 GOOGLE_CLOUD_LOCATION=global,\
+CASERELAY_CONTROL_PLANE=1,\
 MODEL_ARMOR_TEMPLATE=projects/${PROJECT}/locations/${REGION}/templates/caserelay-screen,\
-MODEL_ARMOR_LOCATION=${REGION}" \
+MODEL_ARMOR_LOCATION=${REGION},\
+CASERELAY_URL_EDUCATION=${CASERELAY_URL_EDUCATION},\
+CASERELAY_URL_HEALTH=${CASERELAY_URL_HEALTH},\
+CASERELAY_URL_LEGAL=${CASERELAY_URL_LEGAL},\
+CASERELAY_URL_SHELTER=${CASERELAY_URL_SHELTER},\
+CASERELAY_URL_FAMILY=${CASERELAY_URL_FAMILY},\
+CASERELAY_URL_VERIFIER=${CASERELAY_URL_VERIFIER},\
+CASERELAY_URL_ORCHESTRATOR=${CASERELAY_URL_ORCHESTRATOR},\
+CASERELAY_URL_INTAKE=${CASERELAY_URL_INTAKE},\
+CASERELAY_IDENTITY_EDUCATION=${CASERELAY_IDENTITY_EDUCATION},\
+CASERELAY_IDENTITY_HEALTH=${CASERELAY_IDENTITY_HEALTH},\
+CASERELAY_IDENTITY_LEGAL=${CASERELAY_IDENTITY_LEGAL},\
+CASERELAY_IDENTITY_SHELTER=${CASERELAY_IDENTITY_SHELTER},\
+CASERELAY_IDENTITY_FAMILY=${CASERELAY_IDENTITY_FAMILY},\
+CASERELAY_IDENTITY_INTAKE=${CASERELAY_IDENTITY_INTAKE},\
+CASERELAY_IDENTITY_ORCHESTRATOR=${CASERELAY_IDENTITY_ORCHESTRATOR},\
+CASERELAY_IDENTITY_VERIFIER=${CASERELAY_IDENTITY_VERIFIER}" \
   --port=8080 \
   --memory=1Gi \
   --cpu=1 \
@@ -51,6 +76,32 @@ gcloud run services add-iam-policy-binding "$SERVICE" \
   --member="serviceAccount:${PORTAL_SA}" \
   --role="roles/run.invoker" \
   --quiet
+
+echo "=== granting aiplatform.user to control plane SA ==="
+CP_SA="${PROJECT_NUMBER:-189353698936}-compute@developer.gserviceaccount.com"
+_grant_with_retry() {
+  local member="$1" role="$2"
+  local attempt=0 backoff=3 max_retries=5
+  while [ $attempt -lt $max_retries ]; do
+    attempt=$((attempt + 1))
+    output=$(gcloud projects add-iam-policy-binding "$PROJECT" \
+      --member="$member" \
+      --role="$role" \
+      --condition=None \
+      --format=json 2>&1) && { echo "  OK: $member <- $role"; return 0; }
+    if echo "$output" | grep -q "ABORTED\|concurrent policy"; then
+      echo "  409 race, retry in ${backoff}s (${attempt}/${max_retries})"
+      sleep $backoff
+      backoff=$((backoff * 2))
+    else
+      echo "  FAIL: $output" | head -3
+      return 1
+    fi
+  done
+  echo "  FAIL after $max_retries retries"
+  return 1
+}
+_grant_with_retry "serviceAccount:${CP_SA}" "roles/aiplatform.user"
 
 URL=$(gcloud run services describe "$SERVICE" \
   --project="$PROJECT" --region="$REGION" \

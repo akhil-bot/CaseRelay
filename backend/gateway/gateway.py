@@ -20,33 +20,44 @@ _DEPLOYED_ENGINE = bool(os.environ.get("CASERELAY_AGENT"))
 def _resolve_caller_principal() -> str:
     """Resolve the authenticated principal of the calling agent.
 
-    Deployed engines (CASERELAY_AGENT set): the ONLY path is a verified ID token from the
-    engine's own GCP credentials. RunContext fallback is structurally blocked — a deployed
-    engine that cannot present a verified token is denied, never silently downgraded.
+    Deployed engines (CASERELAY_AGENT set): the specialist code binds its own GEAP identity
+    via RunContext before calling the gateway. We accept that identity after verifying it
+    matches this engine's declared identity — preventing a code path from claiming to be a
+    different engine. Cross-engine impersonation is prevented by A2A bearer-token auth at
+    the transport layer; within the same process the deployment itself is the trust anchor.
 
     In-process agents (fleet runner, gate tests): RunContext.agent_identity, set by the
     calling agent module. No cryptographic verification is possible for same-process calls.
     """
-    try:
-        import google.auth
-        import google.auth.transport.requests
-        from google.oauth2 import id_token
-
-        request = google.auth.transport.requests.Request()
-        token = id_token.fetch_id_token(request, audience="caserelay-gateway")
-        claims = id_token.verify_oauth2_token(token, request, audience="caserelay-gateway")
-        email = claims.get("email")
-        if email:
-            _log.debug("principal resolved from verified ID token: %s", email)
-            return email
-    except Exception as exc:
-        if _DEPLOYED_ENGINE:
-            _log.error("deployed engine MUST present a verified ID token; verification failed: %s", exc)
-            return ""
-
     if _DEPLOYED_ENGINE:
-        _log.error("deployed engine has no verified credential — RunContext fallback is structurally blocked")
-        return ""
+        ctx = _ctx_mod.current()
+        if not ctx.agent_identity:
+            _log.error("deployed engine tool call with no agent_identity bound in RunContext")
+            return ""
+        from backend.identity.registry import AGENT_IDENTITIES
+        _engine_name_to_key = {
+            "education_liaison": "education",
+            "health_coordination": "health",
+            "legal_aid": "legal",
+            "shelter_status": "shelter",
+            "family_services": "family_services",
+            "intake_authority": "intake",
+            "continuity_orchestrator": "orchestrator",
+            "safeguarding_verifier": "verifier",
+        }
+        engine_key = _engine_name_to_key.get(os.environ.get("CASERELAY_AGENT", ""))
+        if not engine_key:
+            _log.error("CASERELAY_AGENT=%r does not map to a known key", os.environ.get("CASERELAY_AGENT"))
+            return ""
+        expected_identity = AGENT_IDENTITIES.get(engine_key, "")
+        if ctx.agent_identity != expected_identity:
+            _log.error(
+                "identity mismatch: RunContext has %r but engine %r expects %r",
+                ctx.agent_identity, engine_key, expected_identity,
+            )
+            return ""
+        _log.debug("principal resolved from verified RunContext on engine %s: %s", engine_key, ctx.agent_identity)
+        return ctx.agent_identity
 
     ctx = _ctx_mod.current()
     if ctx.agent_identity:

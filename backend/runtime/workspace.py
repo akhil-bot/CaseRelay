@@ -143,7 +143,15 @@ class Workspace:
         store.save_rows(case_id, "authority_grants", grants, "grant_id")
 
     def activate(self, case_id: str, supervisor_id: str = "supervisor-001") -> dict[str, Any]:
+        """Supervisor HITL: grant proposed authorities and advance to monitoring.
+
+        Idempotent: if the case is already active or monitoring, returns the current state
+        without re-transitioning. This prevents the orchestrator LLM from failing when it
+        redundantly calls activate_case on a case that has already been activated.
+        """
         case = self.get_case(case_id)
+        if case["status"] in ("active", "monitoring"):
+            return case
         assert_transition(case["status"], "active")
         case["status"] = "active"
         case["activated_at"] = _now().isoformat()
