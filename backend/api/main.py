@@ -599,21 +599,20 @@ def _build_summary(case_id: str, run_id: str, child_name: str,
 
 
 def _run_background(run_id: str, case_id: str) -> None:
-    """Drive the real agent fleet end-to-end: intake, then orchestrator through PHASES.
+    """Drive the real agent fleet end-to-end: intake, then precondition-driven engine.
 
-    The five specialist fan-out phases (3-fanout-*) are dispatched concurrently via a
-    ThreadPoolExecutor. Each thread gets its own copy of the contextvars context so
-    case_id/run_id/trace_id propagate correctly without bleeding between tasks. All
-    other phases remain strictly sequential.
+    The phase registry in backend/runtime/fleet.py declares a precondition for every phase.
+    After intake, the engine repeatedly evaluates all not-yet-run phases, dispatches
+    whichever is unlocked, and repeats until nothing is ready. Phases in the same group
+    (the five specialist fan-outs) are dispatched concurrently via ThreadPoolExecutor;
+    all others run one at a time with the lowest priority number winning ties.
 
-    Concurrency mechanism: ThreadPoolExecutor with 5 workers. Chosen because run_agent
-    calls asyncio.run() internally (blocking), so asyncio.gather is not an option. Each
-    thread creates its own event loop.
+    Termination guarantee: each phase runs at most once (tracked by completed_phases).
+    The registry has N phases, so the engine needs at most N+1 iterations (one per phase
+    plus a final evaluation that finds nothing ready). Exceeding that raises immediately.
 
     Thread safety: workspace access is protected by a per-case RLock in Workspace._lock_for().
-    This prevents the race where load() replaces container lists wholesale while another thread
-    is iterating or mutating them. The _run_event_lock protects run event appends (which are
-    keyed by run_id, not case_id, so fall outside the case lock's scope).
+    The _run_event_lock protects run event appends (keyed by run_id, not case_id).
     """
     import logging
     import warnings
@@ -622,7 +621,7 @@ def _run_background(run_id: str, case_id: str) -> None:
     from backend.agents.orchestrator.agent import build_for_run as _build_orchestrator
     from backend.memory.platform import enabled as _mb_enabled, search_sync as _mb_search
     from backend.runtime.context import bind as _bind
-    from backend.runtime.fleet import PHASES, SPECIALISTS
+    from backend.runtime.fleet import PHASE_REGISTRY
     from backend.runtime.invoke import finalize_run_memory, run_agent
 
     _adk_logger = logging.getLogger("google.adk")
@@ -645,10 +644,8 @@ def _run_background(run_id: str, case_id: str) -> None:
     def _run_single_phase(label: str, template: str, ctx: contextvars.Context) -> tuple[str, str | None, str]:
         """Execute one orchestrator phase inside the given context. Returns (label, error_or_None, orch_text).
 
-        A fresh orchestrator is built per call so that each asyncio.run() invocation gets its own
-        httpx.AsyncClient. Sharing one client across asyncio.run() calls in different threads causes
-        'Event loop is closed' because the connection pool's async primitives are bound to the first
-        loop that used them.
+        Used for concurrent fan-out dispatch. A fresh orchestrator is built per call so that
+        each asyncio.run() invocation gets its own httpx.AsyncClient.
         """
         def _inner():
             phase_orchestrator = _build_orchestrator()
@@ -733,180 +730,142 @@ def _run_background(run_id: str, case_id: str) -> None:
             if not workspace.commitments.get(case_id) or not workspace.grants.get(case_id):
                 raise RuntimeError(f"intake did not persist commitments/grants: {intake_text[:400]}")
 
+            # ---- Precondition-driven engine ----
+            completed_phases: set[str] = set()
             phase_failures = 0
-            total_phases = len(PHASES)
             failed_phases: list[str] = []
 
-            fanout_prefix = "3-fanout-"
-            pre_fanout = [(l, t) for l, t in PHASES if not l.startswith(fanout_prefix)]
-            fanout_phases = [(l, t) for l, t in PHASES if l.startswith(fanout_prefix)]
-            # Separate sequential phases that come before and after the fan-out group.
-            # pre_fanout includes 2-activate and everything after 3-fanout-*.
-            sequential_before = []
-            sequential_after = []
-            found_fanout = False
-            past_fanout = False
-            for label, template in PHASES:
-                if label.startswith(fanout_prefix):
-                    found_fanout = True
-                    past_fanout = False
-                elif found_fanout and not label.startswith(fanout_prefix):
-                    past_fanout = True
-                if not label.startswith(fanout_prefix) and not past_fanout:
-                    sequential_before.append((label, template))
-                elif not label.startswith(fanout_prefix) and past_fanout:
-                    sequential_after.append((label, template))
+            for _engine_iter in range(len(PHASE_REGISTRY) + 1):
+                ready = [
+                    spec for spec in PHASE_REGISTRY
+                    if spec.label not in completed_phases
+                    and spec.precondition(case_id)
+                ]
 
-            # --- Sequential phases BEFORE fan-out (e.g. 2-activate) ---
-            for label, template in sequential_before:
-                prompt = template.format(case_id=case_id)
-                workspace.update_run(
-                    run_id, current_phase=label,
-                    commitment_states=workspace.commitment_states(case_id),
-                )
-                _push_event({
-                    "event": "phase_started", "run_id": run_id, "phase": label,
-                    "message": _narrate("phase_started", label, case_id=case_id, child_name=child_name),
-                })
-                try:
-                    phase_orch = _build_orchestrator()
-                    orch_text = _quiet_run_agent(phase_orch, prompt, app_name="continuity_orchestrator")
-                except Exception as phase_exc:  # noqa: BLE001
-                    phase_failures += 1
-                    failed_phases.append(label)
-                    err_msg = str(phase_exc) or repr(phase_exc)
-                    _push_event({
-                        "event": "phase_error", "run_id": run_id,
-                        "phase": label, "error": err_msg,
-                        "message": _narrate("phase_error", label, error=err_msg, child_name=child_name),
-                    })
-                    continue
-                states = workspace.commitment_states(case_id)
-                _push_event({
-                    "event": "phase_complete", "run_id": run_id,
-                    "phase": label, "summary": (orch_text or "")[:300],
-                    "commitment_states": states,
-                    "message": _narrate("phase_complete", label, commitment_states=states, child_name=child_name),
-                })
+                if not ready:
+                    break
 
-            # --- CONCURRENT fan-out: five specialists dispatched in parallel ---
-            if fanout_phases:
-                workspace.update_run(
-                    run_id, current_phase="3-fanout",
-                    commitment_states=workspace.commitment_states(case_id),
-                )
-                with ThreadPoolExecutor(max_workers=len(fanout_phases), thread_name_prefix="fanout") as pool:
-                    futures = {
-                        pool.submit(_run_single_phase, label, template, contextvars.copy_context()): label
-                        for label, template in fanout_phases
-                    }
-                    for future in as_completed(futures):
-                        label_result, error, _ = future.result()
-                        if error is not None:
-                            phase_failures += 1
-                            failed_phases.append(label_result)
+                first = min(ready, key=lambda s: s.priority)
 
-            # --- Sequential phases AFTER fan-out (4-checkpoint, 5-wake, etc.) ---
-            from backend.workflows.durable import await_deadline
-
-            def _should_skip(label: str) -> bool:
-                """Data-driven phase skip: quarantine/approve/enrolled only run when warranted."""
-                packet = workspace.get_case(case_id).get("referral_packet", {})
-                has_inject = any(r.get("inject_callback") for r in packet.get("referrals", []))
-                if label == "6-quarantine" and not has_inject:
-                    return True
-                if label == "7-approve":
-                    pending = [a for a in workspace.list_approvals(case_id) if a.get("decision") == "pending"]
-                    if not pending:
-                        return True
-                if label == "8-enrolled" and not has_inject:
-                    return True
-                return False
-
-            for label, template in sequential_after:
-                if _should_skip(label):
-                    continue
-                # 5-wake is genuinely time-triggered: wait for the checkpoint deadline.
-                if label == "5-wake":
-                    cp = workspace.get_checkpoint(f"wf-{case_id}")
-                    cp_deadline = cp.get("due_at") if cp else None
-                    if cp_deadline:
-                        if isinstance(cp_deadline, str):
-                            cp_deadline = datetime.fromisoformat(cp_deadline.replace("Z", "+00:00"))
-                        scheduled_at = datetime.now(timezone.utc)
-                        wait_secs = max(0, (cp_deadline - scheduled_at).total_seconds())
-                        child = child_name or "the child"
-                        _push_event({
-                            "event": "wake_scheduled", "run_id": run_id, "case_id": case_id,
-                            "checkpoint_due": cp_deadline.isoformat(),
-                            "wait_seconds": round(wait_secs, 1),
-                            "message": (
-                                f"Follow-up reminder set for {int(wait_secs)}s from now — "
-                                f"waiting for the deadline before checking back on {child}'s commitments."
-                            ) if wait_secs > 0 else (
-                                f"Deadline already reached — checking back on {child}'s commitments now."
-                            ),
-                        })
-                        workspace.update_run(run_id, current_phase="waiting-for-wake")
-
-                        if wait_secs > 0:
-                            try:
-                                wake_result = await_deadline(case_id, poll_interval=2.0, max_wait=300.0)
-                            except (TimeoutError, ValueError) as wake_exc:
-                                _push_event({
-                                    "event": "phase_error", "run_id": run_id,
-                                    "phase": "5-wake", "error": str(wake_exc),
-                                    "message": f"The scheduled follow-up could not fire: {wake_exc}",
-                                })
+                if first.group:
+                    group_phases = [s for s in ready if s.group == first.group]
+                    workspace.update_run(
+                        run_id, current_phase="3-fanout",
+                        commitment_states=workspace.commitment_states(case_id),
+                    )
+                    with ThreadPoolExecutor(max_workers=len(group_phases), thread_name_prefix="fanout") as pool:
+                        futures = {
+                            pool.submit(
+                                _run_single_phase, spec.label, spec.prompt_template,
+                                contextvars.copy_context(),
+                            ): spec.label
+                            for spec in group_phases
+                        }
+                        for future in as_completed(futures):
+                            label_result, error, _ = future.result()
+                            if error is not None:
                                 phase_failures += 1
-                                failed_phases.append("5-wake")
-                                continue
-                        else:
-                            workspace.update_checkpoint_state(f"wf-{case_id}", "running")
-                            wake_result = {"waited_seconds": 0}
+                                failed_phases.append(label_result)
+                    for spec in group_phases:
+                        completed_phases.add(spec.label)
 
-                        fired_at = datetime.now(timezone.utc)
-                        elapsed = wake_result.get("waited_seconds", 0)
-                        _push_event({
-                            "event": "wake_fired", "run_id": run_id, "case_id": case_id,
-                            "fired_at": fired_at.isoformat(),
-                            "elapsed_seconds": elapsed,
-                            "message": (
-                                f"Reminder fired after {elapsed:.0f}s — "
-                                f"now following up on {child}'s open commitments."
-                            ),
-                        })
+                else:
+                    label = first.label
 
-                prompt = template.format(case_id=case_id)
-                workspace.update_run(
-                    run_id, current_phase=label,
-                    commitment_states=workspace.commitment_states(case_id),
-                )
-                _push_event({
-                    "event": "phase_started", "run_id": run_id, "phase": label,
-                    "message": _narrate("phase_started", label, case_id=case_id, child_name=child_name),
-                })
-                try:
-                    phase_orch = _build_orchestrator()
-                    orch_text = _quiet_run_agent(phase_orch, prompt, app_name="continuity_orchestrator")
-                except Exception as phase_exc:  # noqa: BLE001
-                    phase_failures += 1
-                    failed_phases.append(label)
-                    err_msg = str(phase_exc) or repr(phase_exc)
+                    if label == "5-wake":
+                        from backend.workflows.durable import await_deadline
+
+                        cp = workspace.get_checkpoint(f"wf-{case_id}")
+                        cp_deadline = cp.get("due_at") if cp else None
+                        if cp_deadline:
+                            if isinstance(cp_deadline, str):
+                                cp_deadline = datetime.fromisoformat(cp_deadline.replace("Z", "+00:00"))
+                            scheduled_at = datetime.now(timezone.utc)
+                            wait_secs = max(0, (cp_deadline - scheduled_at).total_seconds())
+                            child = child_name or "the child"
+                            _push_event({
+                                "event": "wake_scheduled", "run_id": run_id, "case_id": case_id,
+                                "checkpoint_due": cp_deadline.isoformat(),
+                                "wait_seconds": round(wait_secs, 1),
+                                "message": (
+                                    f"Follow-up reminder set for {int(wait_secs)}s from now — "
+                                    f"waiting for the deadline before checking back on {child}'s commitments."
+                                ) if wait_secs > 0 else (
+                                    f"Deadline already reached — checking back on {child}'s commitments now."
+                                ),
+                            })
+                            workspace.update_run(run_id, current_phase="waiting-for-wake")
+
+                            if wait_secs > 0:
+                                try:
+                                    wake_result = await_deadline(case_id, poll_interval=2.0, max_wait=300.0)
+                                except (TimeoutError, ValueError) as wake_exc:
+                                    _push_event({
+                                        "event": "phase_error", "run_id": run_id,
+                                        "phase": "5-wake", "error": str(wake_exc),
+                                        "message": f"The scheduled follow-up could not fire: {wake_exc}",
+                                    })
+                                    phase_failures += 1
+                                    failed_phases.append("5-wake")
+                                    completed_phases.add(label)
+                                    continue
+                            else:
+                                workspace.update_checkpoint_state(f"wf-{case_id}", "running")
+                                wake_result = {"waited_seconds": 0}
+
+                            fired_at = datetime.now(timezone.utc)
+                            elapsed = wake_result.get("waited_seconds", 0)
+                            _push_event({
+                                "event": "wake_fired", "run_id": run_id, "case_id": case_id,
+                                "fired_at": fired_at.isoformat(),
+                                "elapsed_seconds": elapsed,
+                                "message": (
+                                    f"Reminder fired after {elapsed:.0f}s — "
+                                    f"now following up on {child}'s open commitments."
+                                ),
+                            })
+
+                    prompt = first.prompt_template.format(case_id=case_id)
+                    workspace.update_run(
+                        run_id, current_phase=label,
+                        commitment_states=workspace.commitment_states(case_id),
+                    )
                     _push_event({
-                        "event": "phase_error", "run_id": run_id,
-                        "phase": label, "error": err_msg,
-                        "message": _narrate("phase_error", label, error=err_msg, child_name=child_name),
+                        "event": "phase_started", "run_id": run_id, "phase": label,
+                        "message": _narrate("phase_started", label, case_id=case_id, child_name=child_name),
                     })
-                    continue
-                states = workspace.commitment_states(case_id)
-                _push_event({
-                    "event": "phase_complete", "run_id": run_id,
-                    "phase": label, "summary": (orch_text or "")[:300],
-                    "commitment_states": states,
-                    "message": _narrate("phase_complete", label, commitment_states=states, child_name=child_name),
-                })
+                    try:
+                        phase_orch = _build_orchestrator()
+                        orch_text = _quiet_run_agent(phase_orch, prompt, app_name="continuity_orchestrator")
+                    except Exception as phase_exc:  # noqa: BLE001
+                        phase_failures += 1
+                        failed_phases.append(label)
+                        err_msg = str(phase_exc) or repr(phase_exc)
+                        _push_event({
+                            "event": "phase_error", "run_id": run_id,
+                            "phase": label, "error": err_msg,
+                            "message": _narrate("phase_error", label, error=err_msg, child_name=child_name),
+                        })
+                        completed_phases.add(label)
+                        continue
+                    states = workspace.commitment_states(case_id)
+                    _push_event({
+                        "event": "phase_complete", "run_id": run_id,
+                        "phase": label, "summary": (orch_text or "")[:300],
+                        "commitment_states": states,
+                        "message": _narrate("phase_complete", label, commitment_states=states, child_name=child_name),
+                    })
+                    completed_phases.add(label)
 
+            else:
+                raise RuntimeError(
+                    f"precondition engine exceeded {len(PHASE_REGISTRY) + 1} iterations — "
+                    f"a precondition likely stayed true after its phase ran; "
+                    f"completed={sorted(completed_phases)}, "
+                    f"remaining={sorted(s.label for s in PHASE_REGISTRY if s.label not in completed_phases)}"
+                )
+
+            total_phases_run = len(completed_phases)
             commitments = workspace.commitment_states(case_id)
             wrote_events = finalize_run_memory(run_id, case_id)
             if wrote_events > 0:
@@ -920,14 +879,10 @@ def _run_background(run_id: str, case_id: str) -> None:
                     ),
                 })
 
-            # A run where specialists silently failed (no Python exception, but their
-            # commitments stayed "pending") must not report "completed". Phase-level
-            # exception counting only catches orchestrator-level failures; specialist
-            # errors surface as LLM text, leaving phase_failures at zero.
             pending_commitments = [k for k, v in commitments.items() if v == "pending"]
             has_unresolved = bool(pending_commitments)
 
-            if phase_failures == total_phases:
+            if total_phases_run > 0 and phase_failures == total_phases_run:
                 outcome = "failed"
             elif phase_failures > 0 or has_unresolved:
                 outcome = "partial_failure"
@@ -944,21 +899,21 @@ def _run_background(run_id: str, case_id: str) -> None:
             if outcome == "failed":
                 workspace.update_run(
                     run_id, state="failed", current_phase="done",
-                    error=f"all {total_phases} phases failed",
+                    error=f"all {total_phases_run} phases failed",
                     commitment_states=commitments,
                     failed_phases=failed_phases,
                 )
                 _push_event({
                     "event": "run_failed", "run_id": run_id, "case_id": case_id,
-                    "error": f"all {total_phases} phases failed",
+                    "error": f"all {total_phases_run} phases failed",
                     "failed_phases": failed_phases,
                     "commitment_states": commitments,
-                    "message": _narrate("run_failed", "done", error=f"all {total_phases} phases failed", child_name=child_name),
+                    "message": _narrate("run_failed", "done", error=f"all {total_phases_run} phases failed", child_name=child_name),
                 })
             elif outcome == "partial_failure":
                 error_parts = []
                 if phase_failures > 0:
-                    error_parts.append(f"{phase_failures}/{total_phases} phases failed")
+                    error_parts.append(f"{phase_failures}/{total_phases_run} phases failed")
                 if has_unresolved:
                     error_parts.append(f"commitments still pending: {pending_commitments}")
                 error_msg = "; ".join(error_parts)
