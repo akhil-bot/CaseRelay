@@ -5,6 +5,7 @@ import {
   useCallback,
   useContext,
   useEffect,
+  useMemo,
   useRef,
   useState,
   type ReactNode,
@@ -70,10 +71,13 @@ export function ToolEventsProvider({ children }: { children: ReactNode }) {
     );
   }, []);
 
+  const value = useMemo(
+    () => ({ caseEntries, subscribe, findCase, pushCase, scenarioCacheRef, subscribersRef }),
+    [caseEntries, subscribe, findCase, pushCase],
+  );
+
   return (
-    <ToolEventsContext.Provider
-      value={{ caseEntries, subscribe, findCase, pushCase, scenarioCacheRef, subscribersRef }}
-    >
+    <ToolEventsContext.Provider value={value}>
       {children}
     </ToolEventsContext.Provider>
   );

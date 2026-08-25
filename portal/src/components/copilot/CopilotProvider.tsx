@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import { CopilotChatConfigurationProvider, CopilotKit } from "@copilotkit/react-core/v2";
 import type { ReactFrontendTool } from "@copilotkit/react-core/v2";
 import type { ReactNode } from "react";
@@ -22,6 +22,11 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
 
 function CopilotProviderInner({ children }: { children: ReactNode }) {
   const { findCase, pushCase, scenarioCacheRef, subscribersRef } = useToolEvents();
+
+  const findCaseRef = useRef(findCase);
+  const pushCaseRef = useRef(pushCase);
+  useEffect(() => { findCaseRef.current = findCase; }, [findCase]);
+  useEffect(() => { pushCaseRef.current = pushCase; }, [pushCase]);
 
   const frontendTools = useMemo(
     () => [
@@ -70,7 +75,7 @@ function CopilotProviderInner({ children }: { children: ReactNode }) {
               return `No scenario found matching "${scenario}". Available: ${available}`;
             }
             const result = await createCase(match.id, due_in);
-            pushCase({ caseId: result.case_id, scenario: match.id, childName: match.child_name });
+            pushCaseRef.current({ caseId: result.case_id, scenario: match.id, childName: match.child_name });
             for (const cb of subscribersRef.current) cb.onCaseCreated(result, match);
             return JSON.stringify({
               case_id: result.case_id,
@@ -96,7 +101,7 @@ function CopilotProviderInner({ children }: { children: ReactNode }) {
         }),
         handler: async ({ case_ref }: { case_ref: string }) => {
           try {
-            const entry = findCase(case_ref);
+            const entry = findCaseRef.current(case_ref);
             if (!entry) {
               return "No case found in this session. Create a case first.";
             }
@@ -114,9 +119,8 @@ function CopilotProviderInner({ children }: { children: ReactNode }) {
         },
       },
     ],
-    // Stable: handler closures capture refs (findCase, pushCase are useCallback-stable;
-    // scenarioCacheRef and subscribersRef are React refs that never change identity)
-    [findCase, pushCase, scenarioCacheRef, subscribersRef],
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [],
   );
 
   return (
