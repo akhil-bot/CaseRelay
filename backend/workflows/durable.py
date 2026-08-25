@@ -100,6 +100,58 @@ def sweep(now: datetime | None = None) -> list[str]:
     return fired
 
 
+def await_deadline(case_id: str, poll_interval: float = 2.0, max_wait: float = 300.0) -> dict:
+    """Block until the case's checkpoint becomes due, then fire it.
+
+    This is the demo-friendly path: the run genuinely waits for wall-clock time to pass.
+    Returns the checkpoint dict with actual timing metadata. Raises TimeoutError if
+    max_wait is exceeded before the deadline arrives (safety valve for Cloud Run's 900s limit).
+    """
+    import time
+
+    workflow_id = f"wf-{case_id}"
+    cp = workspace.get_checkpoint(workflow_id)
+    if not cp:
+        raise ValueError(f"no checkpoint for {case_id}")
+
+    due_at = cp.get("due_at")
+    if due_at is None:
+        raise ValueError(f"checkpoint {workflow_id} has no due_at")
+    if isinstance(due_at, str):
+        due_at = datetime.fromisoformat(due_at.replace("Z", "+00:00"))
+    if not due_at.tzinfo:
+        due_at = due_at.replace(tzinfo=timezone.utc)
+
+    start = time.monotonic()
+    scheduled_at = datetime.now(timezone.utc)
+
+    while True:
+        now = datetime.now(timezone.utc)
+        if now >= due_at:
+            break
+        elapsed = time.monotonic() - start
+        if elapsed >= max_wait:
+            raise TimeoutError(
+                f"waited {elapsed:.1f}s for checkpoint {workflow_id} "
+                f"(due_at={due_at.isoformat()}, now={now.isoformat()})"
+            )
+        remaining = (due_at - now).total_seconds()
+        time.sleep(min(poll_interval, remaining + 0.1))
+
+    fired_at = datetime.now(timezone.utc)
+    elapsed_seconds = (fired_at - scheduled_at).total_seconds()
+
+    workspace.update_checkpoint_state(workflow_id, "running")
+    return {
+        "workflow_id": workflow_id,
+        "case_id": case_id,
+        "due_at": due_at,
+        "fired_at": fired_at,
+        "waited_seconds": round(elapsed_seconds, 1),
+        "state": "running",
+    }
+
+
 def resume_wake(case_id: str, workflow_id: str | None = None) -> dict:
     """Resume a workflow from its checkpoint, writing a scheduler audit event."""
     if workflow_id is None:
