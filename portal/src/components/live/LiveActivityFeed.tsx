@@ -80,7 +80,7 @@ export function LiveActivityFeed({ run }: { run: LiveRunState }) {
     <Card
       icon="activity"
       title="Agent Activity"
-      subtitle={run.streaming ? "Streaming live events" : run.terminalState ? `Run ${run.terminalState}` : undefined}
+      subtitle={run.streaming ? "Streaming live events" : run.terminalState ? `Run ${run.terminalState.replace("_", " ")}` : undefined}
       action={
         run.terminalState ? (
           <Badge

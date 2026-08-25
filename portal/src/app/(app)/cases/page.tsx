@@ -165,7 +165,7 @@ function LiveCasesSection() {
                     <span className="shrink-0 font-mono text-[11px] text-ink-muted">{id}</span>
                   </div>
                   <p className={cx("mt-0.5 truncate", type_.small)}>
-                    {String(c.scenario ?? "")} — {status}
+                    {String(c.scenario ?? (c.referral_packet as Record<string, unknown> | undefined)?.scenario ?? "")} — {status}
                   </p>
                 </div>
                 <Badge variant="accent" icon="activity">Live</Badge>

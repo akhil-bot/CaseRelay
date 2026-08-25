@@ -29,7 +29,7 @@ import { AGENTS_BY_ID } from "@/lib/mock/agents";
 import { AUTHORITY_GRANT, CASES, PRIMARY_CASE_ID } from "@/lib/mock/cases";
 import { EDUCATION_PROJECTION } from "@/lib/mock/policy";
 import { useViewer } from "@/lib/viewer";
-import type { Commitment } from "@/lib/types";
+import type { Commitment, CommitmentStatus } from "@/lib/types";
 
 // ---------------------------------------------------------------------------
 // Route decision: mock walkthrough vs live control-plane data
@@ -178,11 +178,13 @@ function LiveCaseDetail({ caseId }: { caseId: string }) {
   const { data, runs } = liveCase;
   const caseData = data.case;
   const childName = String(caseData.child_name ?? caseId);
-  const scenario = String(caseData.scenario ?? "");
+  const referral = (caseData.referral_packet ?? {}) as Record<string, unknown>;
+  const scenario = String(caseData.scenario ?? referral.scenario ?? "");
   const status = String(caseData.status ?? "unknown");
   const commitmentStates = data.commitments;
   const commitmentEntries = Object.entries(commitmentStates);
-  const closedCount = commitmentEntries.filter(([, v]) => v === "completed").length;
+  const TERMINAL_STATUSES = new Set(["completed", "blocked", "unresolved"]);
+  const closedCount = commitmentEntries.filter(([, v]) => TERMINAL_STATUSES.has(v)).length;
   const hasActiveRun = runs.some((r) => r.state === "running" || r.state === "queued");
   const isStreaming = activeRunState.streaming || hasActiveRun;
 
@@ -279,7 +281,9 @@ function LiveCaseDetail({ caseId }: { caseId: string }) {
           <Rows as="ol">
             {commitmentEntries.map(([type, commitmentStatus]) => (
               <li key={type} className={cx("border-l-2", row.pad,
-                commitmentStatus === "completed" ? "border-l-seal" : "border-l-transparent",
+                commitmentStatus === "completed" ? "border-l-seal"
+                  : commitmentStatus === "blocked" ? "border-l-danger"
+                  : "border-l-transparent",
               )}>
                 <div className="flex items-center gap-3">
                   <DomainIcon domain={type as "legal" | "education" | "healthcare" | "shelter" | "family"} size={32} />
@@ -288,7 +292,7 @@ function LiveCaseDetail({ caseId }: { caseId: string }) {
                       {type.replace("_", " ")}
                     </span>
                   </div>
-                  <StatusBadge status={commitmentStatus as "completed" | "pending" | "in_progress" | "unresolved"} />
+                  <StatusBadge status={commitmentStatus as CommitmentStatus} />
                 </div>
               </li>
             ))}
@@ -369,8 +373,8 @@ function LiveCaseDetail({ caseId }: { caseId: string }) {
                         {e.agent_identity}
                       </Mono>
                     )}
-                    {e.detail && (
-                      <p className={cx("mt-0.5", type_.meta)}>{e.detail}</p>
+                    {(e.detail || e.explanation) && (
+                      <p className={cx("mt-0.5", type_.meta)}>{e.detail || e.explanation}</p>
                     )}
                   </div>
                   {e.timestamp && (
