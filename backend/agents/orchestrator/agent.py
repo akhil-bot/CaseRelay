@@ -1,3 +1,4 @@
+import logging
 import os
 
 from google.adk.agents import Agent
@@ -10,6 +11,8 @@ from backend.agents.shelter import agent as shelter
 from backend.agents.verifier import agent as verifier
 from backend.memory.bank import preload
 from backend.memory.platform import enabled as memory_bank_enabled, search_sync as platform_search
+
+logger = logging.getLogger(__name__)
 from backend.runtime.workspace import workspace
 from backend.workflows.durable import resume_wake, write_checkpoint
 
@@ -62,13 +65,20 @@ def wake_workflow(case_id: str) -> dict:
 
 
 def preload_memory(case_id: str) -> dict:
-    """Load operational state and platform Memory Bank recall for continuity across sessions."""
+    """Load operational state and platform Memory Bank recall for continuity across sessions.
+
+    Memory Bank recall is best-effort. If the search times out or fails (e.g. under concurrent
+    fanout load), we log and return local memory rather than propagating and killing the phase.
+    """
     result = preload(case_id)
     if memory_bank_enabled():
         query = f"coordination history and outcomes for case {case_id}"
-        memories = platform_search(case_id, query)
-        if memories:
-            result["platform_memories"] = memories
+        try:
+            memories = platform_search(case_id, query)
+            if memories:
+                result["platform_memories"] = memories
+        except Exception as exc:
+            logger.warning("Memory Bank recall failed for case %s: %s", case_id, repr(exc))
     return result
 
 

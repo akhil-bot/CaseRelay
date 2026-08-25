@@ -529,12 +529,13 @@ def _run_background(run_id: str, case_id: str) -> None:
             try:
                 text = _quiet_run_agent(orchestrator_agent, prompt, app_name="continuity_orchestrator")
             except Exception as exc:  # noqa: BLE001
+                err_msg = str(exc) or repr(exc)
                 _push_event({
                     "event": "phase_error", "run_id": run_id,
-                    "phase": label, "error": str(exc),
-                    "message": _narrate("phase_error", label, error=str(exc)),
+                    "phase": label, "error": err_msg,
+                    "message": _narrate("phase_error", label, error=err_msg),
                 })
-                return (label, str(exc), "")
+                return (label, err_msg, "")
             states = workspace.commitment_states(case_id)
             _push_event({
                 "event": "phase_complete", "run_id": run_id,
@@ -616,10 +617,11 @@ def _run_background(run_id: str, case_id: str) -> None:
                 except Exception as phase_exc:  # noqa: BLE001
                     phase_failures += 1
                     failed_phases.append(label)
+                    err_msg = str(phase_exc) or repr(phase_exc)
                     _push_event({
                         "event": "phase_error", "run_id": run_id,
-                        "phase": label, "error": str(phase_exc),
-                        "message": _narrate("phase_error", label, error=str(phase_exc)),
+                        "phase": label, "error": err_msg,
+                        "message": _narrate("phase_error", label, error=err_msg),
                     })
                     continue
                 states = workspace.commitment_states(case_id)
@@ -663,10 +665,11 @@ def _run_background(run_id: str, case_id: str) -> None:
                 except Exception as phase_exc:  # noqa: BLE001
                     phase_failures += 1
                     failed_phases.append(label)
+                    err_msg = str(phase_exc) or repr(phase_exc)
                     _push_event({
                         "event": "phase_error", "run_id": run_id,
-                        "phase": label, "error": str(phase_exc),
-                        "message": _narrate("phase_error", label, error=str(phase_exc)),
+                        "phase": label, "error": err_msg,
+                        "message": _narrate("phase_error", label, error=err_msg),
                     })
                     continue
                 states = workspace.commitment_states(case_id)
