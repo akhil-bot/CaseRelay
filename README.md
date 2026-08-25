@@ -153,7 +153,7 @@ Persona switching (advocate vs. platform view) is UI-only and carries no authent
 **Prerequisites:** Python 3.12+, `uv`, Google Cloud project with GEAP access, `gcloud` CLI authenticated.
 
 ```bash
-git clone https://github.com/<your-org>/caserelay.git
+git clone git@github.com:akhil-bot/CaseRelay.git
 cd caserelay
 uv sync                       # installs from pyproject.toml into .venv
 source .venv/bin/activate
