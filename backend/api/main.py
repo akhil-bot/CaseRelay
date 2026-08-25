@@ -686,6 +686,11 @@ def _run_background(run_id: str, case_id: str) -> None:
                 "message": _narrate("run_started", "intake", case_id=case_id, child_name=child_name),
             })
 
+            _push_event({
+                "event": "phase_started", "run_id": run_id, "phase": "intake",
+                "message": _narrate("phase_started", "intake", case_id=case_id, child_name=child_name),
+            })
+
             recall_count = 0
             if _mb_enabled():
                 child = child_name or "the child"
@@ -802,7 +807,76 @@ def _run_background(run_id: str, case_id: str) -> None:
                             failed_phases.append(label_result)
 
             # --- Sequential phases AFTER fan-out (4-checkpoint, 5-wake, etc.) ---
+            from backend.workflows.durable import await_deadline
+
+            def _should_skip(label: str) -> bool:
+                """Data-driven phase skip: quarantine/approve/enrolled only run when warranted."""
+                packet = workspace.get_case(case_id).get("referral_packet", {})
+                has_inject = any(r.get("inject_callback") for r in packet.get("referrals", []))
+                if label == "6-quarantine" and not has_inject:
+                    return True
+                if label == "7-approve":
+                    pending = [a for a in workspace.list_approvals(case_id) if a.get("decision") == "pending"]
+                    if not pending:
+                        return True
+                if label == "8-enrolled" and not has_inject:
+                    return True
+                return False
+
             for label, template in sequential_after:
+                if _should_skip(label):
+                    continue
+                # 5-wake is genuinely time-triggered: wait for the checkpoint deadline.
+                if label == "5-wake":
+                    cp = workspace.get_checkpoint(f"wf-{case_id}")
+                    cp_deadline = cp.get("due_at") if cp else None
+                    if cp_deadline:
+                        if isinstance(cp_deadline, str):
+                            cp_deadline = datetime.fromisoformat(cp_deadline.replace("Z", "+00:00"))
+                        scheduled_at = datetime.now(timezone.utc)
+                        wait_secs = max(0, (cp_deadline - scheduled_at).total_seconds())
+                        child = child_name or "the child"
+                        _push_event({
+                            "event": "wake_scheduled", "run_id": run_id, "case_id": case_id,
+                            "checkpoint_due": cp_deadline.isoformat(),
+                            "wait_seconds": round(wait_secs, 1),
+                            "message": (
+                                f"Follow-up reminder set for {int(wait_secs)}s from now — "
+                                f"waiting for the deadline before checking back on {child}'s commitments."
+                            ) if wait_secs > 0 else (
+                                f"Deadline already reached — checking back on {child}'s commitments now."
+                            ),
+                        })
+                        workspace.update_run(run_id, current_phase="waiting-for-wake")
+
+                        if wait_secs > 0:
+                            try:
+                                wake_result = await_deadline(case_id, poll_interval=2.0, max_wait=300.0)
+                            except (TimeoutError, ValueError) as wake_exc:
+                                _push_event({
+                                    "event": "phase_error", "run_id": run_id,
+                                    "phase": "5-wake", "error": str(wake_exc),
+                                    "message": f"The scheduled follow-up could not fire: {wake_exc}",
+                                })
+                                phase_failures += 1
+                                failed_phases.append("5-wake")
+                                continue
+                        else:
+                            workspace.update_checkpoint_state(f"wf-{case_id}", "running")
+                            wake_result = {"waited_seconds": 0}
+
+                        fired_at = datetime.now(timezone.utc)
+                        elapsed = wake_result.get("waited_seconds", 0)
+                        _push_event({
+                            "event": "wake_fired", "run_id": run_id, "case_id": case_id,
+                            "fired_at": fired_at.isoformat(),
+                            "elapsed_seconds": elapsed,
+                            "message": (
+                                f"Reminder fired after {elapsed:.0f}s — "
+                                f"now following up on {child}'s open commitments."
+                            ),
+                        })
+
                 prompt = template.format(case_id=case_id)
                 workspace.update_run(
                     run_id, current_phase=label,
