@@ -69,7 +69,7 @@ async def _run(agent, message: str, app_name: str, user_id: str) -> str:
                 tracer.add("output", author, "says", part.text)
                 chunks.append(part.text)
 
-    if memory_bank_enabled():
+    if memory_bank_enabled() and app_name == "continuity_orchestrator":
         case_id = _case_id_from_context()
         if case_id:
             completed = await sessions.get_session(
