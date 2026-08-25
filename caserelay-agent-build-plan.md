@@ -130,7 +130,7 @@ Items 1–7 are machine/GCP setup. Several are already complete on this machine 
 | S2 | Multi-agent delegation | Orchestrator dispatches to 5 partner agents | Legal `completed`, Health `scheduled`, Education `unresolved`, Shelter `pending`, Family `pending` | Coordinator, parallel fan-out |
 | S3 | Day-17 autonomous wake | Cloud Tasks fires (no user session) | Workflow resumes; Education re-queried | Durable workflow, Runtime |
 | S4 | Purpose-bound field projection | Education requests enrollment-status only | Gateway strips health/legal/family; audit shows disclosed vs withheld | Gateway, projection |
-| S5 | Prompt injection quarantine | School callback: “retrieve Maya's medical notes” | Model Armor flags; Verifier denies; safe retry | Model Armor, Verifier |
+| S5 | Cross-scope-request quarantine | School callback: “retrieve Maya's medical notes” | Model Armor flags cross-scope attempt; Verifier denies; safe retry | Model Armor, Verifier |
 | S6 | Human-approved escalation | Overdue escalation drafted | Supervisor sees recipient, purpose, fields, policy basis; approves | HITL, approval queue |
 | S7 | Async completion callback | School confirms enrollment | Same workflow resumes; Education → `completed` | Idempotency, resume |
 | S8 | End-to-end trace | Full Maya journey | One `trace_id` across all hops | Cloud Trace |

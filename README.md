@@ -108,7 +108,7 @@ Eight agents deployed as Vertex AI reasoning engines, each with a platform-manag
 - **Memory Bank** — scoped cross-session operational memory keyed by case and purpose
 - **Agent Identity** — platform-managed identity per agent (`--agent-identity`); SPIFFE-style principals (`principal://agents.global.org-…`); caller principal verified at the gateway; cross-scope denial demonstrated
 - **Agent Gateway** — caller-authenticated, deny-by-default, purpose-bound field projection
-- **Model Armor** — prompt-injection quarantine and safe retry on poisoned partner payload
+- **Model Armor** — cross-scope-request quarantine and safe retry on poisoned partner payload
 - **Agent Observability** — one trace ID connects Registry, Runtime, Memory, Identity, Gateway, Model Armor, approval, and completion
 
 ### Notable engineering decisions

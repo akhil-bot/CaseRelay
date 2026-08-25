@@ -2,7 +2,7 @@
 
 ## What this run demonstrates
 
-The **maya** scenario exercises the flagship demo flow: multi-agent fan-out over A2A to all specialist engines, Model Armor catching a prompt-injection payload in a partner callback, quarantine → human escalation → supervisor approval → case closes, durable state across a timed wake, and the audit trail attributing actions to per-agent platform identities. It is the only scenario that touches phases 4–9 of the PHASES list (checkpoint, wake, quarantine, approve, enrolled, memory).
+The **maya** scenario exercises the flagship demo flow: multi-agent fan-out over A2A to all specialist engines, Model Armor catching a cross-scope data-exfiltration attempt in a partner callback, quarantine → human escalation → supervisor approval → case closes, durable state across a timed wake, and the audit trail attributing actions to per-agent platform identities. It is the only scenario that touches phases 4–9 of the PHASES list (checkpoint, wake, quarantine, approve, enrolled, memory).
 
 **What maya does NOT cover:** cross-scope denial at the Gateway layer (that is `rosa`). In maya, the poisoned callback is caught by Model Armor in phase 6; the Gateway's field-level scope denial (`IdentityDenied` on a denied field) is exercised only by `rosa`. If you need to show that, run rosa as a short second demo after maya completes — it takes ~2 minutes and produces a `denial` audit event with `denied_field` populated.
 
@@ -25,7 +25,7 @@ The portal's BFF proxy (`/api/control-plane/[...path]`) forwards all traffic ser
 
 1. Navigate to **http://localhost:3000/admin** (the "Synthetic Data Lab" card loads).
 2. Set the **Deadline** field to `45s` (compresses the wake timer so it fires in-run rather than 17 real days).
-3. Under **Complex**, click the **Maya** card ("Flagship — stalled enrollment, prompt injection, quarantine, approval, close").
+3. Under **Complex**, click the **Maya** card ("Flagship — stalled enrollment, cross-scope callback, quarantine, approval, close").
 4. The "Case CR-XXXX" card appears with scenario details and a due timestamp.
 5. Click **"Run the fleet"**.
 6. The event stream opens. Watch the event log scroll — each row shows a human-readable message, a raw event type badge, and a phase badge.
@@ -70,7 +70,7 @@ The event log renders the `message` field from each SSE event. These are the exa
 | 5-wake | `phase_started` | "Day-17 wake fired; re-checking open commitments." | — | Timed/async wake |
 | 5-wake | `phase_complete` | "Wake phase complete; open commitments re-checked." | 10–30s | Durable wake resumes without user session |
 | 6-quarantine | `phase_started` | "Inspecting an inbound callback for safety concerns." | — | Model Armor trigger point |
-| 6-quarantine | `phase_complete` | "Callback inspected and quarantine decision made." | 10–30s | **Injection caught** |
+| 6-quarantine | `phase_complete` | "Callback inspected and quarantine decision made." | 10–30s | **Cross-scope callback quarantined** |
 | 7-approve | `phase_started` | "Supervisor is reviewing the quarantined escalation." | — | Human escalation gate |
 | 7-approve | `phase_complete` | "Supervisor approved the escalation." | 5–15s | Approval recorded |
 | 8-enrolled | `phase_started` | "Verifying school enrollment via the SIS callback." | — | Clean re-callback |
@@ -83,7 +83,7 @@ Fan-out events (phases 3-fanout-*) arrive in **arbitrary order** — they run co
 
 ---
 
-## The moment that matters: injection → quarantine → escalation
+## The moment that matters: cross-scope callback → quarantine → escalation
 
 **What happens internally (phase 6):**
 

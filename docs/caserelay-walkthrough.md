@@ -143,7 +143,7 @@ Before this change, a specialist whose grant covered only its own status fields 
 
 The reason for auditing the boring successes too: this trail is the artefact you show a supervisor or a judge. It has to be able to answer "what did this agent see, and under what authority" for **every** access — and an in-process trace object does not survive the request, let alone a redeploy. So it goes to Firestore under `cases/{case_id}/audit_events/{event_id}`.
 
-The Memory Bank write (`backend/memory/bank.py`) is the operational counterpart: one entry per purpose holding status, disclosed/withheld fields, legal basis, verdict. `bank.write()` filters a `FORBIDDEN_RAW` set (`diagnosis`, `medication`, `clinical_notes`, `legal_strategy`, `narrative`, `instruction`) so raw content can never reach memory even by accident. That last key, `instruction`, is what stops a prompt-injection payload being persisted.
+The Memory Bank write (`backend/memory/bank.py`) is the operational counterpart: one entry per purpose holding status, disclosed/withheld fields, legal basis, verdict. `bank.write()` filters a `FORBIDDEN_RAW` set (`diagnosis`, `medication`, `clinical_notes`, `legal_strategy`, `narrative`, `instruction`) so raw content can never reach memory even by accident. That last key, `instruction`, is what stops a cross-scope exfiltration payload being persisted.
 
 ### Quarantine and the human gate
 
