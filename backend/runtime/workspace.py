@@ -152,23 +152,34 @@ class Workspace:
         Idempotent: if the case is already active or monitoring, returns the current state
         without re-transitioning. This prevents the orchestrator LLM from failing when it
         redundantly calls activate_case on a case that has already been activated.
+
+        Thread safety: the entire operation is serialised under the per-case RLock. Without
+        the lock, a concurrent HTTP handler (portal polling, SSE stream, etc.) can call
+        load() and replace self.grants[case_id] wholesale with fresh "proposed" objects from
+        Firestore between the mutation loop and put_grants(). When that happens, put_grants
+        saves the replaced proposed list rather than the mutated granted one, leaving grants
+        permanently stuck at "proposed" while the case advances to "monitoring".
         """
-        case = self.get_case(case_id)
-        if case["status"] in ("active", "monitoring"):
+        with self._lock_for(case_id):
+            self.load(case_id)
+            case = self.cases.get(case_id)
+            if not case:
+                raise CaseNotFound(f"case {case_id} has not been ingested")
+            if case["status"] in ("active", "monitoring"):
+                return case
+            assert_transition(case["status"], "active")
+            case["status"] = "active"
+            case["activated_at"] = _now().isoformat()
+            case["supervisor_id"] = supervisor_id
+            for grant in self.grants.get(case_id, []):
+                grant["status"] = "granted"
+                grant["granted_by"] = supervisor_id
+                grant["revoked"] = False
+            assert_transition("active", "monitoring")
+            case["status"] = "monitoring"
+            self.put_grants(case_id, self.grants.get(case_id, []))
+            store.save_case(case_id, case)
             return case
-        assert_transition(case["status"], "active")
-        case["status"] = "active"
-        case["activated_at"] = _now().isoformat()
-        case["supervisor_id"] = supervisor_id
-        for grant in self.grants[case_id]:
-            grant["status"] = "granted"
-            grant["granted_by"] = supervisor_id
-            grant["revoked"] = False
-        assert_transition("active", "monitoring")
-        case["status"] = "monitoring"
-        self.put_grants(case_id, self.grants[case_id])
-        store.save_case(case_id, case)
-        return case
 
     def grant_for(self, case_id: str, identity: str, purpose: str) -> dict[str, Any] | None:
         with self._lock_for(case_id):

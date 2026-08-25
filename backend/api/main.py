@@ -680,6 +680,13 @@ def _run_background(run_id: str, case_id: str) -> None:
             commitments = workspace.commitment_states(case_id)
             finalize_run_memory(run_id, case_id)
 
+            # A run where specialists silently failed (no Python exception, but their
+            # commitments stayed "pending") must not report "completed". Phase-level
+            # exception counting only catches orchestrator-level failures; specialist
+            # errors surface as LLM text, leaving phase_failures at zero.
+            pending_commitments = [k for k, v in commitments.items() if v == "pending"]
+            has_unresolved = bool(pending_commitments)
+
             if phase_failures == total_phases:
                 workspace.update_run(
                     run_id, state="failed", current_phase="done",
@@ -694,20 +701,25 @@ def _run_background(run_id: str, case_id: str) -> None:
                     "commitment_states": commitments,
                     "message": _narrate("run_failed", "done", error=f"all {total_phases} phases failed"),
                 })
-            elif phase_failures > 0:
+            elif phase_failures > 0 or has_unresolved:
+                error_parts = []
+                if phase_failures > 0:
+                    error_parts.append(f"{phase_failures}/{total_phases} phases failed")
+                if has_unresolved:
+                    error_parts.append(f"commitments still pending: {pending_commitments}")
+                error_msg = "; ".join(error_parts)
                 workspace.update_run(
                     run_id, state="partial_failure", current_phase="done",
-                    error=f"{phase_failures}/{total_phases} phases failed",
+                    error=error_msg,
                     commitment_states=commitments,
                     failed_phases=failed_phases,
                 )
                 _push_event({
                     "event": "run_partial_failure", "run_id": run_id, "case_id": case_id,
-                    "error": f"{phase_failures}/{total_phases} phases failed",
+                    "error": error_msg,
                     "failed_phases": failed_phases,
                     "commitment_states": commitments,
-                    "message": _narrate("run_partial_failure", "done",
-                                        error=f"{phase_failures}/{total_phases} phases failed"),
+                    "message": _narrate("run_partial_failure", "done", error=error_msg),
                 })
             else:
                 workspace.update_run(
