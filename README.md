@@ -69,7 +69,7 @@ CASA Volunteer / Supervisor
 
 ## Agent Fleet
 
-Eight agents, each with a distinct Google service-account identity and a scoped data projection:
+Eight agents, each with a platform-managed Agent Identity (`identityType: AGENT_IDENTITY`) and a scoped data projection:
 
 | Agent | Owner | Scope |
 |---|---|---|

@@ -582,7 +582,7 @@ A useful pairing for demos: `--keep`, then `python infra/case_cli.py show <case_
 
 ### Working
 
-- All eight agents deployed to Agent Runtime in `us-central1`, each under its own service account.
+- All eight agents deployed to Agent Runtime in `us-central1`, each with platform-managed Agent Identity (`identityType: AGENT_IDENTITY`).
 - Local in-process end-to-end: green, matching section 9.
 - Cloud end-to-end against deployed endpoints: green, with the same final state, verified by reading Firestore rather than trusting the agents.
 - Governance verified on cloud: field projection, per-access disclosure audit, quarantine of the poisoned callback, and the human approval gate.

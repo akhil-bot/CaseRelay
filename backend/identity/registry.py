@@ -28,13 +28,25 @@ _IDENTITY_ENV_VARS: list[tuple[str, str]] = [
     ("verifier", "CASERELAY_IDENTITY_VERIFIER"),
 ]
 
-_DEV_DOMAIN = "@agent.caserelay.dev"
+_DEPLOYED_ENGINE = bool(os.environ.get("CASERELAY_AGENT"))
+_LOCAL_PLACEHOLDER_DOMAIN = "@LOCAL-PLACEHOLDER.invalid"
 
 AGENT_IDENTITIES: dict[str, str] = {}
 for _key, _env_var in _IDENTITY_ENV_VARS:
     _val = os.environ.get(_env_var, "")
     if not _val:
-        _val = f"caserelay-{_key.replace('_', '-')}@agent.caserelay.dev"
+        if _DEPLOYED_ENGINE:
+            raise RuntimeError(
+                f"{_env_var} is not set on a deployed engine. "
+                f"Source infra/fleet_endpoints.env or re-run infra/collect_endpoints.sh. "
+                f"Fabricated identities are structurally blocked in deployed mode."
+            )
+        _val = f"caserelay-{_key.replace('_', '-')}{_LOCAL_PLACEHOLDER_DOMAIN}"
+        _log.warning(
+            "identity env var %s not set — using local placeholder %s "
+            "(NOT a real platform principal)",
+            _env_var, _val,
+        )
     AGENT_IDENTITIES[_key] = _val
 
 IDENTITIES: dict[str, dict[str, Any]] = {}
@@ -108,5 +120,5 @@ def assert_scope(identity: str, field: str) -> None:
 
 
 def is_dev_default(identity: str) -> bool:
-    """True if the identity is a fabricated dev-default, not a real platform principal."""
-    return identity.endswith(_DEV_DOMAIN)
+    """True if the identity is a local placeholder, not a real platform principal."""
+    return identity.endswith(_LOCAL_PLACEHOLDER_DOMAIN)

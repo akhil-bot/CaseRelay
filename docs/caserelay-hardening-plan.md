@@ -838,11 +838,15 @@ Your teammate is unblocked when all of these hold:
 Cut these from the docs rather than building them. Each is a day or more and none moves a scored
 criterion as far as the video does.
 
-- ~~Managed Agent Gateway with PSC/IAP, mTLS and DPoP~~ **Delivered:** all eight engines recreated
-  with `--agent-identity` (GEAP's `IdentityType.AGENT_IDENTITY`). The gateway now verifies the
-  caller principal from GCP credentials (`google.oauth2.id_token`) in deployed engines and rejects
-  any caller whose principal does not match the grant subject. The old `PURPOSE_TO_IDENTITY` lookup
-  (which derived identity from the purpose argument) is deleted.
+- ~~Managed Agent Gateway with PSC/IAP, mTLS and DPoP~~ **Delivered:** all eight engines use
+  GEAP's platform-managed Agent Identity (`identityType: AGENT_IDENTITY`). Each engine's
+  `effectiveIdentity` is a real principal of the form
+  `agents.global.org-<org>.system.id.goog/resources/aiplatform/.../<engine-id>`. The gateway
+  verifies the caller principal from GCP credentials (`google.oauth2.id_token`) in deployed
+  engines and rejects any caller whose principal does not match the grant subject. Fabricated
+  dev-default identities (`@agent.caserelay.dev`) are deleted; a deployed engine missing its
+  `CASERELAY_IDENTITY_*` env var now raises `RuntimeError` at startup instead of silently
+  falling back to an invented principal.
 - The conflicting-updates, identity-revocation and case-closure scenarios (S11–S13).
 - Fixing the Gemini Enterprise UI `NOT_FOUND` documented at `walkthrough:572-584`.
 - Rebuilding the whole portal. The API contract is what matters; screens can follow.
