@@ -119,13 +119,21 @@ async def write_memory(case_id: str, fact: str) -> None:
         logger.exception("Failed to write explicit memory for case %s", case_id)
 
 
+_EXTRACTION_TOPICS = [
+    {"custom_memory_topic_label": "partner_contacts"},
+    {"custom_memory_topic_label": "institutional_shortcuts"},
+    {"custom_memory_topic_label": "unblocking_strategies"},
+]
+
+
 async def commit_session_events(session) -> None:
     """Extract coordination knowledge from session events synchronously.
 
     Uses memories.generate (wait_for_completion=True) rather than ingestEvents, because
     the async pipeline's idle-duration trigger never fires within compressed demo timing.
-    Measured: synchronous extraction completes in ~22-26s and produces immediately
-    retrievable memories with high-quality coordination facts.
+    allowed_topics restricts extraction to our custom topics (partner contacts, institutional
+    shortcuts, unblocking strategies) rather than the default KEY_CONVERSATION_DETAILS which
+    produces status roll-ups duplicating Firestore state.
     """
     svc = get_service()
     if svc is None:
@@ -135,7 +143,10 @@ async def commit_session_events(session) -> None:
             app_name=getattr(session, "app_name", APP_NAME),
             user_id=getattr(session, "user_id", "unknown"),
             events=getattr(session, "events", []),
-            custom_metadata={"wait_for_completion": True},
+            custom_metadata={
+                "wait_for_completion": True,
+                "allowed_topics": _EXTRACTION_TOPICS,
+            },
         )
         logger.info(
             "Extracted memories from session (case scope: %s)",
