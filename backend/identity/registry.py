@@ -42,7 +42,7 @@ for _key, _env_var in _IDENTITY_ENV_VARS:
                 f"Fabricated identities are structurally blocked in deployed mode."
             )
         _val = f"caserelay-{_key.replace('_', '-')}{_LOCAL_PLACEHOLDER_DOMAIN}"
-        _log.warning(
+        _log.debug(
             "identity env var %s not set — using local placeholder %s "
             "(NOT a real platform principal)",
             _env_var, _val,

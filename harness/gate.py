@@ -149,10 +149,14 @@ class Ctx:
 
     def py(self, code: str, label: str, *, env: dict | None = None, timeout: int = 180,
            prelude: bool = False) -> bool:
-        """Run a snippet in a subprocess. It must print OK as its last line.
+        """Run a snippet in a subprocess. It must print OK as its last line of stdout.
 
         Import errors, exceptions and silence all count as failure, which is
         correct: a gate for code that does not exist yet must fail.
+
+        Pass/fail is determined from stdout alone — stderr is library noise
+        (warnings, logging) that must not mask the sentinel. Stderr is still
+        included in the failure detail so real diagnostics are visible.
         """
         full_env = {**os.environ, "PYTHONPATH": str(ROOT), **(env or {})}
         script = (PRELUDE if prelude else "") + textwrap.dedent(code)
@@ -167,9 +171,12 @@ class Ctx:
             )
         except subprocess.TimeoutExpired:
             return self.add(False, label, f"timed out after {timeout}s")
-        out = (p.stdout + p.stderr).strip()
-        ok = bool(out) and p.returncode == 0 and out.splitlines()[-1] == "OK"
-        return self.add(ok, label, out)
+        stdout = p.stdout.strip()
+        ok = bool(stdout) and p.returncode == 0 and stdout.splitlines()[-1] == "OK"
+        detail = stdout
+        if not ok and p.stderr.strip():
+            detail = f"{stdout}\n--- stderr ---\n{p.stderr.strip()}"
+        return self.add(ok, label, detail)
 
     def routes(self) -> tuple[bool, list[dict]]:
         """Import the FastAPI app and return its route table."""
