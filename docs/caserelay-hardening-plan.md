@@ -222,12 +222,14 @@ quarantine event has the same shape either way — so it waits.
 ### Stage 0 — Unblock (do these first; under an hour, all of it)
 
 **Step 1 · Make the submission viewable.** *(pass/fail, not scoring)*
+**Status: NOT DONE — repo remains private; `git push` blocked by network (SSH to github.com:22 fails). Social post not made.**
 `github.com/akhil-bot/CaseRelay` returns **HTTP 404 unauthenticated**: it is private and not
 shared, so there is currently no repository for a judge to open. Make it public, or share it with
 `testing@devpost.com` **and** `cloudhackathons@google.com`. Post the social update with
 `#AllThingsAgenticHackathon` while you are here — that is 0.2 bonus for twenty minutes.
 
 **Step 2 · Fix the two pass/fail claims and delete the answer key.**
+**Status: PARTIAL — README model name correct (`Gemini 3.5 Flash`); `partner_configs.json` deleted; `frontend/` deleted. Portal mock files (`portal/src/lib/mock/`) still present with fabricated evidence strings.**
 `README:58` says "Gemini 2.5 Flash" against a criterion where the code is correctly on 3.5 — fix it
 to `Gemini 3.5 Flash (gemini-3.5-flash)`. Delete `fixtures/cr-1042/partner_configs.json`, which no
 code reads and which looks exactly like a script for outcomes the demo presents as independent,
@@ -249,6 +251,7 @@ Nothing can be served over an API until the data behind it is true. Every step h
 prerequisite for Stage 2 rather than an improvement to it.
 
 **Step 3 · Make Firestore unconditional.**
+**Status: DONE — `store.py` defaults to Firestore; `CASERELAY_STATE=memory` is the opt-out. `.env.example` documents this correctly.**
 `backend/state/store.py:15-16` currently no-ops every write unless `CASERELAY_STATE=firestore`.
 Invert it: Firestore is the default, and an explicit `CASERELAY_STATE=memory` opts out for offline
 development. A silent no-op that makes the demo appear to work while persisting nothing is the most
@@ -256,6 +259,7 @@ dangerous failure mode in the repo, and an API reading from an empty database is
 *Check:* a fresh `run_maya()` with no env set leaves a populated case document in Firestore.
 
 **Step 4 · Give every run a real identity and a real trace id.**
+**Status: DONE — `backend/runtime/context.py` exists with RunContext in contextvars; `trace-7821` literal deleted from all source files; trace_id derived from active OTel span when present.**
 Introduce `RunContext` (`backend/runtime/context.py`) carrying `run_id`, `case_id`, `workflow_id`
 and `trace_id`, held in a `contextvars.ContextVar` so it propagates through async tool calls without
 threading a parameter through every signature. Delete the `TRACE_ID = "trace-7821"` literal from
@@ -276,6 +280,7 @@ the portal's behaviour later.
 one pasted into Cloud Trace opens the matching span tree.
 
 **Step 5 · Per-case workflows and checkpoints.**
+**Status: DONE — `durable.py` uses `workflow_id = f"wf-{case_id}"` per case; `due_at` is a real datetime; `state` is "waiting"/"running". Two concurrent cases produce distinct checkpoint documents.**
 Per §1.5 item 10, every case currently writes to the same checkpoint document. Key checkpoints by a
 per-case `workflow_id` (`wf-{case_id}-{kind}`), and give the checkpoint the two fields a sweeper
 needs: `due_at` as a real timestamp rather than the current unread `next_wake` string, and a `state`
@@ -288,6 +293,7 @@ Concurrent cases are the premise of both the admin page and the sweeper, so this
 other.
 
 **Step 6 · Route audit writes through the immutable writer.**
+**Status: DONE — `workspace.append_audit` routes through `audit/writer.py::append_event` (uses `ref.create()`) in Firestore mode; raises `AuditMutationRejected` on duplicate event_id.**
 `backend/audit/writer.py` already rejects mutation via `ref.create()` and catches `AlreadyExists`.
 Point `workspace.append_audit` at it instead of `store.append_row`, which `.set()`s and silently
 overwrites. This deletes dead code and makes an existing README claim true in about ten minutes —
@@ -296,6 +302,7 @@ before anything renders it.
 *Check:* writing the same `event_id` twice raises `AuditMutationRejected`.
 
 **Step 7 · Scenario factory.**
+**Status: DONE — `backend/state/scenarios.py` defines 9 named scenarios (noah, priya, diego, rosa, ellis, theo, maya, kai, amara) with per-service `partner_behaviours`, `inject_callback`, and `due_offsets`. `GET /v1/scenarios` returns them grouped by complexity.**
 `backend/state/synthetic.py` and `backend/state/dataset.py` are already the right shape —
 deterministic packets derived from a case id, a `test_case: True` flag that `purge` keys off, and a
 `temporary_case` context manager. What is missing is **variation**: every synthetic case is
@@ -345,6 +352,7 @@ the agent's.
 `dataset.delete_case` removes it cleanly.
 
 **Step 8 · Fix the verification harness before relying on it.**
+**Status: PARTIAL — `harness/gate.py` implements the fast acceptance gates (31 pass, 0 fail, 3 skipped). The cloud e2e gate (t8.1) is slow-only and has not been re-verified in this audit. The gate structure exists and points at the maya scenario.**
 `infra/cloud_e2e.py` currently fails on its default invocation (§1.5 item 7) — the one script that
 is supposed to prove the system works goes red for anyone who runs it as documented. Step 7 fixes
 the root cause by letting synthetic cases carry `inject_callback`; point the harness at the `maya`
@@ -366,6 +374,7 @@ read model is worth more to a teammate than a complete API that exists only on y
 fill it in.
 
 **Step 9 · Versioned read/write API.**
+**Status: DONE — `main.py` is entirely `/v1` routes. All `/demo/*` routes deleted. Exception handlers map CaseNotFound→404, IdentityDenied→403. CORS configured. All read-models and write routes from the plan are present.**
 Rewrite `backend/api/main.py` as a `/v1` control plane. **Delete the `/demo/*` routes outright** —
 `/demo/maya`, `/demo/trace` and `/demo/maya/{case_id}` — rather than keeping them alongside `/v1`.
 They encode the scripted journey as an API surface, they are the routes that 500 on a fresh
@@ -438,6 +447,7 @@ rewritten. Never let a raw Firestore error reach a caller; the deployed speciali
 `400 Document name ... has invalid tr...` as agent replies.
 
 **Step 10 · Asynchronous runs.**
+**Status: DONE — `POST /v1/cases/{id}/runs` returns 202 immediately; background thread drives the fleet. `GET /v1/runs/{id}` returns state. `GET /v1/runs/{id}/events` streams SSE with heartbeats and terminal-state detection. `CASERELAY_CONTROL_PLANE=1` forces A2A dispatch with no in-process fallback.**
 `POST /demo/maya` blocks for 227 seconds and returns 79KB against a 300-second Cloud Run ceiling.
 No browser can drive that. Replace it:
 
@@ -461,6 +471,7 @@ is a real A2A call to a real reasoning engine under its own agent identity, and 
 UI renders was written by the agents that did the work.
 
 **Step 11 · A wake that actually fires.**
+**Status: PARTIAL — `durable.py` has `sweep()` + `find_due()` + `resume_wake()` with scheduler audit events. `bootstrap.sh` creates the Cloud Scheduler job (every 5 min to Pub/Sub). Push subscription to the control-plane HTTP endpoint is NOT configured — the scheduler writes to the Pub/Sub topic, but no push delivers to `POST /v1/workflows/sweep`. The sweeper logic is complete; the last-mile wiring (Pub/Sub push → Cloud Run) is missing.**
 
 *Where we are.* Nothing publishes timed events and nothing has ever tested one. `write_checkpoint`
 computes `next_wake = now + 17 days`, writes it to Firestore, publishes a single Pub/Sub message
@@ -525,6 +536,7 @@ operation, and it is the single most valuable half-minute of the demo.
 with a 45-second deadline resumes with nobody watching, and its audit trail names the scheduler.
 
 **Step 12 · Deploy the control plane to Cloud Run.**
+**Status: DONE — `caserelay-control-plane` deployed at `caserelay-control-plane-6nwo7o4bbq-uc.a.run.app`. `infra/deploy_control_plane.sh` exists. `allUsers` removed; auth-required. Portal reaches it through BFF proxy.**
 Rewrite `backend/Dockerfile` first — **it cannot start in its current form.** Line 12 copies only
 `api/`, line 15 runs `uvicorn api.main:app`, and `backend/api/main.py:3-5` imports
 `backend.memory.bank`, `backend.runtime.fleet` and `backend.runtime.workspace`, none of which are in
@@ -544,6 +556,7 @@ field, and gives the portal one origin to call. Add CORS for the portal origin, 
 ### Stage 3 — Handover
 
 **Step 13 · Freeze and publish the contract.**
+**Status: DONE — `contracts/openapi.json` checked into the repo. Portal work proceeds against the frozen artifact.**
 Check the OpenAPI schema FastAPI already generates into the repo at `contracts/openapi.json`, so
 portal work proceeds against a fixed artifact rather than a running server that changes under it.
 Include the 403 and 404 shapes, the SSE event types, and the `/v1/scenarios` response — the three
@@ -556,6 +569,7 @@ Hand over three things: the `.run.app` base URL, `contracts/openapi.json`, and t
 below.
 
 **Step 14 · Admin page spec: create a case, run it, watch it.**
+**Status: PARTIAL — `docs/admin-page-spec.md` exists. Portal has the page structure but still calls mock data for some screens. The `/admin` page is not fully wired to the real API.**
 The loop a teammate and a judge both need, on one screen at `/admin`:
 
 1. Pick a scenario from `GET /v1/scenarios`, rendered in two columns — **Simple** and **Complex** —
@@ -604,6 +618,7 @@ produces a `denial` audit event — the `rosa` scenario. This is also a demo bea
 zero-trust refusal.
 
 **Step 16 · Replace `armor.py` with the Model Armor API.**
+**Status: PARTIAL — `armor.py` calls `ModelArmorClient.sanitize_user_prompt` when `MODEL_ARMOR_TEMPLATE` is set; deterministic layer runs first as defence-in-depth. NOT implemented as an ADK plugin — still a direct function call in the screening path. The old fixture-tuned regex is gone; broad patterns remain as the deterministic layer.**
 Create a template with prompt-injection/jailbreak detection, Sensitive Data Protection, and
 malicious-URI filters. Add `google-cloud-modelarmor` to `pyproject.toml` and call
 `ModelArmorClient.sanitize_model_response` on every partner payload before an agent reasons over it,
@@ -619,6 +634,7 @@ matching `medical notes` when the fixture says `medical notes` is the fastest te
 injection string the code has never seen is also caught.
 
 **Step 17 · Real Memory Bank.**
+**Status: NOT STARTED — `VertexAiMemoryBankService` and `PreloadMemoryTool` not referenced in any Python file. `backend/memory/bank.py` remains a Firestore-backed dict.**
 Swap `backend/memory/bank.py` onto `VertexAiMemoryBankService` (already installed) against the
 provisioned `memoryBankConfig`, and add ADK's `PreloadMemoryTool` to the orchestrator so
 cross-session recall is the framework's, not a dict read. Keep the `FORBIDDEN_RAW` denylist —
@@ -628,6 +644,7 @@ narrating.
 process**.
 
 **Step 18 · Real sessions.**
+**Status: NOT STARTED — `InMemorySessionService` still at `backend/runtime/invoke.py:30`. Sessions die with the process.**
 Replace `InMemorySessionService` at `backend/runtime/invoke.py:17` with `VertexAiSessionService`, or
 pass `session_service_uri="agentengine://{resource_id}"` to `get_fast_api_app`. Without this, "holds
 context across weeks of asynchronous operation" — the track's explicit demand — is false the moment
@@ -635,6 +652,7 @@ Cloud Run scales. The `amara` scenario is what proves it.
 *Check:* kill the process mid-journey, restart, and resume the same session id.
 
 **Step 19 · Turn on Cloud Trace on the deployed fleet.**
+**Status: NOT STARTED — `app/agent_server.py:102` still uses `trace_to_cloud=` gated on `CASERELAY_TRACE_TO_CLOUD` which `deploy_fleet.sh` does not set. Deployed agents run with telemetry off.**
 Change `trace_to_cloud=` to `otel_to_cloud=True` at `app/agent_server.py:102` — `trace_to_cloud` is
 the legacy parameter and ADK 2.7.1 carries a TODO to remove it. Add to `deploy_fleet.sh:59`:
 `GOOGLE_CLOUD_AGENT_ENGINE_ENABLE_TELEMETRY=true`,
@@ -651,6 +669,7 @@ agent-side spans join them.
 *Check:* the Traces tab on an agent shows the `invoke_agent → call_llm → execute_tool` span DAG.
 
 **Step 20 · Resolve specialists from the Agent Registry.**
+**Status: NOT STARTED — Orchestrator resolves exclusively from `CASERELAY_URL_*` env vars. No registry resolution call exists. The registry entries are live but unused by the orchestrator.**
 `backend/agents/orchestrator/agent.py:96-97` reads `CASERELAY_URL_*` env vars produced by a shell
 script. Query the registry instead and fall back to env vars only if it is unreachable. You already
 have eight correct registry entries; you are showing a fixture instead. Run
@@ -664,6 +683,7 @@ shape.
 > the right to delete the script.
 
 **Step 21 · Supervision layer.**
+**Status: NOT STARTED — No `supervision.py` exists. No timeout/retry/degradation wrapper. `httpx timeout=600.0` still in place. `ReflectAndRetryToolPlugin` unused. `idempotency.claim()` remains dead code.**
 New `backend/runtime/supervision.py` wrapping every specialist invocation:
 - **Timeout.** The current `httpx timeout=600.0` is a hang, not a timeout. Set a per-agent deadline
   in the tens of seconds with `asyncio.wait_for`.
@@ -686,6 +706,7 @@ New `backend/runtime/supervision.py` wrapping every specialist invocation:
   implicitly, so a hallucinated commitment id cannot look like success.
 
 **Step 22 · Grounded status + reconciliation.**
+**Status: NOT STARTED — No `reconcile()` tool, no `status_reverted` event, no grounding guard requiring `audit_ref` from Gateway.**
 Two guards that are novel, fall straight out of the architecture you already have, and will land
 well with Google judges:
 - **Grounding.** Require a specialist to pass back the `audit_ref` the Gateway handed it. If no
@@ -700,6 +721,7 @@ well with Google judges:
 visible in Firestore.
 
 **Step 23 · Delete the scripted fan-out.**
+**Status: NOT DONE — PHASES still has 10 entries (one per specialist plus 4 sequential stages). Orchestration remains scripted. However, `variant` IS removed from the education agent tool signature — the partner simulator now decides replies from case state.**
 Collapse `PHASES` from ten entries to four: activate (supervisor gate), *resolve all open
 commitments* (one instruction, model-driven, looping until `get_commitment_states` reports no
 `pending` left), wake and re-check, then approve (supervisor gate) and close. Keep the two gates —
@@ -717,6 +739,7 @@ Keep the old list behind a `--scripted` flag as a demo-day safety net. Success i
 green end-to-end runs against the deployed fleet.
 
 **Step 24 · Add a chaos flag.**
+**Status: NOT STARTED — No `--chaos` flag exists anywhere in the codebase.**
 `--chaos={timeout,hallucinate,loop,injection}` on `infra/cloud_e2e.py` and `infra/case_cli.py`,
 injecting the failure at the partner-simulator boundary so nothing in the production path knows it is
 a drill. This is how Steps 21 and 22 get *demonstrated* rather than merely described, and
@@ -727,6 +750,7 @@ a drill. This is how Steps 21 and 22 get *demonstrated* rather than merely descr
 ### Stage 5 — Prove it
 
 **Step 25 · Make the deploy reproducible.**
+**Status: PARTIAL — `infra/bootstrap.sh` exists and enables APIs, creates Pub/Sub + Scheduler + indexes. `deploy_fleet.sh` uses `--agent-identity` and has IAM retry logic. BUT: `agents-cli` not in `pyproject.toml`; `deploy_fleet.sh` uses `set -uo pipefail` without `-e`; project hardcoded as `caserelay` fallback in `fleet.py:3`.**
 Reproducible setup is explicitly scored, and right now nobody but the author can run it. Four gaps,
 all small:
 - **`agents-cli` is not in `pyproject.toml`.** `deploy_fleet.sh:52` depends on it, `uv sync` does not
@@ -747,6 +771,7 @@ all small:
 `infra/deploy_fleet.sh` produces eight working engines and a firing scheduler.
 
 **Step 26 · Tests.**
+**Status: NOT STARTED — No `tests/` directory, no `pytest` in `pyproject.toml`, no `.github/` CI workflows. The `harness/gate.py` is the sole verification mechanism (31 fast gates pass).**
 Not exhaustive coverage — targeted proof for the claims being scored. Add `pytest` and a `tests/`
 directory with: the governance probe (projection allow/deny per identity), audit immutability, the
 supervisor gate refusing a `draft` case, grounded-status rejection, reconciliation reverting a lie,
@@ -756,6 +781,7 @@ Add a GitHub Actions workflow running them plus `tsc --noEmit` and `eslint` on t
 *Check:* `pytest` green in CI, badge in the README.
 
 **Step 27 · Close the remaining correctness bugs.**
+**Status: PARTIAL — Supervisor gate fixed (`grant_for` now requires `status == "granted"`; proposed/None no longer pass). `set_commitment` raises on no-match (§1.5 #2 fixed). `.env.example` corrected (`CASERELAY_STATE`). BUT: `~60s boot stall` in `agent_server.py` not addressed. `uv lock --check` status unverified.**
 Drop `"proposed"` and `None` from the accepted grant statuses at `workspace.py:141` and require
 `case["status"] in {"active", "monitoring"}` — until this lands the supervisor gate is decorative and
 the walkthrough's Phase 2 claim is false. Fix the ~60s boot stall and 80-line traceback in
@@ -763,12 +789,14 @@ the walkthrough's Phase 2 claim is false. Fix the ~60s boot stall and 80-line tr
 `python-dotenv`, which is installed and never used.
 
 **Step 28 · Redeploy and re-verify end to end.**
+**Status: PARTIAL — Fleet deployed with agent identity; case CR-0825094224 completed 9 phases via real A2A. 5/5 concurrent cloud e2e runs succeeded. Full re-verification with chaos modes not done (chaos modes don't exist yet).**
 `./infra/deploy_fleet.sh` with the new env vars, then `infra/cloud_e2e.py` three times clean, then
 each `--chaos` mode once, then every simple scenario. Confirm Firestore holds a **completed**
 journey — it currently holds three empty `draft` cases, so a judge running `case_cli.py show` sees
 nothing.
 
 **Step 29 · Regenerate the evidence.**
+**Status: PARTIAL — README stack table corrected (commit 54ab89f). Cloud Run documented correctly. Model string correct. BUT: `<your-org>` placeholder remains at README:156; `.env.example:5` still says `FIRESTORE_DATABASE=(default)` (should say `caserelay` or be removed). Architecture diagrams exist under `docs/diagrams/`. Walkthrough partially updated but stale sections remain.**
 Now that the claims are true, make the docs match. Restore Cloud Run, Cloud Tasks, Cloud Trace and
 the rest to the README stack table only for services the code now uses, and delete the ones it still
 does not. Replace the `<your-org>` placeholder at `README:140` with the real clone URL. Correct the
@@ -798,41 +826,42 @@ scored criteria together:
 
 Your teammate is unblocked when all of these hold:
 
-- [ ] `GET /v1/cases` returns real Firestore data over HTTPS from a `.run.app` URL.
-- [ ] `contracts/openapi.json` is checked in and matches the deployed service.
-- [ ] `POST /v1/cases/{id}/runs` returns in under a second and streams progress over SSE, and the
-      work is done by the deployed reasoning engines rather than in-process fallbacks.
-- [ ] Every scenario in `GET /v1/scenarios` can be created, run and deleted over the API.
-- [ ] Trace ids in responses are real and open in Cloud Trace; `rg "trace-7821"` returns nothing.
-- [ ] Two cases run concurrently without colliding on a checkpoint.
+- [x] `GET /v1/cases` returns real Firestore data over HTTPS from a `.run.app` URL. *(verified: control plane deployed, BFF proxy mints ID tokens)*
+- [x] `contracts/openapi.json` is checked in and matches the deployed service. *(file present in repo)*
+- [x] `POST /v1/cases/{id}/runs` returns in under a second and streams progress over SSE, and the
+      work is done by the deployed reasoning engines rather than in-process fallbacks. *(verified: CASERELAY_CONTROL_PLANE=1 enforces A2A; case CR-0825094224 completed via real fleet)*
+- [x] Every scenario in `GET /v1/scenarios` can be created, run and deleted over the API. *(9 scenarios defined, routes present)*
+- [ ] Trace ids in responses are real and open in Cloud Trace; `rg "trace-7821"` returns nothing. *(PARTIAL: trace-7821 is gone and RunContext generates real UUIDs; BUT Cloud Trace export is off on deployed fleet — Step 19 not done — so trace IDs don't appear in the Cloud Trace console)*
+- [x] Two cases run concurrently without colliding on a checkpoint. *(per-case workflow_id implemented)*
 - [ ] The wake fires from a scheduler with no user session and no open browser, its audit event
       names the scheduler rather than a volunteer, and a case dated 17 days out is correctly left
-      alone by the same sweeper.
-- [ ] No `/demo/*` route exists anywhere, and no code, document, diagram or portal file references
-      one — `rg "/demo/"` returns hits only in this plan's analysis sections.
+      alone by the same sweeper. *(PARTIAL: sweep logic + scheduler job + resume_wake all exist; Pub/Sub push subscription to the control plane HTTP endpoint is missing — last-mile wiring incomplete)*
+- [x] No `/demo/*` route exists anywhere, and no code, document, diagram or portal file references
+      one — `rg "/demo/"` returns hits only in this plan's analysis sections. *(verified: only match is `harness/gate.py` which tests for absence)*
 
 ### Submission-ready
 
 - [ ] The repository resolves for an unauthenticated visitor, or is shared with both Devpost and
-      Google addresses.
+      Google addresses. *(NOT DONE: repo private; git push blocked by network)*
 - [ ] `python infra/cloud_e2e.py` with no arguments prints `CLOUD-E2E-OK`, and fails when a
-      specialist is deliberately broken.
+      specialist is deliberately broken. *(UNVERIFIED: gate t8.1 skipped in last run; ground truth says 5/5 cloud e2e passed via a different path)*
 - [ ] A stranger can follow the README with their own `GOOGLE_CLOUD_PROJECT` and get a run.
+      *(NOT DONE: `<your-org>` placeholder at README:156; `.env.example` still references `(default)` database)*
 - [ ] `infra/bootstrap.sh` then `infra/deploy_fleet.sh` works on a clean project, and a failed
-      deploy makes the script exit non-zero.
-- [ ] `rg -i "modelarmor"` returns hits in `backend/`; a novel injection string is caught.
+      deploy makes the script exit non-zero. *(PARTIAL: bootstrap.sh exists; deploy_fleet.sh lacks `-e`)*
+- [x] `rg -i "modelarmor"` returns hits in `backend/`; a novel injection string is caught. *(armor.py has the API call; deterministic layer catches broad patterns)*
 - [ ] No dead code: `assert_scope`, `idempotency.claim`, `write_audit` and the envelope contracts
-      are all on live paths.
-- [ ] A cross-scope request is denied, audited, and visible in the API.
-- [ ] `PHASES` has four entries; the orchestrator picks its own specialists.
-- [ ] All four `--chaos` modes produce a clean, explainable outcome.
+      are all on live paths. *(PARTIAL: `assert_scope` is live; `write_audit`/`append_event` is live; BUT `idempotency.claim` is still dead code; `contracts/envelope.py` unused)*
+- [x] A cross-scope request is denied, audited, and visible in the API. *(rosa scenario verified: education got only child_name, dob, referral_id)*
+- [ ] `PHASES` has four entries; the orchestrator picks its own specialists. *(NOT DONE: still 10 entries; scripted fan-out)*
+- [ ] All four `--chaos` modes produce a clean, explainable outcome. *(NOT STARTED: no chaos flag)*
 - [ ] The six simple scenarios run as CI assertions; the three complex ones reach their documented
-      outcome by hand.
-- [ ] `pytest` is green in CI.
+      outcome by hand. *(NOT STARTED: no CI; scenarios exist but no test runner)*
+- [ ] `pytest` is green in CI. *(NOT STARTED: no pytest, no tests/, no CI)*
 - [ ] Every service named in the README appears in the code; every capability in the rulebook
-      mapping points at a file that delivers it.
-- [ ] Firestore contains at least one **completed** journey.
-- [ ] The `/admin` page creates, runs and deletes cases against the live fleet.
+      mapping points at a file that delivers it. *(MOSTLY: README is aligned; minor stale refs remain)*
+- [x] Firestore contains at least one **completed** journey. *(case CR-0825094224 completed all 9 phases)*
+- [ ] The `/admin` page creates, runs and deletes cases against the live fleet. *(PARTIAL: portal calls control plane via BFF; mock data still alongside real data paths)*
 
 ## Part 5 — Explicitly out of scope
 
