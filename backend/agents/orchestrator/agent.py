@@ -55,8 +55,15 @@ def activate_case(case_id: str) -> dict:
 
 
 def schedule_wake(case_id: str) -> dict:
-    """Checkpoint and schedule the day-17 education wake."""
-    return write_checkpoint(case_id)
+    """Checkpoint the workflow, preserving the deadline set at case creation.
+
+    The user's chosen deadline (via due_in at creation) is authoritative. If a checkpoint
+    already exists for this case, its due_at is carried forward. Only when no checkpoint
+    exists (shouldn't happen — create_case writes one) does the 17-day default apply.
+    """
+    existing = workspace.get_checkpoint(f"wf-{case_id}")
+    due_at = existing.get("due_at") if existing else None
+    return write_checkpoint(case_id, due_at=due_at)
 
 
 def wake_workflow(case_id: str) -> dict:
