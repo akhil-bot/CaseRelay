@@ -87,7 +87,8 @@ def delete_case(case_id: str) -> None:
     if not enabled():
         return
     ref = _case_ref(case_id)
-    for name in ("commitments", "authority_grants", "human_approvals", "audit_events"):
+    for name in ("commitments", "authority_grants", "human_approvals", "audit_events",
+                 "screening_verdicts"):
         for doc in ref.collection(name).stream():
             doc.reference.delete()
     ref.delete()
@@ -154,3 +155,20 @@ def query_due_checkpoints(now_ts) -> list[dict[str, Any]]:
         .stream()
     )
     return [d.to_dict() for d in docs if d.to_dict()]
+
+
+# -- screening verdicts --------------------------------------------------------
+
+def save_screening_verdict(case_id: str, verdict: dict[str, Any]) -> None:
+    """Persist the screening verdict for a case so any replica can read it."""
+    if not enabled():
+        return
+    _case_ref(case_id).collection("screening_verdicts").document("latest").set(verdict)
+
+
+def load_screening_verdict(case_id: str) -> dict[str, Any] | None:
+    """Read the most recent screening verdict for a case."""
+    if not enabled():
+        return None
+    doc = _case_ref(case_id).collection("screening_verdicts").document("latest").get()
+    return doc.to_dict() if doc.exists else None

@@ -1,5 +1,6 @@
 import logging
 import threading
+import time
 from uuid import uuid4
 
 from google.adk.agents import Agent
@@ -10,6 +11,7 @@ from backend.gateway.armor import ScreeningUnavailable, screen
 from backend.identity.registry import AGENT_IDENTITIES
 from backend.partners import sim
 from backend.runtime.workspace import workspace
+from backend.state import store
 
 AGENT_IDENTITY = AGENT_IDENTITIES["verifier"]
 
@@ -29,12 +31,58 @@ INSTRUCTION = (
     "- You never finish your task before completing both steps above."
 )
 
-# Screening verdicts recorded by inspect_school_callback, keyed by case_id.
-# open_escalation consults this to enforce the invariant: no escalation without
-# a preceding quarantine verdict. This is control-flow correctness, not content
-# inspection — the security decision is made entirely by Model Armor / Cloud DLP.
-_verdicts: dict[str, str] = {}
-_verdicts_lock = threading.Lock()
+# Same-replica fast-path cache, bounded to _CACHE_MAX entries. The durable source
+# of truth is Firestore (cases/{case_id}/screening_verdicts/latest); the cache
+# only avoids the Firestore round-trip when both tool calls land on one replica.
+_CACHE_MAX = 64
+_verdict_cache: dict[str, tuple[str, float]] = {}
+_cache_lock = threading.Lock()
+
+_VERDICT_MAX_AGE_S = 600  # 10 minutes — generous; a verifier session takes seconds
+
+
+def _cache_put(case_id: str, verdict: str) -> None:
+    with _cache_lock:
+        if len(_verdict_cache) >= _CACHE_MAX:
+            oldest = min(_verdict_cache, key=lambda k: _verdict_cache[k][1])
+            del _verdict_cache[oldest]
+        _verdict_cache[case_id] = (verdict, time.monotonic())
+
+
+def _cache_pop(case_id: str) -> str | None:
+    """Read and evict — prevents stale entries from leaking into later runs."""
+    with _cache_lock:
+        entry = _verdict_cache.pop(case_id, None)
+    if entry is None:
+        return None
+    verdict, ts = entry
+    if time.monotonic() - ts > _VERDICT_MAX_AGE_S:
+        return None
+    return verdict
+
+
+def _resolve_verdict(case_id: str) -> str | None:
+    """Read the screening verdict from cache (same replica) or Firestore (cross-replica).
+
+    Returns the verdict string or None if no fresh verdict is available.
+    """
+    cached = _cache_pop(case_id)
+    if cached is not None:
+        return cached
+
+    try:
+        remote = store.load_screening_verdict(case_id)
+    except Exception:
+        _log.exception("Failed to read screening verdict from Firestore for %s", case_id)
+        return None
+    if not remote:
+        return None
+    verdict = remote.get("verdict")
+    ts = remote.get("screened_at", 0)
+    if time.time() - ts > _VERDICT_MAX_AGE_S:
+        _log.warning("Stale screening verdict for %s (age %.0fs), ignoring", case_id, time.time() - ts)
+        return None
+    return verdict
 
 
 def inspect_school_callback(case_id: str) -> dict:
@@ -54,8 +102,12 @@ def inspect_school_callback(case_id: str) -> dict:
         verdict, rules = "quarantine", ["screening_unavailable"]
         _log.error("Content screening unavailable — failing closed: %s", exc)
 
-    with _verdicts_lock:
-        _verdicts[case_id] = verdict
+    _cache_put(case_id, verdict)
+    store.save_screening_verdict(case_id, {
+        "verdict": verdict,
+        "rules": rules,
+        "screened_at": time.time(),
+    })
 
     result: dict = {"verdict": verdict, "rules": rules}
     if verdict == "quarantine":
@@ -70,11 +122,18 @@ def inspect_school_callback(case_id: str) -> dict:
 def open_escalation(case_id: str, reason: str) -> dict:
     """Open a human-approval escalation for a quarantined callback.
 
-    Refuses if inspect_school_callback did not record a quarantine verdict for
-    this case — prevents the agent from escalating a case that screening cleared.
+    Refuses if no recent quarantine verdict is on record for this case. The
+    verdict is checked first in the in-process cache (same replica), then in
+    Firestore (cross-replica). If neither source has a quarantine, the tool
+    returns an error to the model.
+
+    Failure-mode reasoning: refusing when the verdict is unreadable protects
+    against false escalations of clean cases (the original demo-breaking bug).
+    If Firestore is genuinely down, the same-replica cache still covers the
+    common path. The cross-replica + Firestore-down combination is an infra
+    failure that will break the session regardless.
     """
-    with _verdicts_lock:
-        recorded = _verdicts.get(case_id)
+    recorded = _resolve_verdict(case_id)
 
     if recorded != "quarantine":
         _log.warning(
