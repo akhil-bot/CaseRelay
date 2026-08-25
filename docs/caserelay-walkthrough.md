@@ -10,7 +10,7 @@ A CASA (Court Appointed Special Advocate) volunteer is assigned to one child. Th
 
 CaseRelay tracks each of those commitments as a first-class record, gives each partner its own agent to chase, and — this is the part that matters more than the chasing — keeps a durable record of exactly which fields about the child each agent was allowed to see, under what legal basis, on every single access.
 
-It is built on Google's Gemini Enterprise Agent Platform: ADK for the agents, Vertex AI Agent Runtime for hosting, Firestore for shared case state.
+It is built on Google's Gemini Enterprise Agent Platform: ADK for the agents, Vertex AI Agent Engine (reasoning engines) for hosting, Firestore for shared case state, and Cloud Run for the control plane.
 
 ![CaseRelay end-to-end architecture](diagrams/caserelay-geap-e2e-light.png)
 
@@ -39,7 +39,7 @@ Everything runs on `gemini-3.5-flash`.
 
 ## 3. Deployment shape: one image, eight identities
 
-All eight agents are deployed to Vertex AI Agent Runtime in `us-central1`, one endpoint per agent, **each running under its own platform-managed agent identity** (`--agent-identity` / `IdentityType.AGENT_IDENTITY`). The platform binds a managed principal to each engine at create time — stronger than a hand-made service account because it is scoped to the agent resource lifecycle.
+All eight agents are deployed to Vertex AI Agent Engine (reasoning engines) in `us-central1`, one endpoint per agent, **each running under its own platform-managed agent identity** (`--agent-identity` / `IdentityType.AGENT_IDENTITY`). The platform binds a managed principal to each engine at create time — stronger than a hand-made service account because it is scoped to the agent resource lifecycle. Only the control plane (`caserelay-control-plane`) runs on Cloud Run.
 
 ### The same container serves all eight
 
@@ -50,7 +50,7 @@ There is one image. `app/agent_server.py` decides at startup which agent this in
 3. `_write_agent_cards()` then **deletes `agent.json` from every other agent folder** and writes a fresh card for the selected one. ADK mounts A2A routes only for folders that contain a card, keyed on the folder name — so after this step the process physically has no route for any other agent.
 4. The card's `rpc_url` is built from `CASERELAY_PUBLIC_URL`, which is only knowable after the service has a URL. This is why `deploy_fleet.sh` is meant to be re-run once endpoints have been collected.
 
-So the education endpoint runs under `education-agent@`, serves only `/a2a/education`, and cannot answer as the health agent even though the health agent's code is in the image.
+So the education endpoint runs under its own platform-managed agent identity principal, serves only `/a2a/education`, and cannot answer as the health agent even though the health agent's code is in the image.
 
 ### Deploying, collecting, checking
 
@@ -60,10 +60,10 @@ So the education endpoint runs under `education-agent@`, serves only `/a2a/educa
 ./infra/deploy_fleet.sh health legal    # a subset
 
 ./infra/collect_endpoints.sh            # writes infra/fleet_endpoints.env
-./infra/fleet_status.sh                 # engine id, display name, agent, service account
+./infra/fleet_status.sh                 # engine id, display name, agent, identity
 ```
 
-`deploy_fleet.sh` calls `agents-cli deploy -d agent_runtime` per agent and sets `CASERELAY_AGENT`, `CASERELAY_STATE=firestore`, `CASERELAY_PROJECT_ID`, the Vertex env vars, and `PYTHONPATH=/app`. For the orchestrator it additionally passes all six `CASERELAY_URL_*` specialist URLs from the current shell — which is why you must `source infra/fleet_endpoints.env` before redeploying the orchestrator.
+`deploy_fleet.sh` calls `agents-cli deploy -d agent_runtime` per agent with `--agent-identity` (platform-managed Agent Identity) and sets `CASERELAY_AGENT`, `CASERELAY_STATE=firestore`, `CASERELAY_PROJECT_ID`, `GOOGLE_API_USE_CLIENT_CERTIFICATE=true` (mTLS routing — see decision note below), the Vertex env vars, and `PYTHONPATH=/app`. For the orchestrator it additionally passes all six `CASERELAY_URL_*` specialist URLs and `CASERELAY_IDENTITY_*` from the current shell — which is why you must `source infra/fleet_endpoints.env` before redeploying the orchestrator.
 
 `collect_endpoints.sh` lists the project's reasoning engines, reads each one's `CASERELAY_AGENT` env var to work out which agent it is, and writes both the A2A base URL and the raw resource name:
 
@@ -83,7 +83,7 @@ Agent Runtime exposes the container's own HTTP routes under an `/api` passthroug
 
 The `AgentTool` wrapper is the important detail. A local specialist built in `single_turn` mode is exposed by ADK as a tool, so calling it returns control to the orchestrator when it finishes. A `RemoteA2aAgent` has no such mode — as a bare `sub_agent` it would be reached by `transfer_to_agent`, which hands the turn away permanently and never comes back. Wrapping it in `AgentTool` restores the call-and-return shape that the phase driver depends on.
 
-The local fallback is what makes local testing possible at all: with no `CASERELAY_URL_*` set, the orchestrator assembles the whole fleet in one process and needs no cloud.
+The local fallback is what makes local testing possible at all: with no `CASERELAY_URL_*` set, the orchestrator assembles the whole fleet in one process and needs no cloud. In control-plane mode (`CASERELAY_CONTROL_PLANE=1`), the fallback is disabled — every specialist must be reachable via its `CASERELAY_URL_*` env var, and the control plane fails fast at startup if endpoints are missing. The old silent in-process fallback is gone for deployed use.
 
 Authenticated A2A calls are handled by two small modules: `backend/runtime/a2a_auth.py` mints and refreshes a bearer token from Application Default Credentials (`RemoteA2aAgent`'s default client sends no credentials, and the `/api` passthrough sits behind Google's API frontend, which rejects anonymous requests); `backend/runtime/a2a_client.py` is the caller side, sending a JSON-RPC `message/send` and flattening every text part out of whatever shape the task result came back in.
 
@@ -94,6 +94,8 @@ Authenticated A2A calls are handled by two small modules: `backend/runtime/a2a_a
 `backend/runtime/workspace.py` holds the case: cases, commitments, grants, approvals, audit events, checkpoints, memory. Locally these are plain dicts in one process.
 
 When `CASERELAY_STATE=firestore` those same dicts become a read-through / write-through cache over `backend/state/store.py`. Every function in `store.py` is a no-op unless that env var is set, which keeps the local path fast and fully offline.
+
+Firestore uses the **named database `caserelay`**, not `(default)`. Agent Runtime's network proxy URL-encodes parentheses in outgoing requests, turning `(default)` into `%28default%29`, which Firestore rejects with HTTP 400. A named database sidesteps this entirely since it contains no special characters.
 
 The reason this exists is structural, not a nice-to-have. Once the eight agents are eight separate endpoints they no longer share memory. The authority grant that the orchestrator writes when it activates the case has to be readable by the education agent running on a different host a second later. Without a shared store, the education agent looks for its grant, finds nothing, and raises `no granted authority`.
 
@@ -147,7 +149,7 @@ The Memory Bank write (`backend/memory/bank.py`) is the operational counterpart:
 
 `backend/gateway/armor.py` is a single regex screen looking for cross-scope requests — patterns like `retrieve.*medical`, `health.*records`, `legal.*strategy`, `medical notes`. It returns `("quarantine", ["block_cross_scope_request"])` or `("allow", [])`.
 
-The verifier agent's `inspect_school_callback` tool pulls the school's callback, runs it through `screen()`, and returns the verdict. When the verdict is `quarantine`, its second tool `open_escalation` writes a **pending** human approval (`approval_id: apr-poison`, policy basis `["block_cross_scope_request", "CR-POLICY-003"]`) plus a `quarantine` audit event. It does not carry out the instruction, not even partially, and it never touches a commitment status.
+The verifier agent's `inspect_school_callback` tool pulls the school's callback, runs it through `screen()`, and returns the verdict. When the verdict is `quarantine`, its second tool `open_escalation` writes a **pending** human approval (`approval_id: apr-{uuid4[:8]}`, policy basis `["block_cross_scope_request", "CR-POLICY-003"]`) plus a `quarantine` audit event. It does not carry out the instruction, not even partially, and it never touches a commitment status.
 
 Nothing moves until a supervisor decides. The orchestrator's `approve_escalation` tool is the gate, and its instruction forbids it from calling that tool unless the request explicitly says a supervisor approved.
 
@@ -275,7 +277,7 @@ The school sends a callback. From `fixtures/cr-1042/poisoned_school_payload.json
 
 The orchestrator asks `safeguarding_verifier` to inspect it. `inspect_school_callback` reads the education referral id off the stored packet, fetches the payload, and runs `screen()` on it. `retrieve Maya's medical notes` matches `retrieve.*medical`, so the verdict is `quarantine` with rule `block_cross_scope_request`.
 
-The verifier then calls `open_escalation`, which writes the pending approval `apr-poison` and a `quarantine` audit event with the verifier's agent identity. **The instruction is never carried out.**
+The verifier then calls `open_escalation`, which writes a pending approval (`apr-{uuid4[:8]}`) and a `quarantine` audit event with the verifier's agent identity. **The instruction is never carried out.**
 
 Note that the education agent has its own independent defence — its instruction says that if the SIS asks it to retrieve medical or health records it must not comply and must report `blocked`. So there are three layers here: the regex screen, the agent's own refusal, and the fact that education has no grant covering medical fields in the first place.
 
@@ -305,7 +307,7 @@ Both the local in-process run and the cloud run against deployed endpoints reach
 |---|---|
 | case status | `monitoring` |
 | authority grants | 5, all `granted` |
-| approvals | `apr-poison` → `approved` |
+| approvals | `apr-{id}` → `approved` |
 | audit events | 8 |
 | Memory Bank scopes | all five purposes, plus `checkpoint` |
 
@@ -406,7 +408,7 @@ print(r['case_status'], r['commitment_states'], r['audit_events'])
 "
 ```
 
-The child's name, DOB and referral ids are all different; the outcome should match section 9. One caveat to know about: the verifier's `open_escalation` falls back to the literal `"CR-1042"` if it is handed something that does not start with `CR-`, and its approval id is always `apr-poison`.
+The child's name, DOB and referral ids are all different; the outcome should match section 9. One caveat to know about: the verifier's `open_escalation` falls back to the literal `"CR-1042"` if it is handed something that does not start with `CR-`.
 
 ### Targeted probes with no LLM cost at all
 
@@ -463,7 +465,13 @@ Two things to check in that output: the shelter agent never sees Maya's name, an
 
 ### Control-plane API (v1)
 
-`backend/api/main.py` is the versioned control plane. All routes are under `/v1`:
+`backend/api/main.py` is the versioned control plane, deployed to Cloud Run as `caserelay-control-plane`. The service is **locked down**: `allUsers` has been removed from `roles/run.invoker`, so unauthenticated calls return 403.
+
+The portal reaches it through a Next.js BFF proxy (`portal/src/app/api/control-plane/[...path]/route.ts`) that mints Google-signed ID tokens server-side. No credential is exposed to the browser. SSE endpoints are proxied with incremental delivery preserved.
+
+The control plane deploys with `CASERELAY_URL_*`, `CASERELAY_IDENTITY_*` and `CASERELAY_CONTROL_PLANE=1`, and fails fast at startup if endpoints are missing. The old silent in-process fallback is gone — a portal-triggered run fans out over real A2A to the deployed engines.
+
+All routes are under `/v1`:
 
 ```
 GET  /v1/cases                          → inbox rows
@@ -582,13 +590,28 @@ A useful pairing for demos: `--keep`, then `python infra/case_cli.py show <case_
 
 ### Working
 
-- All eight agents deployed to Agent Runtime in `us-central1`, each with platform-managed Agent Identity (`identityType: AGENT_IDENTITY`).
+- All eight agents deployed to Vertex AI Agent Engine (reasoning engines) in `us-central1`, each with platform-managed Agent Identity (`identityType: AGENT_IDENTITY`).
+- `caserelay-control-plane` deployed to Cloud Run, auth-required (`allUsers` removed from `roles/run.invoker`).
+- Portal reaches the control plane through a BFF proxy that mints Google-signed ID tokens server-side. No credential exposed to the browser. SSE proxied with incremental delivery.
+- Control plane deploys with `CASERELAY_CONTROL_PLANE=1` and fails fast if specialist endpoints are missing. The old silent in-process fallback is gone.
+- Portal-triggered runs fan out over real A2A to the deployed engines. Verified: case CR-0825094224 completed all 9 phases with 7 engines serving A2A.
 - Local in-process end-to-end: green, matching section 9.
 - Cloud end-to-end against deployed endpoints: green, with the same final state, verified by reading Firestore rather than trusting the agents.
 - Governance verified on cloud: field projection, per-access disclosure audit, quarantine of the poisoned callback, and the human approval gate.
+- Cross-scope denial verified: in the `rosa` scenario the education agent received ONLY `child_name`, `dob`, `referral_id`; no medical fields disclosed.
+- A2A transport auth verified: calls with no credentials or an invalid bearer token refused with HTTP 401; valid token returns 200.
+- Quarantine → escalation: 5/5 concurrent cloud e2e runs had the verifier agent itself call `open_escalation`.
 - Memory Bank verified on cloud: all five purposes plus the checkpoint scope.
 - Test cases created and deleted on demand, from either source, with `purge` as a backstop.
-- All eight agents are **auto-registered in Google Cloud Agent Registry** by `agents-cli deploy`. There is no separate registration step. Worth being clear about what this is: a catalog and inspection view of the fleet, not a chat interface.
+- All eight agents are **auto-registered in Google Cloud Agent Registry** by `agents-cli deploy`. There is no separate registration step.
+- Firestore uses the named database `caserelay` (not `(default)` — see section 4 for rationale).
+- mTLS routing: `GOOGLE_API_USE_CLIENT_CERTIFICATE=true` set on all engines. CAA enforcement is ON; we deliberately did NOT use the opt-out (`GOOGLE_API_PREVENT_AGENT_TOKEN_SHARING_FOR_GCP_SERVICES=False`) because it disables token binding.
+
+### Portal status
+
+The portal runs locally via `npm run dev`. `caserelay-portal.web.app` is not live. Per the official hackathon rules, a hosted URL is optional ("Your app does not need to be publicly accessible or live at the exact moment of submission or judging").
+
+Persona switching (advocate vs. platform view) is UI-only and carries no authentication or access-control implications. There is no end-user authentication.
 
 ### Open: invoking from the Gemini Enterprise web UI
 
@@ -602,7 +625,7 @@ The hypothesis: Gemini Enterprise invokes an ADK agent via Vertex AI `:streamQue
 
 There is a partial mitigation already in the code, and it is important not to mistake it for a fix. `app/agent_server.py` now passes `gemini_enterprise_app_name=FOLDER` to `get_fast_api_app`. That argument gates an entire route block inside ADK: without it, the `/api/reasoning_engine` and `/api/stream_reasoning_engine` routes that `streamQuery` calls are never mounted at all, which produces a 404 on every invocation and a silent fallback to the base Gemini model. So the routes should now exist.
 
-Whether that resolves the `NOT_FOUND` has **not** been confirmed. Treat this as an open issue with a plausible cause and a candidate mitigation in place, not as solved. The next step is a redeploy followed by a UI invocation — remembering the four-minute wait.
+Whether that resolves the `NOT_FOUND` has **not** been confirmed. Treat this as an open issue with a plausible cause and a candidate mitigation in place, not as solved.
 
 ### Two remaining pieces of static data
 
@@ -618,6 +641,6 @@ Neither of these is case data, and neither is read by an agent as a fact about a
 Two things exist in the tree that a reader would reasonably assume are load-bearing and are not:
 
 - `gateway.dispatch()` and the handler registrations in `backend/runtime/handlers.py` (which wire up `backend/agents/*/service.py`) are an alternative inbound-payload path that nothing currently calls. The live specialist path is `authorized_context()` plus a direct `sim` call from the agent's own tool.
-- `verifier/service.py::quarantine_response()` is reachable only through `gateway.dispatch()`. The quarantine that actually runs in the journey comes from `verifier/agent.py::open_escalation`, which is what creates `apr-poison`.
+- `verifier/service.py::quarantine_response()` is reachable only through `gateway.dispatch()`. The quarantine that actually runs in the journey comes from `verifier/agent.py::open_escalation`, which creates `apr-{uuid4[:8]}`.
 
 `armor.screen()` itself *is* on the live path, via the verifier agent's `inspect_school_callback` tool.

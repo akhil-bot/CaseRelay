@@ -1,8 +1,15 @@
-# CaseRelay Portal — UI prototype
+# CaseRelay Portal
 
-Front-end only. Every case, child, partner organization, court order, agent, and trace on these
-screens is synthetic and hard-coded in `src/lib/mock/`. The chat panel requires a configured agent
-backend — see "Chat: CopilotKit and the ADK agent" below.
+The portal runs locally via `npm run dev` and is not deployed (`caserelay-portal.web.app` is not
+live). It reaches the deployed control plane through a BFF proxy
+(`src/app/api/control-plane/[...path]/route.ts`) that mints Google-signed ID tokens server-side —
+no credential is exposed to the browser. SSE endpoints are proxied with incremental delivery.
+
+Some screens still render from `src/lib/mock/` for layout prototyping. The chat panel requires a
+configured agent backend — see "Chat: CopilotKit and the ADK agent" below.
+
+Persona switching (advocate vs. platform view) is UI-only and carries no authentication or
+access-control implications. There is no end-user authentication.
 
 ## Run
 

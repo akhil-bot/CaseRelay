@@ -21,8 +21,8 @@ Use this if an ADK/GEAP API is unfamiliar. Do not stop the sprint to “finish t
 | 3 | Function tools, `@tool`, `McpToolset`, tool schemas | Field projection, Firestore, Pub/Sub, approval queue | #1 |
 | 4 | `session.state`, `output_key`, shared state | Checkpoints, commitment status, idempotency keys | #2 |
 | 5 | Memory Bank, `PreloadMemoryTool`, scoped retrieval | Cross-session memory keyed by `case_id` + purpose | #4 |
-| 6 | `AdkApp`, `agent_engines.create`, `agents-cli deploy` | Deploy 8 agents to Agent Runtime / Cloud Run | #1–5 |
-| 7 | SPIFFE / per-agent service accounts, mTLS, DPoP | Distinct identity per org agent | #6 |
+| 6 | `AdkApp`, `agent_engines.create`, `agents-cli deploy` | Deploy 8 agents to Agent Engine (reasoning engines) | #1–5 |
+| 7 | SPIFFE / platform-managed Agent Identity, mTLS, DPoP | Distinct identity per org agent | #6 |
 | 8 | Agent Gateway, PSC, REQUEST_AUTHZ, CONTENT_AUTHZ | Purpose-bound projection + cross-agent authz | #7 |
 | 9 | Model Armor (injection, sanitization, SDP) | Quarantine poisoned school payload | #8 |
 | 10 | Agent Registry cards, versioned discovery | 8 cards with owners, scopes, health | #6 |
@@ -50,12 +50,12 @@ Items 1–7 are machine/GCP setup. Several are already complete on this machine 
 | 3 | Confirm CLIs | `which gcloud agents-cli adk`; `gcloud --version`; `agents-cli --version`; `adk --version` | `gcloud` 580+, `agents-cli` 1.4.0+, `adk` 2.7.1+ | None (already done) |
 | 4 | Confirm official Google MCP | Restart Cursor so it loads `gcloud` from `.cursor/mcp.json`. Optional: `gemini mcp list` | Cursor shows `gcloud` MCP; Gemini shows `gcloud` + `geap-agent-registry` + `geap-agent-platform` Connected | 3 (config written; Cursor restart still required) |
 | 5 | GEAP access gate — record what is callable vs preview-only | Cloud Console → Gemini Enterprise Agent Platform: Agent Runtime, Memory Bank, Agent Identity, Agent Gateway, Model Armor, Observability, Agent Registry | A short note in this file or chat: each capability is `callable` / `proof-only` / `unavailable`. Never put an unavailable preview on the demo critical path | 1–2 |
-| 6 | Create Firestore native DB (default) | `gcloud firestore databases create --database='(default)' --location=nam5 --type=firestore-native --project=caserelay` (skip if exists) | Console shows a Native-mode database | 2 |
+| 6 | Create Firestore native DB (`caserelay`) | `gcloud firestore databases create --database=caserelay --location=nam5 --type=firestore-native --project=caserelay` (skip if exists). Uses a named database, not `(default)`, because Agent Runtime's proxy URL-encodes parentheses → `%28default%29` → Firestore 400 | Console shows a Native-mode database named `caserelay` | 2 |
 | 7 | Create event + schedule backbone | `gcloud pubsub topics create caserelay-events caserelay-dead-letter --project=caserelay` and `gcloud tasks queues create caserelay-wakes --location=us-central1 --project=caserelay` | Topics + queue exist | 2 |
 | 8 | Scaffold the monorepo (do **not** run `agents-cli create` as the repo root — it would nest a second project). Create dirs + manifests by hand, then use Agents CLI later per-agent if useful | Create `backend/`, `frontend/`, `infra/`, `contracts/`, `fixtures/`. Files: `pyproject.toml`, `frontend/package.json`, `.env.example`, `.gitignore`, `backend/Dockerfile` | Empty trees exist; Python 3.12 + Next.js can be installed later without colliding | 3 |
 | 9 | Install Python deps in a project venv | `cd` repo; `uv venv && uv pip install "google-cloud-aiplatform[agent_engines,adk]" google-adk fastapi uvicorn google-cloud-firestore google-cloud-pubsub google-cloud-tasks pydantic` | `uv run python -c "from google.adk.agents import Agent"` succeeds | 8 |
 | 10 | Smoke-test one ADK agent locally | `backend/agents/_smoke/agent.py` — single `Agent` with a health tool; `adk web backend/agents/_smoke` or `agents-cli run "ping"` from a later scaffold | Agent returns a structured reply in the playground | 9 |
-| 11 | Minimal Cloud Run healthcheck | `backend/api/` FastAPI `GET /health` → `{"ok": true}`; `gcloud run deploy caserelay-api --source backend/api --region us-central1 --allow-unauthenticated --project=caserelay` | Live `.run.app` URL | 2, 8 |
+| 11 | Control plane on Cloud Run | `backend/api/` FastAPI `GET /health` → `{"ok": true}`; deployed as `caserelay-control-plane` (auth-required, `allUsers` removed) | Live `.run.app` URL | 2, 8 |
 
 ### Contracts, schema, policy
 
@@ -86,7 +86,7 @@ Items 1–7 are machine/GCP setup. Several are already complete on this machine 
 
 | # | Do this | Command / file | Done when | Depends on |
 |---|---------|----------------|-----------|------------|
-| 27 | Eight service accounts | `gcloud iam service-accounts create {intake,orchestrator,education,health,legal,shelter,family,verifier}-agent --project=caserelay` + least-privilege bindings | Each agent has its own SA email | 1 |
+| 27 | ~~Eight service accounts~~ | **Superseded.** Fleet uses GEAP platform-managed Agent Identity (`--agent-identity`). Grant IAM roles via `principalSet://` at the project level | Each agent has its own platform-managed principal | 1 |
 | 28 | Agent Gateway + identities | Console or Terraform: gateway `caserelay-gateway`, egress to Agent Runtime. Fallback if Gateway is preview-only: enforce projection + IAM in FastAPI and label it as fallback in the demo | Every inter-agent call has a verified identity | 5, 27 |
 | 29 | REQUEST_AUTHZ | IAP / IAM on each target tool; Education SA cannot read health collections | Education→health request is denied and audited | 15, 28 |
 | 30 | CONTENT_AUTHZ / Model Armor | Enable Model Armor on partner ingress; custom rule for `retrieve.*medical\|health.*records` | Poisoned school payload is quarantined (S5) | 5, 25 |
@@ -109,7 +109,7 @@ Items 1–7 are machine/GCP setup. Several are already complete on this machine 
 
 | # | Do this | Command / file | Done when | Depends on |
 |---|---------|----------------|-----------|------------|
-| 40 | Deploy agents | `agents-cli deploy` per agent **or** `agent_engines.create` / Cloud Run. Register cards in Agent Registry (`agents-cli publish` or Registry MCP `create_service`) | 8 live endpoints + 8 registry records | 5, 26, 27 |
+| 40 | Deploy agents | `agents-cli deploy` per agent with `--agent-identity`. Register cards in Agent Registry (`agents-cli publish` or Registry MCP `create_service`) | 8 live reasoning engines + 8 registry records | 5, 26, 27 |
 | 41 | Memory Bank scopes | Runtime memory keyed by `case_id` + purpose; no raw records | Memory for CR-1042 is operational state only | 40 |
 | 42 | Observability | Cloud Trace + structured logs; custom attributes `caserelay.case_id`, `commitment_type`, `workflow_id` | S8: one `trace_id` across intake → orchestrator → gateway → domain → verifier | 40 |
 | 43 | Run Maya end-to-end on cloud | Activate CR-1042, fan-out, compressed day-17 wake, projection, quarantine, approval, callback | P0 scenarios S1–S8 pass on the deployed URL | 21, 29–32, 39–42 |
@@ -217,7 +217,7 @@ caserelay-db/
 | Field | Type | Description |
 |-------|------|-------------|
 | `grant_id` | string | UUID |
-| `granted_to` | string | Agent identity (e.g. `education-agent@caserelay.iam`) |
+| `granted_to` | string | Agent identity key (e.g. `education`) mapped to platform-managed Agent Identity principal |
 | `purpose` | string | `verify_school_enrollment` |
 | `allowed_fields` | array[string] | `["child_name", "dob", "referral_id"]` |
 | `granted_by` | string | Supervisor identity |
@@ -312,7 +312,7 @@ caserelay-db/
 | `denied_data_scopes` | array[string] | |
 | `endpoint` | string | Agent Runtime URL |
 | `health_status` | enum | `healthy`, `degraded`, `offline` |
-| `identity` | string | Service account email |
+| `identity` | string | Agent identity principal |
 | `created_at` | timestamp | |
 | `updated_at` | timestamp | |
 
@@ -708,12 +708,12 @@ content_authz:
 
 ### 6.7 Agent Identity
 
-```bash
-gcloud iam service-accounts create education-agent \
-  --display-name="CaseRelay Education Liaison Agent" \
-  --project=caserelay
-# repeat per agent
-```
+> **Update:** Per-agent service accounts are no longer used. The fleet uses GEAP platform-managed
+> Agent Identity (`--agent-identity`, `identityType: AGENT_IDENTITY`). Each engine's principal is a
+> SPIFFE-style identifier:
+> `principal://agents.global.org-126484209344.system.id.goog/resources/aiplatform/projects/189353698936/locations/us-central1/reasoningEngines/<ENGINE_ID>`
+>
+> IAM grants are applied via `principalSet://` at the project level. See `docs/research/agent-identity-iam.md`.
 
 ### 6.8 Agent Registry
 

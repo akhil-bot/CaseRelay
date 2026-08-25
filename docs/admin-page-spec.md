@@ -8,8 +8,8 @@ Operator surface for synthetic cases only. Refuses to display any case without `
 
 `GET /v1/scenarios` returns all nine named scenarios. Render in two columns:
 
-- **Simple** — noah, miguel, aisha, priya, lucas, fatima
-- **Complex** — rosa, dante, yara
+- **Simple** — noah, priya, diego, rosa, ellis, theo
+- **Complex** — maya, kai, amara
 
 Each card shows: child name, what the scenario exercises, expected outcome.
 
@@ -84,5 +84,5 @@ When `approval_required` arrives, surface the approval in the Approval Center:
 | POST | `/v1/approvals/{id}/decide` | Approve/reject |
 | DELETE | `/v1/cases/{case_id}` | Cleanup |
 
-Base URL: `https://caserelay-api-<hash>-uc.a.run.app`  
+Base URL: `https://caserelay-control-plane-189353698936.us-central1.run.app` (auth-required; portal reaches it through the BFF proxy)  
 OpenAPI contract: `contracts/openapi.json`

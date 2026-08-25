@@ -22,8 +22,8 @@ Verified against the live `caserelay` project and by executing the code, not by 
 | Claim | Evidence |
 |---|---|
 | 8 ADK agents on `gemini-3.5-flash` | `backend/agents/*/agent.py`. The model resolves on the `global` Vertex endpoint (confirmed by direct `generateContent` call); it does **not** exist in `us-central1`, and `GOOGLE_CLOUD_LOCATION=global` is set correctly everywhere. The Stage One model gate is satisfied. |
-| 8 endpoints live on Vertex AI Agent Runtime | 8 `reasoningEngines` in `us-central1`, all `agentFramework: google-adk`. |
-| 8 distinct IAM service accounts, one per agent | Live `spec.serviceAccount`, bound by `infra/deploy_fleet.sh:58`. |
+| 8 endpoints live on Vertex AI Agent Engine | 8 `reasoningEngines` in `us-central1`, all `agentFramework: google-adk`. |
+| 8 platform-managed Agent Identities | All eight deployed with `--agent-identity` (`identityType: AGENT_IDENTITY`). Per-agent service accounts are **no longer used** — replaced by GEAP-managed SPIFFE-style principals. |
 | 8 real Agent Registry entries with A2A cards | Live `agentregistry.googleapis.com` returns 8 × `A2A_AGENT_CARD`. |
 | Authenticated A2A over the `/api` passthrough | `backend/runtime/a2a_auth.py:14-32` mints real ADC bearer tokens. |
 | Deterministic field projection with per-access audit | `backend/policy/projection.py`, `backend/gateway/gateway.py:36-61`. Education sees 3 of 14 fields, family services sees 1 of 14. |
@@ -39,8 +39,8 @@ This is a real Fortified Enterprise Fleet spine. The problem is everything layer
 | **Model Armor** | `backend/gateway/armor.py` — 15 lines, one regex | The pattern is tuned to the exact strings in `fixtures/cr-1042/poisoned_school_payload.json`. The attack and the catch are both predetermined. `modelarmor.googleapis.com` is already enabled on the project and never called. |
 | **Agent Observability** | `TRACE_ID = "trace-7821"`, a string literal in three files | Every audit event in every case carries the same fake trace id. ADK's real Cloud Trace export exists at `app/agent_server.py:102` gated on `CASERELAY_TRACE_TO_CLOUD`, which `deploy_fleet.sh` never sets — all eight agents run with telemetry off. |
 | **Memory Bank** | `backend/memory/bank.py` — denylist-filtered dict on a Firestore field | The engines have `contextSpec.memoryBankConfig` provisioned and `VertexAiMemoryBankService` is installed. Neither is used. |
-| **Agent Identity** | `dict.get()` on `education-agent@caserelay.iam` | Not a valid service-account format. Worse, `gateway.py:12` derives identity from the *purpose string argument* — any caller naming a purpose receives that agent's fields. `assert_scope()`, the only function reading `denied_data_scopes`, is never called. |
-| **Agent Gateway** | In-process function imported by the agents it governs | No network boundary, no caller authentication, no registry routing. |
+| **Agent Identity** | ~~`dict.get()` on `education-agent@caserelay.iam`~~ | **Fixed.** All eight engines use `--agent-identity` (GEAP platform-managed). The gateway resolves the caller principal from `RunContext` on deployed engines and verifies it matches the engine's declared identity. `assert_scope()` is now called. The old purpose-derived identity path (`PURPOSE_TO_IDENTITY`) is deleted. |
+| **Agent Gateway** | ~~In-process function imported by the agents it governs~~ | **Fixed.** Gateway now authenticates callers by principal (deployed engine identity from `RunContext`), enforces grant matching, and calls `assert_scope()` for cross-scope denial. Still in-process (no managed Gateway), but caller-authenticated and deny-by-default. |
 | **Sessions** | `InMemorySessionService` (`backend/runtime/invoke.py:17`) | Context dies with the process. On `max-instances 2`, "weeks of context" survives until the first scale event. |
 | **Agent Registry** | Roster loaded from `fixtures/cr-1042/agent_cards.json` | The real registry has the correct data. The orchestrator resolves specialists from `CASERELAY_URL_*` env vars instead. |
 
@@ -52,7 +52,7 @@ This is a real Fortified Enterprise Fleet spine. The problem is everything layer
   and `caserelay-dead-letter` exist with **zero subscriptions**, so every message the one publish
   at `durable.py:26-39` ever sent went nowhere — and that publish is wrapped in a bare
   `except: return` besides. The **Cloud Scheduler API is not enabled** on the project. There are
-  **zero Cloud Run services**, so there is no HTTP endpoint a scheduler or a push subscription
+  **zero Cloud Run services** (at time of writing; `caserelay-control-plane` has since been deployed), so there was no HTTP endpoint a scheduler or a push subscription
   could target even if they existed. Nothing about the timed event has ever run. This is the
   headline Innovation beat.
 - **Delegation is scripted.** `PHASES` is a hardcoded 10-step list naming exactly one specialist
@@ -110,11 +110,18 @@ asserts, which makes wiring them up the cheapest defensibility gain available.
 
 ### 1.6 The portal
 
-`portal/src` contains **zero** `fetch`, `axios`, or any other backend call. All six screens render
+> **Update (Aug 25):** The portal now calls the real control plane through a BFF proxy
+> (`portal/src/app/api/control-plane/[...path]/route.ts`) that mints Google-signed ID tokens
+> server-side. SSE is proxied with incremental delivery preserved. A portal-triggered run fans
+> out over real A2A to the deployed engines. Verified: case CR-0825094224 completed all 9
+> phases with 7 engines serving A2A. The portal is **not deployed** — it runs via `npm run dev`
+> locally. `caserelay-portal.web.app` is not live. Some mock data may still exist alongside
+> real data paths; the analysis below describes the state as of the plan's writing.
+
+`portal/src` originally contained **zero** `fetch`, `axios`, or any other backend call. The screens rendered
 from `lib/mock/*.ts` driven by one `step` integer that auto-advances every 3800 ms, with a visible
-play/next/prev scrubber in the sidebar. `mock/agents.ts` invents a third, conflicting agent roster
-with fabricated `https://cr-*-7g2h.a.run.app` endpoints — the project has **zero** Cloud Run
-services — plus static `p50Ms: 412` and `lastHeartbeat: "18s ago"`.
+play/next/prev scrubber in the sidebar. `mock/agents.ts` invented a third, conflicting agent roster
+with fabricated `https://cr-*-7g2h.a.run.app` endpoints — plus static `p50Ms: 412` and `lastHeartbeat: "18s ago"`.
 
 The two sides describe unrelated worlds. The only value that matches is `trace-7821`, because both
 hardcode it:
@@ -140,9 +147,12 @@ deployed, `POST /demo/maya` blocks for 227 seconds, and Firestore writes are opt
 
 ### 1.7 Documentation accuracy
 
-Six of the ten services in the README stack table are unused by any code: Cloud Run, Cloud Tasks,
-Cloud Storage, Secret Manager, Cloud Logging, Cloud Trace. `README:58` says "Gemini 2.5 Flash"
-against a pass/fail criterion where the code is correctly on 3.5. `docs/hackathon-rulebook.md:244-257`
+> **Update (Aug 25):** The README stack table has been corrected. Cloud Run is now used for
+> the control plane (`caserelay-control-plane`). Cloud Storage, Secret Manager, Cloud Tasks,
+> and Pub/Sub (events / scheduling) are not on the live path and have been removed from the
+> stack table. The model string has been correct (`gemini-3.5-flash`) since prior edits.
+
+`docs/hackathon-rulebook.md:244-257`
 cites `idempotency.py` and `audit/writer.py` as evidence for capabilities they do not deliver.
 `fixtures/cr-1042/partner_configs.json` is unused by any code and reads exactly like an answer key
 for the demo's supposedly independent outcomes.
@@ -447,7 +457,7 @@ development and wrong for the control plane — a portal click that silently run
 one Cloud Run container is not the multi-agent system being claimed. Fail loudly rather than falling
 back. (Resolving those endpoints from the registry instead of env vars is Step 20; it is a swap
 behind this boundary, not a change to it, which is why it can wait.) Then every action in the portal
-is a real A2A call to a real reasoning engine under its own service account, and the audit trail the
+is a real A2A call to a real reasoning engine under its own agent identity, and the audit trail the
 UI renders was written by the agents that did the work.
 
 **Step 11 · A wake that actually fires.**
@@ -523,7 +533,7 @@ drift from what you tested. Install from `pyproject.toml` and `uv.lock` instead 
 inline list.
 
 The agents stay on Agent Runtime; the control plane is a separate Cloud Run service with its own
-service account, holding **read-only** Firestore access plus permission to invoke the orchestrator.
+service identity, holding **read-only** Firestore access plus permission to invoke the orchestrator.
 This makes the README's Cloud Run claim true, gives a `.run.app` URL for the submission's hosted-URL
 field, and gives the portal one origin to call. Add CORS for the portal origin, and note the
 300-second request ceiling is why Step 10 exists.
@@ -582,19 +592,12 @@ Everything here improves how a capability is *implemented* without changing what
 it runs concurrently with portal work. Ordered by score-per-hour.
 
 **Step 15 · Make identity real and enforced.** *(highest architectural value in the plan)*
-Three changes, in order:
-1. Fix the identities. `education-agent@caserelay.iam` is not a service account. Change
-   `fixtures/cr-1042/agent_cards.json` and `CANONICAL_GRANTS` in
-   `backend/state/intake_service.py:123-154` to the real
-   `*-agent@caserelay.iam.gserviceaccount.com` values.
-2. Stop deriving identity from the purpose. `gateway.py:12` does
-   `target = PURPOSE_TO_IDENTITY[purpose]`, so the answer to "which agent am I" is "whichever Python
-   function got called". Replace it: verify the incoming ID token with
-   `google.oauth2.id_token.verify_oauth2_token`, take the `email` claim as the caller principal, and
-   require it to equal `grant["granted_to"]`. Deny and audit when they disagree.
-3. Call `assert_scope`. It is the only code that reads `denied_data_scopes`, and it is dead. Invoke
-   it inside `authorized_context` so a cross-scope request produces an audited denial rather than a
-   structurally-absent field.
+
+> **Status (Aug 25): DONE.** All three sub-steps are implemented and verified on the deployed fleet.
+
+1. ~~Fix the identities.~~ **Done.** Engines use GEAP platform-managed Agent Identity (`--agent-identity`), not per-agent service accounts. Grants reference the agent identity key, not a fake email.
+2. ~~Stop deriving identity from the purpose.~~ **Done.** `PURPOSE_TO_IDENTITY` is deleted. The gateway resolves the caller principal from `RunContext.agent_identity` on deployed engines and requires it to match the engine's declared identity; mismatch is denied and audited.
+3. ~~Call `assert_scope`.~~ **Done.** `assert_scope` is invoked inside `authorized_context` for every disclosed field; a cross-scope request produces an audited denial.
 
 *Check:* a request presenting the health agent's token for `verify_school_enrollment` is denied and
 produces a `denial` audit event — the `rosa` scenario. This is also a demo beat: a real, visible
@@ -636,7 +639,7 @@ Change `trace_to_cloud=` to `otel_to_cloud=True` at `app/agent_server.py:102` �
 the legacy parameter and ADK 2.7.1 carries a TODO to remove it. Add to `deploy_fleet.sh:59`:
 `GOOGLE_CLOUD_AGENT_ENGINE_ENABLE_TELEMETRY=true`,
 `OTEL_SEMCONV_STABILITY_OPT_IN=gen_ai_latest_experimental`,
-`OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT=EVENT_ONLY`. Grant each service account
+`OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT=EVENT_ONLY`. Grant each agent identity
 `roles/cloudtrace.agent`. Step 4 already produces real trace ids locally; this is what makes the
 agent-side spans join them.
 
@@ -728,12 +731,10 @@ Reproducible setup is explicitly scored, and right now nobody but the author can
 all small:
 - **`agents-cli` is not in `pyproject.toml`.** `deploy_fleet.sh:52` depends on it, `uv sync` does not
   install it, and the README never mentions it. Add it.
-- **Nothing creates the eight service accounts.** `deploy_fleet.sh:58` assumes they exist. Write
-  `infra/bootstrap.sh` that enables the required APIs (including Cloud Scheduler, currently
-  disabled), creates the eight SAs, grants each its roles (per-agent least privilege, per Step 15),
-  creates the Firestore database, deploys `infra/firestore.indexes.json`, and creates the Scheduler
-  job and Pub/Sub push subscription from Step 11. Those steps exist today only as prose in
-  `caserelay-agent-build-plan.md:49-56`.
+- **Per-agent service accounts are no longer used.** The fleet uses GEAP platform-managed Agent Identity
+  (`--agent-identity`). `infra/bootstrap.sh` should enable the required APIs (including Cloud Scheduler, currently
+  disabled), grant the `principalSet://` IAM bindings, create the Firestore database, deploy
+  `infra/firestore.indexes.json`, and create the Scheduler job and Pub/Sub push subscription from Step 11.
 - **The deploy loop hides its own failures.** `deploy_fleet.sh:8` uses `set -uo pipefail` without
   `-e`, and passes `--no-wait` to all eight deploys. A failed deploy neither stops the loop nor
   surfaces. Add `-e`, and either drop `--no-wait` or poll the operations and fail on error.
@@ -771,8 +772,8 @@ nothing.
 Now that the claims are true, make the docs match. Restore Cloud Run, Cloud Tasks, Cloud Trace and
 the rest to the README stack table only for services the code now uses, and delete the ones it still
 does not. Replace the `<your-org>` placeholder at `README:140` with the real clone URL. Correct the
-four false rows in `docs/hackathon-rulebook.md:244-257`, change "nine agents" to eight, and drop
-`deployment_metadata.json` as cited evidence — it is gitignored, so no judge will ever see it. Fix
+four false rows in `docs/hackathon-rulebook.md:244-257` (now corrected: "eight agents", Cloud Run
+clarified as control-plane only, `deployment_metadata.json` dropped as evidence). Fix
 `.env.example` to name `CASERELAY_STATE` rather than the phantom `CASERELAY_PERSIST`.
 
 Redraw both diagrams as-built. Update the walkthrough, including the stale section 11 (`:596-601`)

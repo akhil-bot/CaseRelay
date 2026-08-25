@@ -28,48 +28,49 @@ CaseRelay closes that gap with an accountable, audited agent fleet — one where
 CASA Volunteer / Supervisor
         │
         ▼
-  CaseRelay Portal (Next.js)
-        │
+  CaseRelay Portal (Next.js, local)
+        │  BFF proxy — mints ID tokens server-side;
+        │  no credential reaches the browser
         ▼
-  Cloud Run API (FastAPI / Python)
+  Control Plane (FastAPI on Cloud Run, auth-required)
         │
-        ├─► Intake & Authority Agent  ──► Firestore (case state)
+        ├─► Intake & Authority Agent  ──► Firestore (named DB "caserelay")
         │                                       │
-        │                              Pub/Sub Events ◄── Cloud Tasks (scheduler)
+        │                              Pub/Sub Events
         │                                       │
         ▼                                       ▼
   Continuity Orchestrator ◄────────── Agent Registry
         │
         ▼
   Agent Gateway  ──► Education Agent ──┐
-                 ──► Health Agent     ──┤
-                 ──► Legal Agent      ──┼──► Model Armor ──► Safeguarding Verifier
-                 ──► Shelter Agent    ──┤                          │
-                 ──► Family Services  ──┘                          ▼
-                                                        Human Approval Queue
-                                                                   │
-                                                          Firestore / Audit Log
+                 ──► Health Agent     ──┤    All 8 agents on Vertex AI
+                 ──► Legal Agent      ──┼──► Agent Engine (reasoning engines)
+                 ──► Shelter Agent    ──┤    with platform-managed Agent Identity
+                 ──► Family Services  ──┘
+                          │
+                    Model Armor ──► Safeguarding Verifier
+                                          │
+                                 Human Approval Queue
+                                          │
+                                 Firestore / Audit Log
 ```
 
 **Technology stack:**
 
 | Layer | Technology |
 |---|---|
-| Agent runtime | Google ADK, Gemini 3.5 Flash (`gemini-3.5-flash`, Vertex AI) |
-| Backend API | Python, FastAPI, Cloud Run |
-| Portal | Next.js, TypeScript |
-| State | Firestore |
-| Events / scheduling | Pub/Sub, Cloud Tasks |
-| Secrets | Secret Manager |
-| Storage | Cloud Storage |
+| Agent runtime | Google ADK on Vertex AI Agent Engine (reasoning engines), Gemini 3.5 Flash (`gemini-3.5-flash`) |
+| Control plane | Python, FastAPI, Cloud Run (`caserelay-control-plane`; `allUsers` removed, auth-required) |
+| Portal | Next.js, TypeScript (local `npm run dev`; not deployed) |
+| State | Firestore (named database `caserelay` — see decision note below) |
 | Observability | Cloud Logging, Cloud Trace, GEAP Agent Observability |
-| Security | GEAP Model Armor, Safeguarding Verifier (deterministic policy) |
+| Security | GEAP Agent Identity (platform-managed, mTLS + DPoP), Model Armor, Safeguarding Verifier (deterministic policy) |
 
 ---
 
 ## Agent Fleet
 
-Eight agents, each with a platform-managed Agent Identity (`identityType: AGENT_IDENTITY`) and a scoped data projection:
+Eight agents deployed as Vertex AI reasoning engines, each with a platform-managed Agent Identity (`identityType: AGENT_IDENTITY`, `--agent-identity`) and a scoped data projection. Only the control plane runs on Cloud Run.
 
 | Agent | Owner | Scope |
 |---|---|---|
@@ -102,23 +103,38 @@ Eight agents, each with a platform-managed Agent Identity (`identityType: AGENT_
 
 ## GEAP Capabilities Demonstrated
 
-- **Agent Registry** — versioned cards and live discovery for all eight agents
-- **Agent Runtime** — durable execution with checkpoint, sleep, and deadline-triggered resume
+- **Agent Registry** — versioned A2A cards and live discovery for all eight agents, auto-registered by `agents-cli deploy`
+- **Agent Runtime** — eight reasoning engines in `us-central1` with checkpoint, sleep, and deadline-triggered resume
 - **Memory Bank** — scoped cross-session operational memory keyed by case and purpose
-- **Agent Identity** — platform-managed identity per agent (`--agent-identity`); verified caller principal; cross-scope denial
+- **Agent Identity** — platform-managed identity per agent (`--agent-identity`); SPIFFE-style principals (`principal://agents.global.org-…`); caller principal verified at the gateway; cross-scope denial demonstrated
 - **Agent Gateway** — caller-authenticated, deny-by-default, purpose-bound field projection
 - **Model Armor** — prompt-injection quarantine and safe retry on poisoned partner payload
 - **Agent Observability** — one trace ID connects Registry, Runtime, Memory, Identity, Gateway, Model Armor, approval, and completion
 
+### Notable engineering decisions
+
+| Decision | Rationale |
+|---|---|
+| **mTLS over CAA opt-out** | Agent Identity tokens are certificate-bound (DPoP + mTLS). We hit 401s when calling non-mTLS endpoints and fixed them by setting `GOOGLE_API_USE_CLIENT_CERTIFICATE=true` so traffic routes to `*.mtls.googleapis.com`. We deliberately did NOT set `GOOGLE_API_PREVENT_AGENT_TOKEN_SHARING_FOR_GCP_SERVICES=False` (Google's documented opt-out) because that disables token binding entirely. CAA enforcement remains on. See [troubleshoot-auth-manager](https://docs.google.com/iam/docs/troubleshoot-auth-manager). |
+| **Named Firestore database** | Uses the database named `caserelay`, not `(default)`. Agent Runtime's network proxy URL-encodes parentheses in outgoing requests, turning `(default)` into `%28default%29`, which Firestore rejects with HTTP 400. A named database sidesteps this entirely. |
+| **BFF proxy for the control plane** | The portal reaches the authenticated Cloud Run service through a Next.js server-side proxy (`portal/src/app/api/control-plane/[...path]/route.ts`) that mints Google-signed ID tokens. No credential is exposed to the browser. SSE is proxied with incremental delivery preserved. |
+| **Control plane locked down** | `allUsers` removed from `roles/run.invoker`; unauthenticated calls return 403. |
+
 ---
 
-## Portal Screens
+## Portal
+
+The portal runs locally via `npm run dev`. It is not deployed; `caserelay-portal.web.app` is not live. Per the official hackathon rules, a hosted URL is optional ("Your app does not need to be publicly accessible or live at the exact moment of submission or judging").
+
+Portal screens:
 
 1. **Case Inbox** — overdue, blocked, approval-needed, and recently completed cases
 2. **Continuity Timeline** — commitments, owners, evidence, deadlines, handoffs
 3. **Approval Center** — proposed action, evidence, disclosed/withheld fields, policy basis
 4. **Agent Registry** — owner, version, purpose, tools, scopes, endpoint, health
 5. **Audit Trace** — correlated delegation, access, model/tool calls, retry, approval, completion events
+
+Persona switching (advocate vs. platform view) is UI-only and carries no authentication or access-control implications. There is no end-user authentication.
 
 ---
 
@@ -162,6 +178,17 @@ Full instructions, expected outputs, and the deploy procedure are in **[docs/cas
 
 ---
 
+## Verified Security Properties
+
+These have been demonstrated on the deployed fleet, not merely asserted.
+
+- **Cross-scope denial** — in the `rosa` scenario the education agent received ONLY `child_name`, `dob`, `referral_id`; no medical fields disclosed.
+- **A2A transport auth** — calls with no credentials or an invalid bearer token are refused with HTTP 401; valid token returns 200.
+- **Gateway identity model** — on a deployed engine the caller principal is resolved from `RunContext` and must match that engine's own deployed identity, preventing an engine from claiming to be a different engine. Cross-engine protection comes from A2A bearer-token auth at the transport layer.
+- **Quarantine → escalation** — 5/5 concurrent cloud end-to-end runs had the verifier agent itself call `open_escalation`.
+
+---
+
 ## Submission Details
 
 | Field | Value |
@@ -171,7 +198,7 @@ Full instructions, expected outputs, and the deploy procedure are in **[docs/cas
 | Track | Fortified Enterprise Fleet |
 | Demo duration | ≤ 3:50 |
 | Demo language | English (with captions) |
-| Cloud platform | Google Cloud (Cloud Run, Firestore, Pub/Sub, Vertex AI, GEAP) |
+| Cloud platform | Google Cloud (Vertex AI Agent Engine, Cloud Run, Firestore, GEAP) |
 
 Official rules, submission checklist, scoring mechanism, and judging criteria are mirrored in
 [docs/hackathon-rulebook.md](docs/hackathon-rulebook.md).
