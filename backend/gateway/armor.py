@@ -20,7 +20,7 @@ _log = logging.getLogger(__name__)
 
 _CROSS_SCOPE = re.compile(
     r"(?:retrieve|access|fetch|extract|get|pull|send|disclose|share|reveal|return|provide)"
-    r"\s+(?:\w+\s+){0,4}"
+    r"\s+(?:\S+\s+){0,4}"
     r"(?:medical|clinical|health|diagnosis|medication|legal\s*strategy|family\s*notes"
     r"|confidential|restricted|private|sealed)",
     re.IGNORECASE,

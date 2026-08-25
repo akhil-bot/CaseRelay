@@ -22,6 +22,7 @@
       "referral_date": "2026-07-15",
       "due_date": "2026-08-01",
       "status": "sent",
+      "partner_behaviour": "inject",
       "inject_callback": true
     },
     {
