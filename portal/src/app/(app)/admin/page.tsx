@@ -17,7 +17,7 @@ import {
   type RunStatus,
   type Scenario,
 } from "@/lib/api";
-import { useAdminCopilotTools } from "@/lib/copilot/admin-tools";
+import { useToolEvents, type ToolEventCallbacks } from "@/lib/copilot/tool-events";
 
 type Phase = "pick" | "created" | "streaming" | "done";
 
@@ -128,7 +128,7 @@ export default function AdminPage() {
     }
   }, [createdCase, startEventStream]);
 
-  const copilotCallbacks = useMemo(
+  const copilotCallbacks = useMemo<ToolEventCallbacks>(
     () => ({
       onCaseCreated: (result: CreatedCase, scenario: Scenario) => {
         setSelectedScenario(scenario);
@@ -148,7 +148,8 @@ export default function AdminPage() {
     [createdCase, startEventStream],
   );
 
-  useAdminCopilotTools(copilotCallbacks);
+  const { subscribe } = useToolEvents();
+  useEffect(() => subscribe(copilotCallbacks), [subscribe, copilotCallbacks]);
 
   const handleDelete = useCallback(async () => {
     if (!createdCase) return;

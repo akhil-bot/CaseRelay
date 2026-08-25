@@ -14,6 +14,7 @@ import { ConversationBridge } from "@/components/copilot/conversation-history";
 import { LogoMark } from "@/components/Logo";
 import { cx } from "@/design/tokens";
 import { CASERELAY_AGENT_ID, isRuntimeAvailable } from "@/lib/copilot/config";
+import { useToolEvents } from "@/lib/copilot/tool-events";
 import { useDemo } from "@/lib/demo-store";
 import { useViewer } from "@/lib/viewer";
 
@@ -76,9 +77,17 @@ function ConnectedChat() {
   const pathname = usePathname() ?? "/";
   const { profile, showsTechnical } = useViewer();
   const { cases, pendingApprovals, meta } = useDemo();
+  const { caseEntries } = useToolEvents();
 
   const overdue = cases.filter((item) => item.flags.includes("overdue")).length;
   const blocked = cases.filter((item) => item.flags.includes("blocked")).length;
+
+  const caseRegistryValue =
+    caseEntries.length === 0
+      ? "No cases created this session."
+      : caseEntries
+          .map((e) => `${e.childName} → ${e.caseId} (scenario: ${e.scenario})`)
+          .join("; ");
 
   useAgentContext({
     description: "Current view and signed-in role",
@@ -93,6 +102,11 @@ function ConnectedChat() {
   useAgentContext({
     description: "Scenario clock position",
     value: `${meta.dayLabel} — ${meta.label}. ${meta.narration}`,
+  });
+
+  useAgentContext({
+    description: "Session case registry — maps child names to case IDs for conversational reference",
+    value: caseRegistryValue,
   });
 
   return (
