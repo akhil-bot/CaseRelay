@@ -520,7 +520,7 @@ const platform: PersonaCopy = {
   },
   sidebar: {
     sectionLabel: "Platform",
-    footerNote: "Synthetic fixtures. Nothing in this build is deployed and no request leaves the browser.",
+    footerNote: "Scripted walkthrough data. The Synthetic Data Lab runs the real deployed fleet; every other screen shows a scenario script.",
   },
   guidelines: {
     label: "Operating envelope",
@@ -590,9 +590,9 @@ const platform: PersonaCopy = {
       subtitle: "What this build is and is not evidence of.",
       items: [
         {
-          title: "Synthetic fixtures throughout",
+          title: "Scripted walkthrough and live fleet",
           icon: "shield",
-          body: "No agent is deployed behind this build, no request leaves the browser, and health and latency figures are illustrative. Every case, identity, and trace is fabricated.",
+          body: "The Synthetic Data Lab runs real agents deployed on Vertex AI. Every other screen shows a scripted walkthrough with fabricated cases, identities, and traces.",
         },
         {
           title: "Deterministic code owns the consequential path",

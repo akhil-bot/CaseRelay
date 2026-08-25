@@ -103,10 +103,6 @@ export const CASES: CaseSummary[] = [
   },
 ];
 
-export const CASES_BY_ID: Record<string, CaseSummary> = Object.fromEntries(
-  CASES.map((item) => [item.id, item]),
-);
-
 /**
  * Baseline commitments for CR-1042. The demo store rewrites status/detail per step;
  * this array is the Day 0 proposal produced by the Intake & Authority Agent.
