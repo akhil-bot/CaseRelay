@@ -86,18 +86,22 @@ function LiveCaseDetail({ caseId }: { caseId: string }) {
     ? manualRunState
     : runState;
 
-  const quarantineEvents = useMemo(() =>
-    activeRunState.events.filter((ev: RunEvent) => {
-      const phase = ev.phase ?? "";
-      return phase.includes("quarantine") || (ev.message ?? "").toLowerCase().includes("quarantine");
-    }),
+  const quarantineCompleted = useMemo(() =>
+    activeRunState.events.filter((ev: RunEvent) =>
+      ev.event === "phase_complete" && (ev.phase ?? "").includes("quarantine"),
+    ),
   [activeRunState.events]);
 
-  const escalationEvents = useMemo(() =>
-    activeRunState.events.filter((ev: RunEvent) => {
-      const phase = ev.phase ?? "";
-      return phase.includes("approve") || (ev.message ?? "").toLowerCase().includes("escalation");
-    }),
+  const quarantineErrors = useMemo(() =>
+    activeRunState.events.filter((ev: RunEvent) =>
+      ev.event === "phase_error" && (ev.phase ?? "").includes("quarantine"),
+    ),
+  [activeRunState.events]);
+
+  const escalationCompleted = useMemo(() =>
+    activeRunState.events.filter((ev: RunEvent) =>
+      ev.event === "phase_complete" && (ev.phase ?? "").includes("approve"),
+    ),
   [activeRunState.events]);
 
   const handleRun = async () => {
@@ -292,35 +296,47 @@ function LiveCaseDetail({ caseId }: { caseId: string }) {
         </Card>
       )}
 
-      {/* Quarantine / escalation highlight */}
-      {quarantineEvents.length > 0 && (
-        <Card icon="lock" title="Quarantine Event Detected">
-          <div className="rounded-control border border-danger/25 bg-danger/5 px-4 py-3">
-            <div className="flex items-start gap-3">
-              <Icon name="shield" size={20} className="mt-0.5 shrink-0 text-danger" />
-              <div>
-                <p className="text-[13px] font-medium text-danger">
-                  Cross-scope data exfiltration attempt quarantined
-                </p>
-                {quarantineEvents.map((ev, i) => (
-                  <p key={i} className="mt-1 text-[12.5px] text-ink-soft">
-                    {String(ev.message ?? ev.detail ?? ev.event)}
-                  </p>
-                ))}
+      {/* Quarantine / escalation highlight — only rendered when the phase
+          actually completed (phase_complete), never on phase_started alone.
+          All text comes from the backend's _narrate message field. */}
+      {(quarantineCompleted.length > 0 || quarantineErrors.length > 0) && (
+        <Card icon="lock" title="Quarantine">
+          {quarantineCompleted.length > 0 && (
+            <div className="rounded-control border border-danger/25 bg-danger/5 px-4 py-3">
+              <div className="flex items-start gap-3">
+                <Icon name="shield" size={20} className="mt-0.5 shrink-0 text-danger" />
+                <div>
+                  {quarantineCompleted.map((ev, i) => (
+                    <p key={i} className={cx("text-[13px]", i === 0 ? "font-medium text-danger" : "mt-1 text-ink-soft")}>
+                      {String(ev.message ?? ev.event)}
+                    </p>
+                  ))}
+                </div>
               </div>
             </div>
-          </div>
-          {escalationEvents.length > 0 && (
+          )}
+          {quarantineErrors.length > 0 && (
+            <div className={cx(quarantineCompleted.length > 0 && "mt-3", "rounded-control border border-danger/25 bg-danger/5 px-4 py-3")}>
+              <div className="flex items-start gap-3">
+                <Icon name="alert" size={20} className="mt-0.5 shrink-0 text-danger" />
+                <div>
+                  {quarantineErrors.map((ev, i) => (
+                    <p key={i} className="text-[13px] text-danger">
+                      {String(ev.message ?? ev.error ?? ev.event)}
+                    </p>
+                  ))}
+                </div>
+              </div>
+            </div>
+          )}
+          {escalationCompleted.length > 0 && (
             <div className="mt-3 rounded-control border border-warn/25 bg-warn-soft px-4 py-3">
               <div className="flex items-start gap-3">
                 <Icon name="user" size={20} className="mt-0.5 shrink-0 text-warn" />
                 <div>
-                  <p className="text-[13px] font-medium text-warn">
-                    Escalation to supervisor
-                  </p>
-                  {escalationEvents.map((ev, i) => (
-                    <p key={i} className="mt-1 text-[12.5px] text-ink-soft">
-                      {String(ev.message ?? ev.detail ?? ev.event)}
+                  {escalationCompleted.map((ev, i) => (
+                    <p key={i} className={cx("text-[13px]", i === 0 ? "font-medium text-warn" : "mt-1 text-ink-soft")}>
+                      {String(ev.message ?? ev.event)}
                     </p>
                   ))}
                 </div>

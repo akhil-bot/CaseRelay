@@ -25,7 +25,7 @@ function phaseIcon(event: string): { name: IconName; color: string } {
     case "run_failed":
       return { name: "close", color: "text-danger" };
     case "stream_end":
-      return { name: "checkCircle", color: "text-brand" };
+      return { name: "activity", color: "text-ink-muted" };
     default:
       return { name: "activity", color: "text-ink-muted" };
   }

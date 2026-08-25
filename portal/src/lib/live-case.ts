@@ -49,7 +49,10 @@ export function useLiveCase(caseId: string): LiveCaseState {
     let cancelled = false;
     dispatch({ type: "loading" });
 
-    Promise.all([getCase(caseId), listCaseRuns(caseId)])
+    const caseFetch = getCase(caseId);
+    const runsFetch = listCaseRuns(caseId).catch(() => [] as CaseRunSummary[]);
+
+    Promise.all([caseFetch, runsFetch])
       .then(([detail, runs]) => {
         if (!cancelled) dispatch({ type: "loaded", data: detail, runs });
       })
