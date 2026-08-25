@@ -36,9 +36,9 @@ This is a real Fortified Enterprise Fleet spine. The problem is everything layer
 
 | Capability | What exists | Why it fails a Google judge |
 |---|---|---|
-| **Model Armor** | `backend/gateway/armor.py` — 15 lines, one regex | The pattern is tuned to the exact strings in `fixtures/cr-1042/poisoned_school_payload.json`. The attack and the catch are both predetermined. `modelarmor.googleapis.com` is already enabled on the project and never called. |
-| **Agent Observability** | `TRACE_ID = "trace-7821"`, a string literal in three files | Every audit event in every case carries the same fake trace id. ADK's real Cloud Trace export exists at `app/agent_server.py:102` gated on `CASERELAY_TRACE_TO_CLOUD`, which `deploy_fleet.sh` never sets — all eight agents run with telemetry off. |
-| **Memory Bank** | `backend/memory/bank.py` — denylist-filtered dict on a Firestore field | The engines have `contextSpec.memoryBankConfig` provisioned and `VertexAiMemoryBankService` is installed. Neither is used. |
+| **Model Armor** | `backend/gateway/armor.py` — calls Model Armor API (`modelarmor.googleapis.com`) with template `caserelay-screen`; SDP Advanced Config references Cloud DLP inspect template `caserelay-cross-scope` (custom dictionary detectors + hotword proximity rule). All old regexes deleted. Fails closed. | Template configuration in `infra/bootstrap.sh` / GCP console. Not an ADK plugin (direct call), but enforced by Google services. |
+| **Agent Observability** | `otel_to_cloud=True` in `agent_server.py`; `GOOGLE_CLOUD_AGENT_ENGINE_ENABLE_TELEMETRY=true` in `deploy_fleet.sh`; `CloudTraceSpanExporter` in `context.py`; trace IDs derived from live OTel spans | Control-plane and engine traces do NOT share a trace id (Agent Runtime starts a fresh trace context). No end-to-end correlation across both hops. |
+| **Memory Bank** | `backend/memory/platform.py` — `VertexAiMemoryBankService` against instance `8631858420611284992`; sessions extracted via `memories.generate` (synchronous); 3 custom topics (`partner_contacts`, `institutional_shortcuts`, `unblocking_strategies`) | Scoped per case; orchestrator searches on each turn when env var set. `backend/memory/bank.py` is a separate Firestore module, NOT the GEAP Memory Bank. |
 | **Agent Identity** | ~~`dict.get()` on `education-agent@caserelay.iam`~~ | **Fixed.** All eight engines use `--agent-identity` (GEAP platform-managed). The gateway resolves the caller principal from `RunContext` on deployed engines and verifies it matches the engine's declared identity. `assert_scope()` is now called. The old purpose-derived identity path (`PURPOSE_TO_IDENTITY`) is deleted. |
 | **Agent Gateway** | ~~In-process function imported by the agents it governs~~ | **Fixed.** Gateway now authenticates callers by principal (deployed engine identity from `RunContext`), enforces grant matching, and calls `assert_scope()` for cross-scope denial. Still in-process (no managed Gateway), but caller-authenticated and deny-by-default. |
 | **Sessions** | `InMemorySessionService` (`backend/runtime/invoke.py:17`) | Context dies with the process. On `max-instances 2`, "weeks of context" survives until the first scale event. |
@@ -185,11 +185,11 @@ When this plan is complete:
 |---|---|---|
 | Agent Registry | JSON fixture | Live registry resolution at orchestrator startup (Step 20) |
 | Agent Runtime | Real deploy, fake durability | Real deploy + Vertex Sessions + Cloud Scheduler wake (Steps 11, 18) |
-| Memory Bank | Firestore dict | `VertexAiMemoryBankService` + `PreloadMemoryTool` (Step 17) |
+| Memory Bank | **Done.** `VertexAiMemoryBankService` + 3 custom topics + `memories.generate` | Vertex Sessions (Step 18) completes the picture |
 | Agent Identity | ~~String compare on fake emails~~ | **Done.** `--agent-identity` on all eight engines; `google.oauth2.id_token` verification in deployed mode. |
 | Agent Gateway | ~~In-process function~~ | **Done.** Caller-authenticated and deny-by-default; `PURPOSE_TO_IDENTITY` deleted. |
-| Model Armor | 15-line regex | `google-cloud-modelarmor` as an ADK plugin (Step 16) |
-| Agent Observability | Hardcoded `trace-7821` | Real OTel context exported to Cloud Trace (Steps 4, 19) |
+| Model Armor | **Done.** `google-cloud-modelarmor` calling template `caserelay-screen` (PI/jailbreak + SDP/DLP) | Could be implemented as ADK plugin for uniform enforcement |
+| Agent Observability | **Done.** `otel_to_cloud=True`, `CloudTraceSpanExporter`, `ENABLE_TELEMETRY=true`; ADK spans with `gen_ai.*` attributes | Cross-hop trace correlation still missing (Agent Runtime limitation) |
 
 ---
 
@@ -471,7 +471,7 @@ is a real A2A call to a real reasoning engine under its own agent identity, and 
 UI renders was written by the agents that did the work.
 
 **Step 11 · A wake that actually fires.**
-**Status: PARTIAL — `durable.py` has `sweep()` + `find_due()` + `resume_wake()` with scheduler audit events. `bootstrap.sh` creates the Cloud Scheduler job (every 5 min to Pub/Sub). Push subscription to the control-plane HTTP endpoint is NOT configured — the scheduler writes to the Pub/Sub topic, but no push delivers to `POST /v1/workflows/sweep`. The sweeper logic is complete; the last-mile wiring (Pub/Sub push → Cloud Run) is missing.**
+**Status: DONE — `durable.py` has `sweep()` + `find_due()` + `resume_wake()` with scheduler audit events. `bootstrap.sh` creates the Cloud Scheduler job (every 5 min to Pub/Sub topic `caserelay-events`). Push subscription `caserelay-events-push` configured to deliver to `${CP_URL}/v1/workflows/sweep` with OIDC authentication and dead-letter after 5 attempts. All wiring codified in `infra/bootstrap.sh` (conditional on `control_plane_url.txt` existing).**
 
 *Where we are.* Nothing publishes timed events and nothing has ever tested one. `write_checkpoint`
 computes `next_wake = now + 17 days`, writes it to Firestore, publishes a single Pub/Sub message
@@ -536,7 +536,7 @@ operation, and it is the single most valuable half-minute of the demo.
 with a 45-second deadline resumes with nobody watching, and its audit trail names the scheduler.
 
 **Step 12 · Deploy the control plane to Cloud Run.**
-**Status: DONE — `caserelay-control-plane` deployed at `caserelay-control-plane-6nwo7o4bbq-uc.a.run.app`. `infra/deploy_control_plane.sh` exists. `allUsers` removed; auth-required. Portal reaches it through BFF proxy.**
+**Status: DONE — `caserelay-control-plane` deployed at `caserelay-control-plane-6nwo7o4bbq-uc.a.run.app`. `infra/deploy_control_plane.sh` exists. Deploys with `--timeout=900`, `--no-cpu-throttling`, gen2 execution environment, min/max instances pinned to 1. `allUsers` removed; auth-required. Portal reaches it through BFF proxy.**
 Rewrite `backend/Dockerfile` first — **it cannot start in its current form.** Line 12 copies only
 `api/`, line 15 runs `uvicorn api.main:app`, and `backend/api/main.py:3-5` imports
 `backend.memory.bank`, `backend.runtime.fleet` and `backend.runtime.workspace`, none of which are in
@@ -618,7 +618,7 @@ produces a `denial` audit event — the `rosa` scenario. This is also a demo bea
 zero-trust refusal.
 
 **Step 16 · Replace `armor.py` with the Model Armor API.**
-**Status: PARTIAL — `armor.py` calls `ModelArmorClient.sanitize_user_prompt` when `MODEL_ARMOR_TEMPLATE` is set; deterministic layer runs first as defence-in-depth. NOT implemented as an ADK plugin — still a direct function call in the screening path. The old fixture-tuned regex is gone; broad patterns remain as the deterministic layer.**
+**Status: DONE — `armor.py` calls `ModelArmorClient.sanitize_user_prompt` against template `caserelay-screen` (PI/jailbreak + malicious URI + SDP Advanced Config referencing Cloud DLP inspect template `caserelay-cross-scope`). The cross-scope policy uses DLP custom dictionary detectors with a hotword proximity rule (terms only match when an action verb appears within 50 characters). All old hand-coded regexes are deleted. Screening fails closed: `ScreeningUnavailable` produces an explicit quarantine with rule `screening_unavailable`. NOT implemented as an ADK plugin — still a direct function call in the screening path. The audit trail reports rule `sdp` from the Model Armor match.**
 Create a template with prompt-injection/jailbreak detection, Sensitive Data Protection, and
 malicious-URI filters. Add `google-cloud-modelarmor` to `pyproject.toml` and call
 `ModelArmorClient.sanitize_model_response` on every partner payload before an agent reasons over it,
@@ -634,7 +634,7 @@ matching `medical notes` when the fixture says `medical notes` is the fastest te
 injection string the code has never seen is also caught.
 
 **Step 17 · Real Memory Bank.**
-**Status: NOT STARTED — `VertexAiMemoryBankService` and `PreloadMemoryTool` not referenced in any Python file. `backend/memory/bank.py` remains a Firestore-backed dict.**
+**Status: DONE — `backend/memory/platform.py` uses `VertexAiMemoryBankService` against instance `8631858420611284992`. Sessions are extracted once per wake via synchronous `memories.generate` (via `commit_session_events`). Scoped per case (`case_id` mapped to ADK `user_id` slot). Three custom memory topics configured on the instance: `partner_contacts`, `institutional_shortcuts`, `unblocking_strategies` (codified in `infra/bootstrap.sh`). The orchestrator searches Memory Bank on each turn when `CASERELAY_MEMORY_BANK_ID` is set. `backend/memory/bank.py` still exists as a lightweight per-purpose Firestore state store — it is NOT the GEAP Memory Bank. The `amara` scenario is the memory showcase.**
 Swap `backend/memory/bank.py` onto `VertexAiMemoryBankService` (already installed) against the
 provisioned `memoryBankConfig`, and add ADK's `PreloadMemoryTool` to the orchestrator so
 cross-session recall is the framework's, not a dict read. Keep the `FORBIDDEN_RAW` denylist —
@@ -652,7 +652,7 @@ Cloud Run scales. The `amara` scenario is what proves it.
 *Check:* kill the process mid-journey, restart, and resume the same session id.
 
 **Step 19 · Turn on Cloud Trace on the deployed fleet.**
-**Status: NOT STARTED — `app/agent_server.py:102` still uses `trace_to_cloud=` gated on `CASERELAY_TRACE_TO_CLOUD` which `deploy_fleet.sh` does not set. Deployed agents run with telemetry off.**
+**Status: DONE — `app/agent_server.py:102` uses `otel_to_cloud=True`. `deploy_fleet.sh` sets `GOOGLE_CLOUD_AGENT_ENGINE_ENABLE_TELEMETRY=true` and `OTEL_SEMCONV_STABILITY_OPT_IN=gen_ai_latest_experimental` on all engines. `backend/runtime/context.py` derives `trace_id` from the active OTel span and exports to Cloud Trace via `CloudTraceSpanExporter`. ADK spans (`invoke_agent`, `call_llm`, `execute_tool`) carry `gen_ai.*` attributes and token counts. ONE LIMITATION: control-plane and engine traces do NOT share a trace id because Agent Runtime starts a fresh trace context rather than honouring the incoming `traceparent`. End-to-end distributed correlation across both hops is not achieved.**
 Change `trace_to_cloud=` to `otel_to_cloud=True` at `app/agent_server.py:102` — `trace_to_cloud` is
 the legacy parameter and ADK 2.7.1 carries a TODO to remove it. Add to `deploy_fleet.sh:59`:
 `GOOGLE_CLOUD_AGENT_ENGINE_ENABLE_TELEMETRY=true`,
@@ -831,11 +831,11 @@ Your teammate is unblocked when all of these hold:
 - [x] `POST /v1/cases/{id}/runs` returns in under a second and streams progress over SSE, and the
       work is done by the deployed reasoning engines rather than in-process fallbacks. *(verified: CASERELAY_CONTROL_PLANE=1 enforces A2A; case CR-0825094224 completed via real fleet)*
 - [x] Every scenario in `GET /v1/scenarios` can be created, run and deleted over the API. *(9 scenarios defined, routes present)*
-- [ ] Trace ids in responses are real and open in Cloud Trace; `rg "trace-7821"` returns nothing. *(PARTIAL: trace-7821 is gone and RunContext generates real UUIDs; BUT Cloud Trace export is off on deployed fleet — Step 19 not done — so trace IDs don't appear in the Cloud Trace console)*
+- [x] Trace ids in responses are real and open in Cloud Trace; `rg "trace-7821"` returns nothing. *(DONE: trace-7821 is gone; RunContext derives from live OTel span; `otel_to_cloud=True` on fleet + control plane; `CloudTraceSpanExporter` exports. Limitation: control-plane and engine traces use different trace contexts — cross-hop correlation not achieved.)*
 - [x] Two cases run concurrently without colliding on a checkpoint. *(per-case workflow_id implemented)*
-- [ ] The wake fires from a scheduler with no user session and no open browser, its audit event
+- [x] The wake fires from a scheduler with no user session and no open browser, its audit event
       names the scheduler rather than a volunteer, and a case dated 17 days out is correctly left
-      alone by the same sweeper. *(PARTIAL: sweep logic + scheduler job + resume_wake all exist; Pub/Sub push subscription to the control plane HTTP endpoint is missing — last-mile wiring incomplete)*
+      alone by the same sweeper. *(DONE: sweep logic + scheduler job + `caserelay-events-push` push subscription all codified in `bootstrap.sh`; push delivers to `POST /v1/workflows/sweep` with OIDC auth and dead-letter after 5 attempts)*
 - [x] No `/demo/*` route exists anywhere, and no code, document, diagram or portal file references
       one — `rg "/demo/"` returns hits only in this plan's analysis sections. *(verified: only match is `harness/gate.py` which tests for absence)*
 

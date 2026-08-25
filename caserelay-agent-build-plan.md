@@ -51,7 +51,7 @@ Items 1–7 are machine/GCP setup. Several are already complete on this machine 
 | 4 | Confirm official Google MCP | Restart Cursor so it loads `gcloud` from `.cursor/mcp.json`. Optional: `gemini mcp list` | Cursor shows `gcloud` MCP; Gemini shows `gcloud` + `geap-agent-registry` + `geap-agent-platform` Connected | 3 (config written; Cursor restart still required) |
 | 5 | GEAP access gate — record what is callable vs preview-only | Cloud Console → Gemini Enterprise Agent Platform: Agent Runtime, Memory Bank, Agent Identity, Agent Gateway, Model Armor, Observability, Agent Registry | A short note in this file or chat: each capability is `callable` / `proof-only` / `unavailable`. Never put an unavailable preview on the demo critical path | 1–2 |
 | 6 | Create Firestore native DB (`caserelay`) | `gcloud firestore databases create --database=caserelay --location=nam5 --type=firestore-native --project=caserelay` (skip if exists). Uses a named database, not `(default)`, because Agent Runtime's proxy URL-encodes parentheses → `%28default%29` → Firestore 400 | Console shows a Native-mode database named `caserelay` | 2 |
-| 7 | Create event + schedule backbone | `gcloud pubsub topics create caserelay-events caserelay-dead-letter --project=caserelay` and `gcloud tasks queues create caserelay-wakes --location=us-central1 --project=caserelay` | Topics + queue exist | 2 |
+| 7 | Create event + schedule backbone | **Done.** Pub/Sub topics (`caserelay-events`, `caserelay-dead-letter`), push subscription `caserelay-events-push` → control plane `/v1/workflows/sweep`, Cloud Scheduler job `caserelay-sweep` (every 5 min). All codified in `infra/bootstrap.sh`. Cloud Tasks queue `caserelay-wakes` no longer used | Topics + push sub + scheduler exist | 2 |
 | 8 | Scaffold the monorepo (do **not** run `agents-cli create` as the repo root — it would nest a second project). Create dirs + manifests by hand, then use Agents CLI later per-agent if useful | Create `backend/`, `frontend/`, `infra/`, `contracts/`, `fixtures/`. Files: `pyproject.toml`, `frontend/package.json`, `.env.example`, `.gitignore`, `backend/Dockerfile` | Empty trees exist; Python 3.12 + Next.js can be installed later without colliding | 3 |
 | 9 | Install Python deps in a project venv | `cd` repo; `uv venv && uv pip install "google-cloud-aiplatform[agent_engines,adk]" google-adk fastapi uvicorn google-cloud-firestore google-cloud-pubsub google-cloud-tasks pydantic` | `uv run python -c "from google.adk.agents import Agent"` succeeds | 8 |
 | 10 | Smoke-test one ADK agent locally | `backend/agents/_smoke/agent.py` — single `Agent` with a health tool; `adk web backend/agents/_smoke` or `agents-cli run "ping"` from a later scaffold | Agent returns a structured reply in the playground | 9 |
@@ -75,7 +75,7 @@ Items 1–7 are machine/GCP setup. Several are already complete on this machine 
 |---|---------|----------------|-----------|------------|
 | 19 | Intake & Authority Agent | `backend/agents/intake/agent.py` — tools `validate_packet`, `extract_commitments`, `propose_grants`. Cannot activate a case | CR-1042 packet → 5 commitments + proposed grants; status stays `draft` | 12, 18 |
 | 20 | Continuity Orchestrator | `backend/agents/orchestrator/agent.py` — coordinator with `sub_agents`; tools `dispatch_task`, `read_checkpoint`, `write_checkpoint`, `schedule_wake`, `request_approval`. Never receives raw partner records | Dispatches by commitment type; writes checkpoint | 19 |
-| 21 | Durable wake path | `backend/workflows/durable.py` — checkpoint → Cloud Tasks HTTP/Pub/Sub → resume same `workflow_id` | Compressed “day-17” publish resumes without a chat session | 7, 14, 16, 20 |
+| 21 | Durable wake path | `backend/workflows/durable.py` — checkpoint → Pub/Sub push + Cloud Scheduler (5-min cron) → `POST /v1/workflows/sweep` → resume. Dead-letter after 5 attempts. All codified in `infra/bootstrap.sh` | Compressed deadline resumes without a chat session | 7, 14, 16, 20 |
 | 22 | Education Liaison | `backend/agents/education/agent.py` — `check_enrollment`, `request_status`, `report_callback`. Scope: name, DOB, referral ID only | Returns `unresolved` for Maya until callback; refuses other scopes | 15, 18 |
 | 23 | Legal Aid | `backend/agents/legal/agent.py` — `check_referral_status`, `report_callback` | Maya legal → `completed` with evidence ref; no strategy text | 15, 18 |
 | 24 | Health, Shelter, Family (thin) | `backend/agents/{health,shelter,family}/agent.py` — status + callback only | Health `scheduled`; Shelter/Family `pending`; no clinical/findings | 15, 18 |
@@ -89,7 +89,7 @@ Items 1–7 are machine/GCP setup. Several are already complete on this machine 
 | 27 | ~~Eight service accounts~~ | **Superseded.** Fleet uses GEAP platform-managed Agent Identity (`--agent-identity`). Grant IAM roles via `principalSet://` at the project level | Each agent has its own platform-managed principal | 1 |
 | 28 | Agent Gateway + identities | Console or Terraform: gateway `caserelay-gateway`, egress to Agent Runtime. Fallback if Gateway is preview-only: enforce projection + IAM in FastAPI and label it as fallback in the demo | Every inter-agent call has a verified identity | 5, 27 |
 | 29 | REQUEST_AUTHZ | IAP / IAM on each target tool; Education SA cannot read health collections | Education→health request is denied and audited | 15, 28 |
-| 30 | CONTENT_AUTHZ / Model Armor | Enable Model Armor on partner ingress; custom rule for `retrieve.*medical\|health.*records` | Poisoned school payload is quarantined (S5) | 5, 25 |
+| 30 | CONTENT_AUTHZ / Model Armor | **Done.** `armor.py` calls `ModelArmorClient.sanitize_user_prompt` against template `caserelay-screen` (PI/jailbreak + SDP/DLP with custom dictionary detectors + hotword proximity rule). Old regex deleted. | Poisoned school payload is quarantined (S5) | 5, 25 |
 | 31 | Retry + dead-letter | 3× exponential backoff; failures → `caserelay-dead-letter` + `dead_letter` collection | S9 path writes DLQ, no infinite retry | 7, 16, 26 |
 | 32 | Human approval queue | `cases/{id}/human_approvals/{id}` + Pub/Sub `approval_needed` | Escalation sits `pending` until supervisor decision | 17, 20, 25 |
 
@@ -110,8 +110,8 @@ Items 1–7 are machine/GCP setup. Several are already complete on this machine 
 | # | Do this | Command / file | Done when | Depends on |
 |---|---------|----------------|-----------|------------|
 | 40 | Deploy agents | `agents-cli deploy` per agent with `--agent-identity`. Register cards in Agent Registry (`agents-cli publish` or Registry MCP `create_service`) | 8 live reasoning engines + 8 registry records | 5, 26, 27 |
-| 41 | Memory Bank scopes | Runtime memory keyed by `case_id` + purpose; no raw records | Memory for CR-1042 is operational state only | 40 |
-| 42 | Observability | Cloud Trace + structured logs; custom attributes `caserelay.case_id`, `commitment_type`, `workflow_id` | S8: one `trace_id` across intake → orchestrator → gateway → domain → verifier | 40 |
+| 41 | Memory Bank scopes | **Done.** GEAP Memory Bank (instance `8631858420611284992`) via `VertexAiMemoryBankService`; 3 custom topics (`partner_contacts`, `institutional_shortcuts`, `unblocking_strategies`); sessions extracted via synchronous `memories.generate`; scoped per case (`case_id` → ADK `user_id`) | Memory for CR-1042 is operational state; `amara` is the memory showcase | 40 |
+| 42 | Observability | **Done.** Cloud Trace enabled (`otel_to_cloud=True`, `GOOGLE_CLOUD_AGENT_ENGINE_ENABLE_TELEMETRY=true`); ADK spans with `gen_ai.*` attributes + token counts; custom attributes `caserelay.case_id`, `commitment_type`, `workflow_id`. Limitation: control-plane and engine traces do not share a trace id (Agent Runtime starts a fresh context) | S8: one `trace_id` across intake → orchestrator → gateway → domain → verifier | 40 |
 | 43 | Run Maya end-to-end on cloud | Activate CR-1042, fan-out, compressed day-17 wake, projection, quarantine, approval, callback | P0 scenarios S1–S8 pass on the deployed URL | 21, 29–32, 39–42 |
 | 44 | Capture proof | Screenshots, trace export, `.run.app` URL, registry cards, Gateway disclose/withhold log, Model Armor event | Evidence list in hackathon plan §12 is complete | 43 |
 | 45 | Record 3:50 demo | Follow hackathon plan §11 timecoded script | Public YouTube/Vimeo link | 44 |
@@ -688,23 +688,18 @@ Console: Agent Platform → Govern → Agent Gateway → `caserelay-gateway`.
 - REQUEST_AUTHZ → IAP → `roles/iap.egressor` on the target
 - CONTENT_AUTHZ → Model Armor
 
-```yaml
-content_authz:
-  service: model-armor
-  policies:
-    - prompt_injection_detection: ENABLED
-    - jailbreak_detection: ENABLED
-    - sensitive_data_protection:
-        inspect_templates:
-          - PERSON_NAME
-          - DATE_OF_BIRTH
-          - MEDICAL_RECORD_NUMBER
-        action: REDACT_AND_LOG
-    - custom_rules:
-        - name: "block_cross_scope_request"
-          pattern: "retrieve.*medical|health.*records|legal.*strategy"
-          action: QUARANTINE
-```
+> **Update:** Model Armor is now live. The fleet calls `modelarmor.googleapis.com` directly via
+> `backend/gateway/armor.py` using the template `caserelay-screen` in `us-central1`. The template
+> combines PI/jailbreak detection (LOW_AND_ABOVE), malicious URI detection, and SDP Advanced Config
+> referencing a Cloud DLP inspect template (`caserelay-cross-scope`) with custom dictionary
+> detectors (`CASERELAY_CROSS_SCOPE_MEDICAL`, `CASERELAY_CROSS_SCOPE_LEGAL`,
+> `CASERELAY_CROSS_SCOPE_FAMILY`) plus a hotword proximity rule (terms only match when an action
+> verb appears within 50 characters). This is still pattern-based detection (not semantic), but
+> the policy is declared as auditable cloud configuration enforced by Google services.
+>
+> Screening fails closed: `ScreeningUnavailable` is raised on any API failure.
+> Not implemented as an ADK plugin — direct API call via `google-cloud-modelarmor`.
+> The old `custom_rules` regex YAML shown below is **superseded** by the DLP template.
 
 ### 6.7 Agent Identity
 

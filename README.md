@@ -63,8 +63,8 @@ CASA Volunteer / Supervisor
 | Control plane | Python, FastAPI, Cloud Run (`caserelay-control-plane`; `allUsers` removed, auth-required) |
 | Portal | Next.js, TypeScript (local `npm run dev`; not deployed) |
 | State | Firestore (named database `caserelay` — see decision note below) |
-| Observability | Cloud Logging, Cloud Trace, GEAP Agent Observability |
-| Security | GEAP Agent Identity (platform-managed, mTLS + DPoP), Model Armor, Safeguarding Verifier (deterministic policy) |
+| Observability | Cloud Logging, Cloud Trace (ADK spans with `gen_ai.*` attributes via `otel_to_cloud`; control-plane spans via `CloudTraceSpanExporter`) |
+| Security | GEAP Agent Identity (platform-managed, mTLS + DPoP), Model Armor (Cloud DLP-backed SDP with custom dictionary detectors), Safeguarding Verifier |
 
 ---
 
@@ -92,7 +92,7 @@ Eight agents deployed as Vertex AI reasoning engines, each with a platform-manag
 1. Supervisor activates monitoring after verifying court authority.
 2. Orchestrator discovers partner agents through the Registry and delegates scoped tasks.
 3. Legal completes. Healthcare schedules. Education goes 17 days without a verified owner.
-4. A Cloud Tasks event wakes the dormant workflow — no user prompt, no open browser.
+4. A Pub/Sub push event (driven by Cloud Scheduler every 5 minutes) wakes the dormant workflow — no user prompt, no open browser.
 5. The Education Agent requests only enrollment-status fields through the Gateway.
 6. A malicious school response tries to retrieve medical notes; Model Armor quarantines it.
 7. The Safeguarding Verifier creates a safe retry and records every withheld field.
@@ -104,12 +104,12 @@ Eight agents deployed as Vertex AI reasoning engines, each with a platform-manag
 ## GEAP Capabilities Demonstrated
 
 - **Agent Registry** — versioned A2A cards and live discovery for all eight agents, auto-registered by `agents-cli deploy`
-- **Agent Runtime** — eight reasoning engines in `us-central1` with checkpoint, sleep, and deadline-triggered resume
-- **Memory Bank** — scoped cross-session operational memory keyed by case and purpose
+- **Agent Runtime** — eight reasoning engines in `us-central1` with checkpoint, sleep, and deadline-triggered resume via Pub/Sub push + Cloud Scheduler (5-minute sweep, dead-letter after 5 attempts, codified in `infra/bootstrap.sh`)
+- **Memory Bank** — GEAP Memory Bank (instance `8631858420611284992`) via ADK's `VertexAiMemoryBankService`; sessions extracted once per wake via synchronous `memories.generate`; scoped per case (`case_id` → ADK `user_id`); three custom memory topics: `partner_contacts`, `institutional_shortcuts`, `unblocking_strategies`
 - **Agent Identity** — platform-managed identity per agent (`--agent-identity`); SPIFFE-style principals (`principal://agents.global.org-…`); caller principal verified at the gateway; cross-scope denial demonstrated
 - **Agent Gateway** — caller-authenticated, deny-by-default, purpose-bound field projection
-- **Model Armor** — cross-scope-request quarantine and safe retry on poisoned partner payload
-- **Agent Observability** — one trace ID connects Registry, Runtime, Memory, Identity, Gateway, Model Armor, approval, and completion
+- **Model Armor** — cross-scope-request quarantine via `modelarmor.googleapis.com` template `caserelay-screen` with SDP Advanced Config referencing a Cloud DLP inspect template (`caserelay-cross-scope`) using custom dictionary detectors + hotword proximity rule; fails closed
+- **Agent Observability** — Cloud Trace enabled on fleet (`otel_to_cloud=True`, `GOOGLE_CLOUD_AGENT_ENGINE_ENABLE_TELEMETRY=true`) with ADK spans (`invoke_agent`, `call_llm`, `execute_tool`) carrying `gen_ai.*` attributes and token counts. Limitation: control-plane and engine traces do not share a trace id (Agent Runtime starts a fresh trace context)
 
 ### Notable engineering decisions
 
@@ -133,6 +133,8 @@ Portal screens:
 3. **Approval Center** — proposed action, evidence, disclosed/withheld fields, policy basis
 4. **Agent Registry** — owner, version, purpose, tools, scopes, endpoint, health
 5. **Audit Trace** — correlated delegation, access, model/tool calls, retry, approval, completion events
+
+The case detail and cases list render live control-plane data (run records persisted to Firestore) for real cases; other screens remain a scripted walkthrough with mock data.
 
 Persona switching (advocate vs. platform view) is UI-only and carries no authentication or access-control implications. There is no end-user authentication.
 

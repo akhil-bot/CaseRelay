@@ -145,9 +145,21 @@ The reason for auditing the boring successes too: this trail is the artefact you
 
 The Memory Bank write (`backend/memory/bank.py`) is the operational counterpart: one entry per purpose holding status, disclosed/withheld fields, legal basis, verdict. `bank.write()` filters a `FORBIDDEN_RAW` set (`diagnosis`, `medication`, `clinical_notes`, `legal_strategy`, `narrative`, `instruction`) so raw content can never reach memory even by accident. That last key, `instruction`, is what stops a cross-scope exfiltration payload being persisted.
 
+In addition to this per-purpose Firestore memory, the **GEAP Memory Bank** service (`backend/memory/platform.py`) runs on the deployed fleet via `VertexAiMemoryBankService` (instance `8631858420611284992`). It extracts coordination knowledge from session events into three custom memory topics — `partner_contacts`, `institutional_shortcuts`, `unblocking_strategies` — via synchronous `memories.generate` calls. These extracted memories are operational (who to contact, what unblocked a process) rather than status summaries. The GEAP Memory Bank scopes by `case_id` (mapped to ADK's `user_id` slot), ensuring cross-case memory isolation.
+
 ### Quarantine and the human gate
 
-`backend/gateway/armor.py` is a single regex screen looking for cross-scope requests — patterns like `retrieve.*medical`, `health.*records`, `legal.*strategy`, `medical notes`. It returns `("quarantine", ["block_cross_scope_request"])` or `("allow", [])`.
+`backend/gateway/armor.py` screens content via the **Model Armor API** (`modelarmor.googleapis.com`). The template `caserelay-screen` (in `us-central1`) combines:
+
+- **Prompt-injection and jailbreak detection** (LOW_AND_ABOVE threshold)
+- **Malicious URI detection**
+- **SDP Advanced Config** referencing a Cloud DLP inspect template (`caserelay-cross-scope`) with custom infoType detectors for CaseRelay's cross-scope data policy (`CASERELAY_CROSS_SCOPE_MEDICAL`, `CASERELAY_CROSS_SCOPE_LEGAL`, `CASERELAY_CROSS_SCOPE_FAMILY`) plus built-in detectors (SSN, credit-card, etc.)
+
+The cross-scope detectors use a **DLP custom dictionary with a hotword proximity rule** — the terms only match when an action verb appears within 50 characters. This is still pattern-based detection (not semantic), but the policy is declared as auditable cloud configuration and enforced by Google services, not hand-coded regexes in our source.
+
+Screening **fails closed**: if the Model Armor API is unreachable or returns no result, `ScreeningUnavailable` is raised and the caller must quarantine with rule `screening_unavailable`.
+
+When the verdict is `quarantine`, the matched filter names (e.g. `sdp`) are included in the audit trail and the maya verdict reports the rule as `sdp`. The policy basis recorded on the escalation remains `block_cross_scope_request` / `CR-POLICY-003`.
 
 The verifier agent's `inspect_school_callback` tool pulls the school's callback, runs it through `screen()`, and returns the verdict. When the verdict is `quarantine`, its second tool `open_escalation` writes a **pending** human approval (`approval_id: apr-{uuid4[:8]}`, policy basis `["block_cross_scope_request", "CR-POLICY-003"]`) plus a `quarantine` audit event. It does not carry out the instruction, not even partially, and it never touches a commitment status.
 
@@ -275,11 +287,11 @@ The school sends a callback. From `fixtures/cr-1042/poisoned_school_payload.json
 }
 ```
 
-The orchestrator asks `safeguarding_verifier` to inspect it. `inspect_school_callback` reads the education referral id off the stored packet, fetches the payload, and runs `screen()` on it. `retrieve Maya's medical notes` matches `retrieve.*medical`, so the verdict is `quarantine` with rule `block_cross_scope_request`.
+The orchestrator asks `safeguarding_verifier` to inspect it. `inspect_school_callback` reads the education referral id off the stored packet, fetches the payload, and runs `screen()` on it. Model Armor's SDP filter (backed by the Cloud DLP custom dictionary in `caserelay-cross-scope`) matches the cross-scope attempt, and the verdict is `quarantine` with rule `sdp`.
 
 The verifier then calls `open_escalation`, which writes a pending approval (`apr-{uuid4[:8]}`) and a `quarantine` audit event with the verifier's agent identity. **The instruction is never carried out.**
 
-Note that the education agent has its own independent defence — its instruction says that if the SIS asks it to retrieve medical or health records it must not comply and must report `blocked`. So there are three layers here: the regex screen, the agent's own refusal, and the fact that education has no grant covering medical fields in the first place.
+Note that the education agent has its own independent defence — its instruction says that if the SIS asks it to retrieve medical or health records it must not comply and must report `blocked`. So there are three layers here: the Model Armor screen (cloud-enforced pattern detection via DLP), the agent's own refusal, and the fact that education has no grant covering medical fields in the first place.
 
 **Store after this phase:** 1 pending approval; 7 audit events.
 
@@ -591,7 +603,7 @@ A useful pairing for demos: `--keep`, then `python infra/case_cli.py show <case_
 ### Working
 
 - All eight agents deployed to Vertex AI Agent Engine (reasoning engines) in `us-central1`, each with platform-managed Agent Identity (`identityType: AGENT_IDENTITY`).
-- `caserelay-control-plane` deployed to Cloud Run, auth-required (`allUsers` removed from `roles/run.invoker`).
+- `caserelay-control-plane` deployed to Cloud Run (`--timeout=900`, `--no-cpu-throttling`, gen2, min/max instances pinned to 1), auth-required (`allUsers` removed from `roles/run.invoker`).
 - Portal reaches the control plane through a BFF proxy that mints Google-signed ID tokens server-side. No credential exposed to the browser. SSE proxied with incremental delivery.
 - Control plane deploys with `CASERELAY_CONTROL_PLANE=1` and fails fast if specialist endpoints are missing. The old silent in-process fallback is gone.
 - Portal-triggered runs fan out over real A2A to the deployed engines. Verified: case CR-0825094224 completed all 9 phases with 7 engines serving A2A.
@@ -601,6 +613,11 @@ A useful pairing for demos: `--keep`, then `python infra/case_cli.py show <case_
 - Cross-scope denial verified: in the `rosa` scenario the education agent received ONLY `child_name`, `dob`, `referral_id`; no medical fields disclosed.
 - A2A transport auth verified: calls with no credentials or an invalid bearer token refused with HTTP 401; valid token returns 200.
 - Quarantine → escalation: 5/5 concurrent cloud e2e runs had the verifier agent itself call `open_escalation`.
+- **Model Armor screening** via `modelarmor.googleapis.com` template `caserelay-screen`: PI/jailbreak detection, malicious URI, SDP Advanced Config referencing a Cloud DLP inspect template (`caserelay-cross-scope`) with custom dictionary detectors and a hotword proximity rule. The cross-scope policy is auditable cloud configuration enforced by Google services, not hand-coded regexes. Screening fails closed: `ScreeningUnavailable` quarantines with rule `screening_unavailable`.
+- **GEAP Memory Bank** (instance `8631858420611284992`) accessed through ADK's `VertexAiMemoryBankService` (`backend/memory/platform.py`). Sessions are extracted once per wake via `memories.generate` (synchronous), scoped per case (`case_id` mapped to the ADK `user_id` slot, cross-case isolation verified). Three custom memory topics configured: `partner_contacts`, `institutional_shortcuts`, `unblocking_strategies` — codified in `infra/bootstrap.sh`. The `amara` scenario is the memory showcase. Note: the older `backend/memory/bank.py` Firestore module still exists for lightweight per-purpose state; it is NOT the GEAP service.
+- **Cloud Trace enabled** on the fleet and control plane (`otel_to_cloud=True` in `agent_server.py`; `GOOGLE_CLOUD_AGENT_ENGINE_ENABLE_TELEMETRY=true` + `OTEL_SEMCONV_STABILITY_OPT_IN=gen_ai_latest_experimental` set in `deploy_fleet.sh`). ADK spans (`invoke_agent`, `call_llm`, `execute_tool`) carry `gen_ai.*` attributes and token counts. **Limitation**: control-plane and engine traces do NOT share a trace id — Agent Runtime starts a fresh trace context rather than honouring the incoming `traceparent`. End-to-end distributed correlation across both hops is not achieved.
+- **Pub/Sub push + Cloud Scheduler** drives timed wakes automatically: subscription `caserelay-events-push` → `/v1/workflows/sweep`, 5-minute cron via scheduler job `caserelay-sweep`, dead-letter after 5 attempts. All codified in `infra/bootstrap.sh`.
+- **Run records persist to Firestore.** The portal's case detail and cases list render live control-plane data for real cases; the other screens remain a scripted walkthrough with mock data.
 - Memory Bank verified on cloud: all five purposes plus the checkpoint scope.
 - Test cases created and deleted on demand, from either source, with `purge` as a backstop.
 - All eight agents are **auto-registered in Google Cloud Agent Registry** by `agents-cli deploy`. There is no separate registration step.
@@ -643,4 +660,4 @@ Two things exist in the tree that a reader would reasonably assume are load-bear
 - `gateway.dispatch()` and the handler registrations in `backend/runtime/handlers.py` (which wire up `backend/agents/*/service.py`) are an alternative inbound-payload path that nothing currently calls. The live specialist path is `authorized_context()` plus a direct `sim` call from the agent's own tool.
 - `verifier/service.py::quarantine_response()` is reachable only through `gateway.dispatch()`. The quarantine that actually runs in the journey comes from `verifier/agent.py::open_escalation`, which creates `apr-{uuid4[:8]}`.
 
-`armor.screen()` itself *is* on the live path, via the verifier agent's `inspect_school_callback` tool.
+`armor.screen()` itself *is* on the live path, via the verifier agent's `inspect_school_callback` tool. It calls the Model Armor API (`ModelArmorClient.sanitize_user_prompt`) against the `caserelay-screen` template, which delegates cross-scope detection to a Cloud DLP inspect template with custom dictionary detectors.
