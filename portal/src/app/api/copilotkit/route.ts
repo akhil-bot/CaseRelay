@@ -31,6 +31,7 @@ function buildHandler() {
       },
     }),
     basePath: COPILOT_RUNTIME_URL,
+    mode: "single-route",
   });
 }
 
