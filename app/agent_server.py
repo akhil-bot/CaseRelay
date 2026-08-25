@@ -99,7 +99,7 @@ app = get_fast_api_app(
     # gemini_enterprise_app_name:`), causing a 404 on every streamQuery
     # invocation and a silent fallback to the base Gemini model.
     gemini_enterprise_app_name=FOLDER,
-    trace_to_cloud=os.environ.get("CASERELAY_TRACE_TO_CLOUD", "").lower() == "true",
+    otel_to_cloud=True,
     host="0.0.0.0",
     port=int(os.environ.get("PORT", "8080")),
 )

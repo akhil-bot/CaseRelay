@@ -42,6 +42,7 @@ ROLES=(
   "roles/datastore.user"
   "roles/serviceusage.serviceUsageConsumer"
   "roles/pubsub.publisher"
+  "roles/cloudtrace.agent"
 )
 
 _grant_one() {

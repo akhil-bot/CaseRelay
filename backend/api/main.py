@@ -46,6 +46,12 @@ try:
 except Exception:
     pass
 
+try:
+    from opentelemetry.instrumentation.httpx import HTTPXClientInstrumentor
+    HTTPXClientInstrumentor().instrument()
+except Exception:
+    pass
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[

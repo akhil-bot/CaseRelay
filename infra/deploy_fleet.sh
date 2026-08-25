@@ -163,7 +163,7 @@ _deploy_one() {
       --no-confirm-project \
       --agent-identity \
       --service-name "$svc" \
-      --update-env-vars "CASERELAY_AGENT=${agent},CASERELAY_STATE=firestore,CASERELAY_PROJECT_ID=${PROJECT},GOOGLE_CLOUD_PROJECT=${PROJECT},GOOGLE_CLOUD_LOCATION=global,GOOGLE_GENAI_USE_VERTEXAI=true,GOOGLE_API_USE_CLIENT_CERTIFICATE=true,PYTHONPATH=/app${extra}" \
+      --update-env-vars "CASERELAY_AGENT=${agent},CASERELAY_STATE=firestore,CASERELAY_PROJECT_ID=${PROJECT},GOOGLE_CLOUD_PROJECT=${PROJECT},GOOGLE_CLOUD_LOCATION=global,GOOGLE_GENAI_USE_VERTEXAI=true,GOOGLE_API_USE_CLIENT_CERTIFICATE=true,GOOGLE_CLOUD_AGENT_ENGINE_ENABLE_TELEMETRY=true,OTEL_SEMCONV_STABILITY_OPT_IN=gen_ai_latest_experimental,PYTHONPATH=/app${extra},MODEL_ARMOR_TEMPLATE=projects/${PROJECT}/locations/${REGION}/templates/caserelay-screen,MODEL_ARMOR_LOCATION=${REGION}" \
       --cpu 1 --memory 2Gi --min-instances 1 --max-instances 2 \
       >> "$log" 2>&1
     deploy_rc=$?

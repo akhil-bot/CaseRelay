@@ -19,9 +19,17 @@ from uuid import uuid4
 try:
     from opentelemetry import trace as _otel_init
     from opentelemetry.sdk.trace import TracerProvider as _SDKProvider
+    from opentelemetry.sdk.trace.export import BatchSpanProcessor
 
     if not isinstance(_otel_init.get_tracer_provider(), _SDKProvider):
-        _otel_init.set_tracer_provider(_SDKProvider())
+        import os as _os
+
+        _provider = _SDKProvider()
+        if _os.environ.get("GOOGLE_CLOUD_PROJECT"):
+            from opentelemetry.exporter.cloud_trace import CloudTraceSpanExporter
+
+            _provider.add_span_processor(BatchSpanProcessor(CloudTraceSpanExporter()))
+        _otel_init.set_tracer_provider(_provider)
 except Exception:  # noqa: BLE001 — OTel SDK not available
     pass
 
