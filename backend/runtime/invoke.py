@@ -75,8 +75,6 @@ async def _run(agent, message: str, app_name: str, user_id: str) -> str:
             completed = await sessions.get_session(
                 app_name=app_name, user_id=user_id, session_id=session.id
             )
-            # Remap scope for Memory Bank: all memories keyed by {caserelay, case_id}
-            # regardless of which agent app (intake, orchestrator, etc.) ran the session.
             completed.app_name = _MB_APP
             completed.user_id = case_id
             await commit_session_events(completed)

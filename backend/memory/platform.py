@@ -96,20 +96,50 @@ def search_sync(case_id: str, query: str) -> list[str]:
     return asyncio.run(search(case_id, query))
 
 
-async def commit_session_events(session) -> None:
-    """Commit a completed session's events to Memory Bank for memory extraction.
+async def write_memory(case_id: str, fact: str) -> None:
+    """Write an explicit coordination fact to Memory Bank (immediately retrievable).
 
-    The Memory Bank LLM distills coordination outcomes, partner behaviours, and
-    what-worked knowledge from the session events — not raw state that Firestore holds.
+    This is the demo-reliable path: memories.create produces an immediately-indexed
+    fact. Used alongside commit_session_events which feeds the async extraction pipeline.
     """
     svc = get_service()
     if svc is None:
         return
     try:
-        await svc.add_session_to_memory(session)
+        from google.adk.memory.memory_entry import MemoryEntry
+        from google.genai import types as _types
+
+        await svc.add_memory(
+            app_name=APP_NAME,
+            user_id=case_id,
+            memories=[MemoryEntry(content=_types.Content(parts=[_types.Part(text=fact)]))],
+        )
+        logger.info("Wrote explicit memory for case %s: %s", case_id, fact[:80])
+    except Exception:
+        logger.exception("Failed to write explicit memory for case %s", case_id)
+
+
+async def commit_session_events(session) -> None:
+    """Extract coordination knowledge from session events synchronously.
+
+    Uses memories.generate (wait_for_completion=True) rather than ingestEvents, because
+    the async pipeline's idle-duration trigger never fires within compressed demo timing.
+    Measured: synchronous extraction completes in ~22-26s and produces immediately
+    retrievable memories with high-quality coordination facts.
+    """
+    svc = get_service()
+    if svc is None:
+        return
+    try:
+        await svc.add_events_to_memory(
+            app_name=getattr(session, "app_name", APP_NAME),
+            user_id=getattr(session, "user_id", "unknown"),
+            events=getattr(session, "events", []),
+            custom_metadata={"wait_for_completion": True},
+        )
         logger.info(
-            "Committed session to Memory Bank (case scope: %s)",
+            "Extracted memories from session (case scope: %s)",
             getattr(session, "user_id", "?"),
         )
     except Exception:
-        logger.exception("Failed to commit session to Memory Bank")
+        logger.exception("Failed to extract memories from session")
