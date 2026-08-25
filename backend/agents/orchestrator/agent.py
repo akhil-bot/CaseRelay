@@ -117,7 +117,14 @@ def resolve_specialists() -> tuple[list, list]:
 
 
 def _specialists() -> tuple[list, list]:
-    """Split specialists into in-process sub_agents and remote tools."""
+    """Split specialists into in-process sub_agents and remote tools.
+
+    Each call creates a fresh httpx.AsyncClient so that the RemoteA2aAgent instances
+    are not pre-bound to a stale event loop. Sharing one AsyncClient across asyncio.run()
+    invocations in different threads causes 'Event loop is closed' errors: the connection
+    pool's internal async primitives are tied to the loop that first used them, and every
+    subsequent asyncio.run() creates a new loop for which those primitives are invalid.
+    """
     from google.adk.agents.remote_a2a_agent import RemoteA2aAgent
     from google.adk.tools.agent_tool import AgentTool
 
@@ -140,6 +147,33 @@ def _specialists() -> tuple[list, list]:
         else:
             sub_agents.append(module.build_agent("single_turn"))
     return sub_agents, remote_tools
+
+
+def build_for_run() -> "Agent":
+    """Build a fresh orchestrator with a new httpx client for a single run phase.
+
+    Call this once per asyncio.run() invocation (i.e. per orchestrator phase) so that
+    RemoteA2aAgent instances are never shared across event loops. The overhead is a single
+    authenticated_client() instantiation plus one RemoteA2aAgent per specialist.
+    """
+    sub_agents, remote_tools = _specialists()
+    return Agent(
+        name="continuity_orchestrator",
+        model="gemini-3.5-flash",
+        mode="chat",
+        description="Routes specialist agents through granted identities. No raw records.",
+        instruction=INSTRUCTION,
+        tools=[
+            activate_case,
+            schedule_wake,
+            wake_workflow,
+            approve_escalation,
+            preload_memory,
+            get_commitment_states,
+        ]
+        + remote_tools,
+        sub_agents=sub_agents,
+    )
 
 
 _sub_agents, _remote_tools = _specialists()

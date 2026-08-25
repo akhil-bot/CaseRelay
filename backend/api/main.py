@@ -505,7 +505,7 @@ def _run_background(run_id: str, case_id: str) -> None:
     import warnings
 
     from backend.agents.intake.agent import root_agent as intake_agent
-    from backend.agents.orchestrator.agent import root_agent as orchestrator_agent
+    from backend.agents.orchestrator.agent import build_for_run as _build_orchestrator
     from backend.runtime.context import bind as _bind
     from backend.runtime.fleet import PHASES, SPECIALISTS
     from backend.runtime.invoke import finalize_run_memory, run_agent
@@ -528,15 +528,22 @@ def _run_background(run_id: str, case_id: str) -> None:
             workspace.push_run_event(run_id, event)
 
     def _run_single_phase(label: str, template: str, ctx: contextvars.Context) -> tuple[str, str | None, str]:
-        """Execute one orchestrator phase inside the given context. Returns (label, error_or_None, orch_text)."""
+        """Execute one orchestrator phase inside the given context. Returns (label, error_or_None, orch_text).
+
+        A fresh orchestrator is built per call so that each asyncio.run() invocation gets its own
+        httpx.AsyncClient. Sharing one client across asyncio.run() calls in different threads causes
+        'Event loop is closed' because the connection pool's async primitives are bound to the first
+        loop that used them.
+        """
         def _inner():
+            phase_orchestrator = _build_orchestrator()
             prompt = template.format(case_id=case_id)
             _push_event({
                 "event": "phase_started", "run_id": run_id, "phase": label,
                 "message": _narrate("phase_started", label, case_id=case_id),
             })
             try:
-                text = _quiet_run_agent(orchestrator_agent, prompt, app_name="continuity_orchestrator")
+                text = _quiet_run_agent(phase_orchestrator, prompt, app_name="continuity_orchestrator")
             except Exception as exc:  # noqa: BLE001
                 err_msg = str(exc) or repr(exc)
                 _push_event({
@@ -622,7 +629,8 @@ def _run_background(run_id: str, case_id: str) -> None:
                     "message": _narrate("phase_started", label, case_id=case_id),
                 })
                 try:
-                    orch_text = _quiet_run_agent(orchestrator_agent, prompt, app_name="continuity_orchestrator")
+                    phase_orch = _build_orchestrator()
+                    orch_text = _quiet_run_agent(phase_orch, prompt, app_name="continuity_orchestrator")
                 except Exception as phase_exc:  # noqa: BLE001
                     phase_failures += 1
                     failed_phases.append(label)
@@ -670,7 +678,8 @@ def _run_background(run_id: str, case_id: str) -> None:
                     "message": _narrate("phase_started", label, case_id=case_id),
                 })
                 try:
-                    orch_text = _quiet_run_agent(orchestrator_agent, prompt, app_name="continuity_orchestrator")
+                    phase_orch = _build_orchestrator()
+                    orch_text = _quiet_run_agent(phase_orch, prompt, app_name="continuity_orchestrator")
                 except Exception as phase_exc:  # noqa: BLE001
                     phase_failures += 1
                     failed_phases.append(label)
