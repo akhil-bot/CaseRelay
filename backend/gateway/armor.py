@@ -1,114 +1,101 @@
-"""Content screening: deterministic pattern layer + Model Armor API when available.
+"""Content screening via Google Cloud Model Armor.
 
-The deterministic layer is defence-in-depth — broad prompt-injection and cross-scope
-patterns that apply regardless of whether the Model Armor API is reachable. It is not
-tuned to any single fixture; it catches structural injection attempts.
+All screening is performed by the Model Armor API (modelarmor.googleapis.com)
+backed by a template that combines:
+  - PI + Jailbreak detection (LOW_AND_ABOVE)
+  - Malicious URI detection
+  - SDP Advanced Config referencing a Cloud DLP inspect template with custom
+    infoTypes for CaseRelay's cross-scope data policy (CASERELAY_CROSS_SCOPE_MEDICAL,
+    CASERELAY_CROSS_SCOPE_LEGAL, CASERELAY_CROSS_SCOPE_FAMILY) plus built-in
+    detectors for SSN, credit-card, etc.
 
-When `google-cloud-modelarmor` is installed and a template is configured, the API
-provides ML-powered jailbreak, prompt-injection, sensitive-data, and malicious-URI
-detection. The deterministic layer still runs first so zero-latency denials never
-reach the network.
+Template: projects/caserelay/locations/us-central1/templates/caserelay-screen
+DLP template: projects/caserelay/locations/us-central1/inspectTemplates/caserelay-cross-scope
+
+Fails closed: if screening cannot execute, ScreeningUnavailable is raised.
+The caller must treat this as a deny, never a silent allow.
 """
 
 import json
 import logging
 import os
-import re
 from typing import Any
 
 _log = logging.getLogger(__name__)
 
-_CROSS_SCOPE = re.compile(
-    r"(?:retrieve|access|fetch|extract|get|pull|send|disclose|share|reveal|return|provide)"
-    r"\s+(?:\S+\s+){0,4}"
-    r"(?:medical|clinical|health|diagnosis|medication|legal\s*strategy|family\s*notes"
-    r"|confidential|restricted|private|sealed)",
-    re.IGNORECASE,
-)
 
-_PROMPT_INJECTION = re.compile(
-    r"(?:ignore\s+(?:all\s+)?(?:previous|prior|above|earlier)\s+instructions?"
-    r"|system\s*:\s*(?:ignore|override|forget|disregard)"
-    r"|you\s+are\s+now\s+(?:a\s+)?(?:different|new|unrestricted)"
-    r"|do\s+not\s+follow\s+(?:any|your)\s+(?:rules|instructions|guidelines)"
-    r"|jailbreak|DAN\s*mode|bypass\s+(?:safety|filter|guard)"
-    r"|pretend\s+(?:you\s+are|to\s+be)\s+(?:a|an)\s+(?:different|unrestricted))",
-    re.IGNORECASE,
-)
-
-_SENSITIVE_DATA = re.compile(
-    r"(?:\b\d{3}-\d{2}-\d{4}\b"  # SSN
-    r"|\b\d{16}\b"  # credit card
-    r"|password\s*[:=]\s*\S+)",
-    re.IGNORECASE,
-)
+class ScreeningUnavailable(RuntimeError):
+    """Content screening cannot execute — the caller must treat this as a deny."""
 
 
-def _deterministic_screen(text: str) -> tuple[str, list[str]]:
-    """Broad pattern-based screening. Not tuned to any fixture."""
-    rules: list[str] = []
-    if _CROSS_SCOPE.search(text):
-        rules.append("block_cross_scope_request")
-    if _PROMPT_INJECTION.search(text):
-        rules.append("block_prompt_injection")
-    if _SENSITIVE_DATA.search(text):
-        rules.append("block_sensitive_data")
-    if rules:
-        return "quarantine", rules
-    return "allow", []
+def _extract_matched_filters(result) -> list[str]:
+    """Walk the sanitization result and return filter names that matched.
 
-
-def _model_armor_screen(text: str) -> tuple[str, list[str]] | None:
-    """Call the Model Armor API. Returns None if the API is not available."""
-    template = os.environ.get("MODEL_ARMOR_TEMPLATE")
-    if not template:
-        return None
+    Uses proto-to-dict so extraction works regardless of nesting depth
+    (SDP has an extra inspectResult level compared to PI+Jailbreak).
+    """
     try:
-        from google.cloud.modelarmor_v1 import (
-            DataItem,
-            ModelArmorClient,
-            SanitizeUserPromptRequest,
-        )
+        from google.protobuf.json_format import MessageToDict
 
-        location = os.environ.get("MODEL_ARMOR_LOCATION", "us-central1")
-        client = ModelArmorClient(
-            client_options={"api_endpoint": f"modelarmor.{location}.rep.googleapis.com"}
-        )
-        request = SanitizeUserPromptRequest(
-            name=template,
-            user_prompt_data=DataItem(text=text),
-        )
-        response = client.sanitize_user_prompt(request=request)
-        result = response.sanitization_result
-        if result and result.filter_match_state.name == "MATCH_FOUND":
-            matched = [
-                f.name for f in (result.filter_results or [])
-                if getattr(f, "match_state", None) and f.match_state.name == "MATCH_FOUND"
-            ]
-            return "quarantine", matched or ["model_armor_match"]
-        return "allow", []
-    except ImportError:
-        _log.debug("google-cloud-modelarmor not installed; skipping API screening")
-        return None
+        d = MessageToDict(result._pb)
     except Exception:
-        _log.warning("Model Armor API call failed; falling back to deterministic screening", exc_info=True)
-        return None
+        return []
+    matched = []
+    for name, entry in d.get("filterResults", {}).items():
+        if _dict_has_match(entry):
+            matched.append(name)
+    return matched
+
+
+def _dict_has_match(obj) -> bool:
+    if isinstance(obj, dict):
+        if obj.get("matchState") == "MATCH_FOUND":
+            return True
+        return any(_dict_has_match(v) for v in obj.values())
+    return False
 
 
 def screen(payload: Any) -> tuple[str, list[str]]:
-    """Screen a payload for injection, cross-scope requests, and sensitive data.
+    """Screen a payload using the Model Armor API. Fails closed on any error."""
+    template = os.environ.get("MODEL_ARMOR_TEMPLATE")
+    if not template:
+        raise ScreeningUnavailable(
+            "MODEL_ARMOR_TEMPLATE not set — cannot screen content"
+        )
 
-    Deterministic patterns run first for zero-latency denials. Model Armor provides a
-    second layer when configured. Either layer matching produces a quarantine verdict.
-    """
     text = payload if isinstance(payload, str) else json.dumps(payload)
 
-    verdict, rules = _deterministic_screen(text)
-    if verdict == "quarantine":
-        return verdict, rules
+    try:
+        from google.cloud.modelarmor_v1 import (
+            DataItem,
+            FilterMatchState,
+            ModelArmorClient,
+            SanitizeUserPromptRequest,
+        )
+    except ImportError as exc:
+        raise ScreeningUnavailable("google-cloud-modelarmor not installed") from exc
 
-    api_result = _model_armor_screen(text)
-    if api_result is not None:
-        return api_result
+    location = os.environ.get("MODEL_ARMOR_LOCATION", "us-central1")
+    client = ModelArmorClient(
+        client_options={"api_endpoint": f"modelarmor.{location}.rep.googleapis.com"}
+    )
+    request = SanitizeUserPromptRequest(
+        name=template,
+        user_prompt_data=DataItem(text=text),
+    )
 
-    return verdict, rules
+    try:
+        response = client.sanitize_user_prompt(request=request)
+    except Exception as exc:
+        raise ScreeningUnavailable(f"Model Armor API call failed: {exc}") from exc
+
+    result = response.sanitization_result
+    if not result:
+        raise ScreeningUnavailable("Model Armor returned no sanitization result")
+
+    if result.filter_match_state == FilterMatchState.MATCH_FOUND:
+        matched = _extract_matched_filters(result)
+        _log.info("Model Armor quarantine: %s", matched)
+        return "quarantine", matched or ["model_armor_match"]
+
+    return "allow", []

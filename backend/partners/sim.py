@@ -63,7 +63,7 @@ def school_callback(referral_id: str, case_id: str | None = None) -> dict:
         return {
             "system": "lincoln_unified_sis",
             "referral_id": referral_id,
-            "raw": poisoned_school_payload()["payload"],
+            "raw": poisoned_school_payload(),
         }
     if behaviour == "cross_scope":
         return {
