@@ -389,6 +389,76 @@ function RunStateBadge({ state }: { state: string }) {
   );
 }
 
+const _HIDDEN_ADMIN_EVENTS = new Set(["connected", "stream_end", "stream_timeout"]);
+
+function _isQuarantine(ev: RunEvent): boolean {
+  return (ev.phase ?? "").includes("quarantine");
+}
+
+function _isEscalation(ev: RunEvent): boolean {
+  return (ev.phase ?? "").includes("approve");
+}
+
+interface AdminSummaryCommitment {
+  domain: string;
+  label: string;
+  partner: string;
+  status: string;
+}
+
+interface AdminSummaryAction {
+  action: string;
+  context: string;
+}
+
+function _statusVariant(status: string): "brand" | "warn" | "danger" | "neutral" {
+  if (status === "completed") return "brand";
+  if (status === "blocked") return "danger";
+  if (status === "unresolved") return "warn";
+  return "neutral";
+}
+
+function AdminSummaryCard({ ev }: { ev: RunEvent }) {
+  const commitments = (ev.commitments ?? []) as AdminSummaryCommitment[];
+  const nextActions = (ev.next_actions ?? []) as AdminSummaryAction[];
+  const outcome = (ev.outcome ?? "completed") as string;
+
+  const borderColor =
+    outcome === "completed" ? "border-brand/25" :
+    outcome === "failed" ? "border-danger/25" : "border-warn/25";
+  const bgColor =
+    outcome === "completed" ? "bg-brand-soft/20" :
+    outcome === "failed" ? "bg-danger/5" : "bg-warn-soft/20";
+
+  return (
+    <li className={cx("rounded-lg border px-4 py-4", borderColor, bgColor)}>
+      <p className="text-[14px] font-semibold leading-relaxed text-ink">
+        {String(ev.message)}
+      </p>
+      {commitments.length > 0 && (
+        <div className="mt-3 space-y-1">
+          {commitments.map((c) => (
+            <div key={c.domain} className="flex items-center gap-2">
+              <span className="text-[13px] text-ink">{c.label}</span>
+              <Badge variant={_statusVariant(c.status)}>{c.status}</Badge>
+            </div>
+          ))}
+        </div>
+      )}
+      {nextActions.length > 0 && (
+        <div className="mt-3 border-t border-line pt-3">
+          <p className="text-[11px] font-medium tracking-[0.08em] text-ink-muted uppercase">What to do next</p>
+          <ul className="mt-1.5 space-y-1">
+            {nextActions.map((a, idx) => (
+              <li key={idx} className="text-[13px] text-ink">{a.action}</li>
+            ))}
+          </ul>
+        </div>
+      )}
+    </li>
+  );
+}
+
 function EventLog({ events, streaming }: { events: RunEvent[]; streaming: boolean }) {
   const endRef = useRef<HTMLDivElement>(null);
 
@@ -396,7 +466,9 @@ function EventLog({ events, streaming }: { events: RunEvent[]; streaming: boolea
     endRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [events.length]);
 
-  if (events.length === 0 && streaming) {
+  const visible = events.filter((ev) => !_HIDDEN_ADMIN_EVENTS.has(ev.event));
+
+  if (visible.length === 0 && streaming) {
     return (
       <div className="flex items-center gap-3 py-6">
         <span className="inline-block size-4 animate-spin rounded-full border-2 border-brand border-t-transparent" />
@@ -408,46 +480,57 @@ function EventLog({ events, streaming }: { events: RunEvent[]; streaming: boolea
   return (
     <div className="max-h-[400px] overflow-y-auto">
       <ol className="space-y-1">
-        {events.map((ev, i) => (
-          <li key={i} className={cx("flex items-start gap-3 rounded px-3 py-2", row.hover)}>
-            <EventIcon event={ev.event} />
-            <div className="min-w-0 flex-1">
-              {ev.message ? (
-                <>
-                  <p className="text-[13px] leading-relaxed text-ink">
-                    {String(ev.message)}
-                  </p>
-                  <div className="mt-0.5 flex flex-wrap items-center gap-2">
-                    <span className="font-mono text-[11px] text-ink-muted">{ev.event}</span>
-                    {ev.phase && <Badge variant="neutral">{ev.phase}</Badge>}
-                  </div>
-                </>
-              ) : (
-                <>
-                  <div className="flex flex-wrap items-center gap-2">
-                    <span className="font-mono text-[12px] font-medium text-ink">{ev.event}</span>
-                    {ev.phase && <Badge variant="neutral">{ev.phase}</Badge>}
-                  </div>
-                  {ev.detail && <p className={cx("mt-0.5", type_.meta)}>{ev.detail}</p>}
-                  {ev.summary && (
-                    <p className={cx("mt-0.5 line-clamp-2", type_.meta)}>{String(ev.summary)}</p>
-                  )}
-                </>
+        {visible.map((ev, i) => {
+          if (ev.event === "run_summary") {
+            return <AdminSummaryCard key={i} ev={ev} />;
+          }
+
+          const quarantine = _isQuarantine(ev);
+          const escalation = _isEscalation(ev);
+          const highlight = quarantine || escalation;
+
+          return (
+            <li
+              key={i}
+              className={cx(
+                "flex items-start gap-3 rounded px-3 py-2",
+                highlight
+                  ? quarantine
+                    ? "border-l-2 border-l-danger bg-danger/5"
+                    : "border-l-2 border-l-warn bg-warn-soft/50"
+                  : row.hover,
               )}
-              {ev.error && <p className="mt-0.5 text-[12px] text-danger">{ev.error}</p>}
-              {ev.failed_phases && ev.failed_phases.length > 0 && (
-                <p className="mt-0.5 text-[12px] text-warn">
-                  Failed: {ev.failed_phases.join(", ")}
-                </p>
-              )}
-            </div>
-          </li>
-        ))}
+            >
+              <EventIcon event={ev.event} />
+              <div className="min-w-0 flex-1">
+                {ev.message ? (
+                  <>
+                    <p className={cx(
+                      "text-[13px] leading-relaxed",
+                      highlight ? "font-medium text-ink" : "text-ink",
+                    )}>
+                      {String(ev.message)}
+                    </p>
+                    {(quarantine || escalation) && (
+                      <div className="mt-0.5 flex flex-wrap items-center gap-2">
+                        {quarantine && <Badge variant="danger" icon="shield">Flagged for review</Badge>}
+                        {escalation && <Badge variant="warn" icon="user">Supervisor review</Badge>}
+                      </div>
+                    )}
+                  </>
+                ) : (
+                  <p className="text-[13px] text-ink-soft">Processing…</p>
+                )}
+                {ev.error && <p className="mt-0.5 text-[12px] text-danger">{ev.error}</p>}
+              </div>
+            </li>
+          );
+        })}
       </ol>
       {streaming && (
         <div className="flex items-center gap-2 px-3 py-2">
           <span className="inline-block size-3 animate-spin rounded-full border-2 border-brand border-t-transparent" />
-          <span className={type_.meta}>Streaming…</span>
+          <span className={type_.meta}>Working…</span>
         </div>
       )}
       <div ref={endRef} />
@@ -471,15 +554,15 @@ function EventIcon({ event }: { event: string }) {
                 ? "alert"
                 : event === "run_failed"
                   ? "close"
-                  : event === "stream_end"
-                    ? "checkCircle"
+                  : event === "run_summary"
+                    ? "list"
                     : "activity";
   const color =
     event === "run_failed" || event === "phase_error"
       ? "text-danger"
       : event === "run_partial_failure"
         ? "text-warn"
-        : event === "run_completed" || event === "phase_complete" || event === "stream_end"
+        : event === "run_completed" || event === "phase_complete"
           ? "text-brand"
           : "text-ink-muted";
   return <Icon name={name as "play"} size={16} className={cx("mt-0.5 shrink-0", color)} />;

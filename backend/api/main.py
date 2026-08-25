@@ -363,125 +363,235 @@ def delete_case(case_id: str) -> dict:
 # ---------------------------------------------------------------------------
 
 
-_SPECIALIST_LABELS = {
-    "education_liaison": "education liaison",
-    "health_coordination": "health coordinator",
-    "legal_aid": "legal aid specialist",
-    "shelter_status": "shelter placement officer",
-    "family_services": "family services worker",
+_DOMAIN_LABELS: dict[str, str] = {
+    "education": "the school",
+    "health": "the clinic",
+    "legal": "legal aid",
+    "shelter": "the shelter",
+    "family_services": "family services",
+}
+
+_COMMITMENT_NOUNS: dict[str, str] = {
+    "education": "enrollment",
+    "health": "health check-up",
+    "legal": "legal representation",
+    "shelter": "placement",
+    "family_services": "assessment",
+}
+
+_SPECIALIST_TO_DOMAIN: dict[str, str] = {
+    "education_liaison": "education",
+    "health_coordination": "health",
+    "legal_aid": "legal",
+    "shelter_status": "shelter",
+    "family_services": "family_services",
 }
 
 _run_event_lock = threading.Lock()
 
 
+def _cap(s: str) -> str:
+    return s[0].upper() + s[1:] if s else s
+
+
 def _narrate(event: str, phase: str, *, summary: str = "", commitment_states: dict | None = None,
-             error: str = "", case_id: str = "") -> str:
-    """Derive a single human-readable sentence for a run event."""
+             error: str = "", case_id: str = "", child_name: str = "") -> str:
+    """Derive a single plain-language sentence for a volunteer advocate.
+
+    Never surfaces internal phase ids, system jargon, or technical labels.
+    Uses the child's name and partner descriptions derived from real case state.
+    """
+    child = child_name or "the child"
     specialist = None
+    domain = None
     if phase.startswith("3-fanout-"):
         specialist = phase.removeprefix("3-fanout-")
+        domain = _SPECIALIST_TO_DOMAIN.get(specialist)
+
+    partner = _DOMAIN_LABELS.get(domain, "the partner") if domain else None
+    noun = _COMMITMENT_NOUNS.get(domain, "commitment") if domain else None
 
     if event == "run_started":
-        return f"Starting the agent fleet for case {case_id}."
+        return f"Opening {child}'s case and reviewing what each partner has promised."
+
     if event == "run_completed":
         closed = sum(1 for v in (commitment_states or {}).values() if v == "completed")
         total = len(commitment_states or {})
         if closed == total and total > 0:
-            return f"All {total} commitments closed."
+            return f"All {total} commitments for {child} are fulfilled."
         if total == 0:
-            return "Run completed."
-        open_items = {k: v for k, v in (commitment_states or {}).items() if v != "completed"}
-        unresolved = [k for k, v in open_items.items() if v == "unresolved"]
-        pending = [k for k, v in open_items.items() if v == "pending"]
-        other = [f"{k} ({v})" for k, v in open_items.items() if v not in ("unresolved", "pending")]
+            return "Finished reviewing the case."
         parts = []
-        if unresolved:
-            names = ", ".join(unresolved)
-            parts.append(f"{names} {'remains' if len(unresolved) == 1 else 'remain'} unresolved")
-        if pending:
-            names = ", ".join(pending)
-            parts.append(f"{names} {'is' if len(pending) == 1 else 'are'} still pending")
-        if other:
-            parts.append(", ".join(other))
-        tail = "; ".join(parts) + "."
-        return f"{closed} of {total} commitments closed; {tail}"
+        for k, v in (commitment_states or {}).items():
+            if v != "completed":
+                label = _DOMAIN_LABELS.get(k, k.replace("_", " "))
+                c_noun = _COMMITMENT_NOUNS.get(k, k.replace("_", " "))
+                parts.append(f"{child}'s {c_noun} with {label} is {v}")
+        return f"{closed} of {total} commitments fulfilled; {'; '.join(parts)}."
+
     if event == "run_failed":
-        return f"Run failed: {error}." if error else "The run has failed."
+        if error:
+            return f"Something went wrong and {child}'s case could not be processed: {error}."
+        return f"Something went wrong and {child}'s case could not be processed."
+
     if event == "run_partial_failure":
-        return f"Partial failure: {error}." if error else "Some phases encountered errors."
+        return f"Some commitments for {child} could not be fully resolved."
 
     if event == "phase_started":
         if phase == "intake":
-            return "Reading the referral packet and extracting commitments."
+            return f"Reading {child}'s referral and identifying the commitments each partner made."
         if specialist:
-            nice = _SPECIALIST_LABELS.get(specialist, specialist.replace("_", " "))
-            return f"Asking the {nice} to check and submit its commitment."
+            return f"Reaching out to {partner} to check on {child}'s {noun}."
         if "activate" in phase:
-            return "Supervisor is reviewing the proposed grants for activation."
+            return "Sending the proposed commitments to a supervisor for review."
         if "checkpoint" in phase:
-            return "Checkpointing the workflow and setting the next wake."
+            return "Setting a reminder to follow up on any commitments still open."
         if "wake" in phase:
-            return "Day-17 wake fired; re-checking open commitments."
+            return f"Reminder fired — checking back on {child}'s open commitments."
         if "quarantine" in phase:
-            return "Inspecting an inbound callback for safety concerns."
+            return "A partner sent a response — screening it for safety before anyone acts on it."
         if "approve" in phase:
-            return "Supervisor is reviewing the quarantined escalation."
+            return "A supervisor is reviewing the flagged response."
         if "enrolled" in phase:
-            return "Verifying school enrollment via the SIS callback."
+            return f"A new update arrived from the school — checking {child}'s enrollment."
         if "memory" in phase:
-            return "Closing the loop and persisting memory for future sessions."
-        return f"Starting phase {phase}."
+            return f"Recording everything that happened for {child}'s file."
+        return f"Working on {child}'s case."
 
     if event == "phase_complete":
         if phase == "intake":
-            return "Intake complete; commitments extracted and grants proposed."
+            return f"Identified the commitments in {child}'s referral — a supervisor will review them next."
         if "activate" in phase:
-            return "Grants activated; the case is now in monitoring."
+            return f"Supervisor approved — now reaching out to every partner on {child}'s case."
         if specialist:
-            nice = _SPECIALIST_LABELS.get(specialist, specialist.replace("_", " "))
             states = commitment_states or {}
-            spec_type = {
-                "education_liaison": "education",
-                "health_coordination": "health",
-                "legal_aid": "legal",
-                "shelter_status": "shelter",
-                "family_services": "family_services",
-            }.get(specialist, specialist)
-            status = states.get(spec_type, "")
+            status = states.get(domain or "", "")
             if status == "completed":
-                return f"{nice.capitalize()} confirmed its commitment is fulfilled."
+                return f"{_cap(partner)} confirmed {child}'s {noun} is fulfilled."
             if status == "unresolved":
-                return f"{nice.capitalize()} could not resolve its commitment; status is unresolved."
+                return f"{_cap(partner)} could not resolve {child}'s {noun} — it's still open."
+            if status == "pending":
+                return f"{_cap(partner)} hasn't responded yet about {child}'s {noun}."
+            if status == "blocked":
+                return f"{_cap(partner)} says {child}'s {noun} is blocked."
             if status:
-                return f"{nice.capitalize()} reported status: {status}."
-            return f"{nice.capitalize()} completed its check."
+                return f"{_cap(partner)} reported {child}'s {noun} is {status}."
+            return f"{_cap(partner)} completed its check on {child}'s {noun}."
         if "checkpoint" in phase:
-            return "Checkpointing the workflow and setting the day-17 wake."
+            return "Reminder set — I'll check back and follow up on anything that hasn't come through."
         if "wake" in phase:
-            return "Wake phase complete; open commitments re-checked."
+            return f"Followed up on {child}'s open commitments."
         if "quarantine" in phase:
-            return "Callback inspected and quarantine decision made."
+            return "The response asked for information outside that partner's allowed access — it's been held and flagged for your supervisor."
         if "approve" in phase:
-            return "Supervisor approved the escalation."
+            return "Supervisor reviewed the flagged response and approved the escalation."
         if "enrolled" in phase:
             states = commitment_states or {}
             edu_status = states.get("education", "")
             if edu_status == "completed":
-                return "School enrollment confirmed via the SIS."
+                return f"School enrollment confirmed for {child}."
+            if edu_status == "blocked":
+                return f"School enrollment check is done, but {child}'s education is still blocked."
             if edu_status:
-                return f"School enrollment check complete; education status is {edu_status}."
-            return "School enrollment check complete."
+                return f"School enrollment update received — {child}'s education status is {edu_status}."
+            return f"School enrollment check complete for {child}."
         if "memory" in phase:
-            return "Memory persisted; commitment statuses summarized."
-        return f"Phase {phase} complete."
+            return f"Case notes updated — all of {child}'s statuses are recorded."
+        return f"Finished a step on {child}'s case."
 
     if event == "phase_error":
         if specialist:
-            nice = _SPECIALIST_LABELS.get(specialist, specialist.replace("_", " "))
-            return f"{nice.capitalize()} encountered an error: {error}."
-        return f"Phase {phase} failed: {error}."
+            return f"Something went wrong reaching {partner} about {child}'s {noun}: {error}."
+        return f"Something went wrong during a step on {child}'s case: {error}."
 
     return ""
+
+
+def _build_summary(case_id: str, run_id: str, child_name: str,
+                   commitment_states: dict[str, str], outcome: str) -> dict:
+    """Build a structured closing summary with per-commitment status and next actions.
+
+    Next actions are derived exclusively from real case state: pending approvals,
+    unresolved commitments, and scheduled follow-ups. Nothing is fabricated.
+    """
+    child = child_name or "the child"
+    commitments = []
+    for domain, status in commitment_states.items():
+        commitments.append({
+            "domain": domain,
+            "label": _COMMITMENT_NOUNS.get(domain, domain.replace("_", " ")),
+            "partner": _DOMAIN_LABELS.get(domain, domain.replace("_", " ")),
+            "status": status,
+        })
+
+    next_actions: list[dict[str, str]] = []
+
+    for a in workspace.list_approvals(case_id):
+        if a.get("decision") == "pending":
+            next_actions.append({
+                "action": "An escalation is waiting for supervisor review.",
+                "context": a.get("reason", "A partner response was flagged and needs a decision."),
+            })
+
+    for domain, status in commitment_states.items():
+        partner_label = _DOMAIN_LABELS.get(domain, domain.replace("_", " "))
+        c_noun = _COMMITMENT_NOUNS.get(domain, domain.replace("_", " "))
+        if status == "blocked":
+            next_actions.append({
+                "action": f"Follow up with {partner_label} about {child}'s {c_noun} — it's currently blocked.",
+                "context": f"{_cap(partner_label)} may need a nudge to move forward.",
+            })
+        elif status == "pending":
+            next_actions.append({
+                "action": f"Check in with {partner_label} about {child}'s {c_noun} — no response yet.",
+                "context": f"{_cap(partner_label)} hasn't confirmed or denied.",
+            })
+        elif status == "unresolved":
+            next_actions.append({
+                "action": f"Reach out to {partner_label} about {child}'s {c_noun} — it couldn't be resolved.",
+                "context": f"{_cap(partner_label)} was unable to fulfill this commitment.",
+            })
+
+    wf_id = workspace._case_workflows.get(case_id)
+    if wf_id:
+        cp = workspace.get_checkpoint(wf_id)
+        if cp and cp.get("state") not in ("fired", "cancelled", None):
+            scheduled = cp.get("due_at")
+            if scheduled:
+                due_str = scheduled.isoformat() if hasattr(scheduled, "isoformat") else str(scheduled)
+                next_actions.append({
+                    "action": f"A follow-up is already scheduled for {due_str}.",
+                    "context": "I'll automatically check back on any open commitments at that time.",
+                })
+
+    if not next_actions:
+        next_actions.append({
+            "action": f"No action needed — all of {child}'s commitments are fulfilled.",
+            "context": "",
+        })
+
+    closed = sum(1 for v in commitment_states.values() if v == "completed")
+    total = len(commitment_states)
+    if closed == total and total > 0:
+        message = f"All {total} commitments for {child} are fulfilled. Nothing else is needed right now."
+    elif total > 0:
+        open_domains = [_DOMAIN_LABELS.get(k, k) for k, v in commitment_states.items() if v != "completed"]
+        message = f"{closed} of {total} commitments for {child} are fulfilled."
+        if open_domains:
+            message += f" Still open: {', '.join(open_domains)}."
+    else:
+        message = f"Finished processing {child}'s case."
+
+    return {
+        "event": "run_summary",
+        "run_id": run_id,
+        "case_id": case_id,
+        "child_name": child,
+        "message": message,
+        "outcome": outcome,
+        "commitments": commitments,
+        "next_actions": next_actions,
+    }
 
 
 def _run_background(run_id: str, case_id: str) -> None:
@@ -540,7 +650,7 @@ def _run_background(run_id: str, case_id: str) -> None:
             prompt = template.format(case_id=case_id)
             _push_event({
                 "event": "phase_started", "run_id": run_id, "phase": label,
-                "message": _narrate("phase_started", label, case_id=case_id),
+                "message": _narrate("phase_started", label, case_id=case_id, child_name=child_name),
             })
             try:
                 text = _quiet_run_agent(phase_orchestrator, prompt, app_name="continuity_orchestrator")
@@ -549,7 +659,7 @@ def _run_background(run_id: str, case_id: str) -> None:
                 _push_event({
                     "event": "phase_error", "run_id": run_id,
                     "phase": label, "error": err_msg,
-                    "message": _narrate("phase_error", label, error=err_msg),
+                    "message": _narrate("phase_error", label, error=err_msg, child_name=child_name),
                 })
                 return (label, err_msg, "")
             states = workspace.commitment_states(case_id)
@@ -557,17 +667,18 @@ def _run_background(run_id: str, case_id: str) -> None:
                 "event": "phase_complete", "run_id": run_id,
                 "phase": label, "summary": (text or "")[:300],
                 "commitment_states": states,
-                "message": _narrate("phase_complete", label, commitment_states=states),
+                "message": _narrate("phase_complete", label, commitment_states=states, child_name=child_name),
             })
             return (label, None, text or "")
         return ctx.run(_inner)
 
     with _bind(case_id=case_id, run_id=run_id):
+        child_name = workspace.get_case(case_id).get("child_name", "")
         try:
             workspace.update_run(run_id, state="running", current_phase="intake")
             _push_event({
                 "event": "run_started", "run_id": run_id, "case_id": case_id,
-                "message": _narrate("run_started", "intake", case_id=case_id),
+                "message": _narrate("run_started", "intake", case_id=case_id, child_name=child_name),
             })
 
             intake_text = _quiet_run_agent(
@@ -587,7 +698,7 @@ def _run_background(run_id: str, case_id: str) -> None:
                 "event": "phase_complete", "run_id": run_id,
                 "phase": "intake", "summary": intake_text[:300],
                 "commitment_states": states,
-                "message": _narrate("phase_complete", "intake", commitment_states=states),
+                "message": _narrate("phase_complete", "intake", commitment_states=states, child_name=child_name),
             })
 
             if not workspace.commitments.get(case_id) or not workspace.grants.get(case_id):
@@ -626,7 +737,7 @@ def _run_background(run_id: str, case_id: str) -> None:
                 )
                 _push_event({
                     "event": "phase_started", "run_id": run_id, "phase": label,
-                    "message": _narrate("phase_started", label, case_id=case_id),
+                    "message": _narrate("phase_started", label, case_id=case_id, child_name=child_name),
                 })
                 try:
                     phase_orch = _build_orchestrator()
@@ -638,7 +749,7 @@ def _run_background(run_id: str, case_id: str) -> None:
                     _push_event({
                         "event": "phase_error", "run_id": run_id,
                         "phase": label, "error": err_msg,
-                        "message": _narrate("phase_error", label, error=err_msg),
+                        "message": _narrate("phase_error", label, error=err_msg, child_name=child_name),
                     })
                     continue
                 states = workspace.commitment_states(case_id)
@@ -646,7 +757,7 @@ def _run_background(run_id: str, case_id: str) -> None:
                     "event": "phase_complete", "run_id": run_id,
                     "phase": label, "summary": (orch_text or "")[:300],
                     "commitment_states": states,
-                    "message": _narrate("phase_complete", label, commitment_states=states),
+                    "message": _narrate("phase_complete", label, commitment_states=states, child_name=child_name),
                 })
 
             # --- CONCURRENT fan-out: five specialists dispatched in parallel ---
@@ -675,7 +786,7 @@ def _run_background(run_id: str, case_id: str) -> None:
                 )
                 _push_event({
                     "event": "phase_started", "run_id": run_id, "phase": label,
-                    "message": _narrate("phase_started", label, case_id=case_id),
+                    "message": _narrate("phase_started", label, case_id=case_id, child_name=child_name),
                 })
                 try:
                     phase_orch = _build_orchestrator()
@@ -687,7 +798,7 @@ def _run_background(run_id: str, case_id: str) -> None:
                     _push_event({
                         "event": "phase_error", "run_id": run_id,
                         "phase": label, "error": err_msg,
-                        "message": _narrate("phase_error", label, error=err_msg),
+                        "message": _narrate("phase_error", label, error=err_msg, child_name=child_name),
                     })
                     continue
                 states = workspace.commitment_states(case_id)
@@ -695,7 +806,7 @@ def _run_background(run_id: str, case_id: str) -> None:
                     "event": "phase_complete", "run_id": run_id,
                     "phase": label, "summary": (orch_text or "")[:300],
                     "commitment_states": states,
-                    "message": _narrate("phase_complete", label, commitment_states=states),
+                    "message": _narrate("phase_complete", label, commitment_states=states, child_name=child_name),
                 })
 
             commitments = workspace.commitment_states(case_id)
@@ -709,6 +820,17 @@ def _run_background(run_id: str, case_id: str) -> None:
             has_unresolved = bool(pending_commitments)
 
             if phase_failures == total_phases:
+                outcome = "failed"
+            elif phase_failures > 0 or has_unresolved:
+                outcome = "partial_failure"
+            else:
+                outcome = "completed"
+
+            summary_event = _build_summary(case_id, run_id, child_name, commitments, outcome)
+            summary_event["timestamp"] = datetime.now(timezone.utc).isoformat()
+            _push_event(summary_event)
+
+            if outcome == "failed":
                 workspace.update_run(
                     run_id, state="failed", current_phase="done",
                     error=f"all {total_phases} phases failed",
@@ -720,9 +842,9 @@ def _run_background(run_id: str, case_id: str) -> None:
                     "error": f"all {total_phases} phases failed",
                     "failed_phases": failed_phases,
                     "commitment_states": commitments,
-                    "message": _narrate("run_failed", "done", error=f"all {total_phases} phases failed"),
+                    "message": _narrate("run_failed", "done", error=f"all {total_phases} phases failed", child_name=child_name),
                 })
-            elif phase_failures > 0 or has_unresolved:
+            elif outcome == "partial_failure":
                 error_parts = []
                 if phase_failures > 0:
                     error_parts.append(f"{phase_failures}/{total_phases} phases failed")
@@ -740,7 +862,7 @@ def _run_background(run_id: str, case_id: str) -> None:
                     "error": error_msg,
                     "failed_phases": failed_phases,
                     "commitment_states": commitments,
-                    "message": _narrate("run_partial_failure", "done", error=error_msg),
+                    "message": _narrate("run_partial_failure", "done", error=error_msg, child_name=child_name),
                 })
             else:
                 workspace.update_run(
@@ -750,13 +872,13 @@ def _run_background(run_id: str, case_id: str) -> None:
                 _push_event({
                     "event": "run_completed", "run_id": run_id, "case_id": case_id,
                     "commitment_states": commitments,
-                    "message": _narrate("run_completed", "done", commitment_states=commitments),
+                    "message": _narrate("run_completed", "done", commitment_states=commitments, child_name=child_name),
                 })
         except Exception as exc:  # noqa: BLE001
             workspace.update_run(run_id, state="failed", error=str(exc))
             _push_event({
                 "event": "run_failed", "run_id": run_id, "error": str(exc),
-                "message": _narrate("run_failed", "", error=str(exc)),
+                "message": _narrate("run_failed", "", error=str(exc), child_name=child_name),
             })
 
 
