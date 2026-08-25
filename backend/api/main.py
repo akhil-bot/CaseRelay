@@ -34,11 +34,20 @@ app = FastAPI(
     description="Versioned HTTP control plane for the CaseRelay multi-agent fleet.",
 )
 
+import logging as _logging
+
+_agui_logger = _logging.getLogger("caserelay.agui")
+
 try:
     from backend.api.agui import agui_app
     app.mount("/agui", agui_app)
-except (ImportError, ModuleNotFoundError):
-    pass
+    _agui_logger.info("AG-UI chat endpoint mounted at /agui")
+except Exception as _agui_exc:
+    _agui_logger.error("Failed to load AG-UI chat endpoint: %s", _agui_exc, exc_info=True)
+    if os.environ.get("CASERELAY_CONTROL_PLANE", "").strip() == "1":
+        raise RuntimeError(
+            f"AG-UI chat endpoint failed to load on the control plane: {_agui_exc}"
+        ) from _agui_exc
 
 try:
     from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
