@@ -1,4 +1,5 @@
 import asyncio
+import threading
 
 from google.adk.runners import Runner
 from google.adk.sessions import InMemorySessionService
@@ -7,11 +8,40 @@ from google.genai import types
 from backend.memory.platform import APP_NAME as _MB_APP, commit_session_events, enabled as memory_bank_enabled
 from backend.runtime.trace import tracer
 
+_run_buffers: dict[str, list] = {}
+_run_buffers_lock = threading.Lock()
+
 
 def run_agent(agent, message: str, app_name: str | None = None, user_id: str | None = None) -> str:
     name = app_name or getattr(agent, "name", "caserelay")
     caller = user_id or _caller_id()
     return asyncio.run(_run(agent, message, name, caller))
+
+
+def finalize_run_memory(run_id: str, case_id: str) -> None:
+    """Extract one memory from the entire wake's accumulated orchestrator events.
+
+    Called once at end of _run_background. Builds a synthetic session from all
+    orchestrator phases' events and runs a single synchronous extraction.
+    """
+    if not memory_bank_enabled():
+        return
+    with _run_buffers_lock:
+        events = _run_buffers.pop(run_id, [])
+    if not events:
+        return
+    asyncio.run(_extract_run(case_id, events))
+
+
+async def _extract_run(case_id: str, events: list) -> None:
+    from google.adk.sessions import InMemorySessionService as _Svc
+
+    svc = _Svc()
+    session = await svc.create_session(
+        app_name=_MB_APP, user_id=case_id, session_id="run-combined"
+    )
+    session.events = events
+    await commit_session_events(session)
 
 
 def _caller_id() -> str:
@@ -26,12 +56,10 @@ def _caller_id() -> str:
     return "caserelay-system"
 
 
-def _case_id_from_context() -> str | None:
-    """Extract case_id from RunContext if bound (set by _run_background)."""
+def _run_id_from_context() -> str | None:
     try:
         from backend.runtime.context import current as _ctx
-        ctx = _ctx()
-        return ctx.case_id or None
+        return _ctx().run_id or None
     except Exception:  # noqa: BLE001
         return None
 
@@ -70,13 +98,12 @@ async def _run(agent, message: str, app_name: str, user_id: str) -> str:
                 chunks.append(part.text)
 
     if memory_bank_enabled() and app_name == "continuity_orchestrator":
-        case_id = _case_id_from_context()
-        if case_id:
+        run_id = _run_id_from_context()
+        if run_id:
             completed = await sessions.get_session(
                 app_name=app_name, user_id=user_id, session_id=session.id
             )
-            completed.app_name = _MB_APP
-            completed.user_id = case_id
-            await commit_session_events(completed)
+            with _run_buffers_lock:
+                _run_buffers.setdefault(run_id, []).extend(completed.events or [])
 
     return "\n".join(chunks).strip()

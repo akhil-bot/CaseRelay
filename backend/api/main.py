@@ -499,7 +499,7 @@ def _run_background(run_id: str, case_id: str) -> None:
     from backend.agents.orchestrator.agent import root_agent as orchestrator_agent
     from backend.runtime.context import bind as _bind
     from backend.runtime.fleet import PHASES, SPECIALISTS
-    from backend.runtime.invoke import run_agent
+    from backend.runtime.invoke import finalize_run_memory, run_agent
 
     _adk_logger = logging.getLogger("google.adk")
 
@@ -678,6 +678,7 @@ def _run_background(run_id: str, case_id: str) -> None:
                 })
 
             commitments = workspace.commitment_states(case_id)
+            finalize_run_memory(run_id, case_id)
 
             if phase_failures == total_phases:
                 workspace.update_run(
