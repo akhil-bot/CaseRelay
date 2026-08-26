@@ -3,6 +3,7 @@
 import {
   CopilotChatAssistantMessage,
   type CopilotChatAssistantMessageProps,
+  type CopilotChatToolCallsViewProps,
   type CopilotModalHeaderProps,
 } from "@copilotkit/react-core/v2";
 import type { ButtonHTMLAttributes, SVGProps } from "react";
@@ -13,7 +14,8 @@ import {
 } from "@/components/copilot/conversation-history";
 import { Icon } from "@/components/icons";
 import { LogoMark } from "@/components/Logo";
-import { chrome, cx, tone } from "@/design/tokens";
+import { chrome, cx, tone, type as type_ } from "@/design/tokens";
+import { formatEventTime } from "@/lib/case-events";
 import { isAdkConnected } from "@/lib/copilot/config";
 
 /**
@@ -31,56 +33,190 @@ import { isAdkConnected } from "@/lib/copilot/config";
  */
 export const Hidden = () => <></>;
 
-/**
- * The assistant's avatar is the CaseRelay mark, not a face.
- *
- * A doodle of a person would imply someone is answering, and this product's
- * whole claim is the opposite: the agents carry paperwork forward and a human
- * still decides. The shield keeps the assistant legibly a piece of software.
- *
- * Hovering it names what just answered and restates the bound it answers under.
- * That line used to run in the header, where it cost a permanent row; here it is
- * attached to the thing it describes and costs nothing until asked for.
- *
- * The whole lockup stays `aria-hidden`. It is decoration beside a message that
- * is already labelled, and a focusable tooltip would put a tab stop in front of
- * every assistant turn to repeat what the panel header states once.
- */
-function AssistantAvatar() {
-  return (
-    <span className="group relative mt-0.5 shrink-0" aria-hidden="true">
-      <span className="flex size-7 items-center justify-center rounded-full bg-brand-soft ring-0 ring-brand/0 transition duration-200 group-hover:ring-2 group-hover:ring-brand/25 motion-safe:group-hover:-translate-y-0.5 motion-safe:group-hover:scale-110">
-        <LogoMark size={16} />
-      </span>
+type ChatMessage = NonNullable<CopilotChatToolCallsViewProps["messages"]>[number];
+type AssistantTurn = CopilotChatToolCallsViewProps["message"];
+type ToolStep = NonNullable<AssistantTurn["toolCalls"]>[number];
 
-      <span className="pointer-events-none absolute top-full left-0 z-30 mt-2 w-max max-w-[210px] rounded-control border border-line bg-surface px-2.5 py-1.5 opacity-0 shadow-pop transition duration-150 group-hover:opacity-100 motion-safe:translate-y-1 motion-safe:group-hover:translate-y-0">
-        <span className="block text-[11.5px] font-medium text-ink">CaseRelay assistant</span>
-        <span className="mt-0.5 block text-[11px] leading-snug text-ink-muted">
-          Reads your view. Decides nothing.
-        </span>
-      </span>
-    </span>
+/**
+ * What each step the assistant can take is called in front of a volunteer.
+ *
+ * The panel never shows a tool name: an advocate needs to know the case was set
+ * up, not which function did it. `doing` runs while a step is still in flight
+ * and `done` once its result is back, so a line that is still moving reads in
+ * the present tense. Anything unrecognised falls back to a phrase that says
+ * nothing about the mechanism rather than leaking an identifier.
+ */
+const STEP_COPY: Record<string, { doing: string; done: string }> = {
+  list_scenarios: {
+    doing: "Checking which cases you can start",
+    done: "Checked which cases you can start",
+  },
+  create_case: { doing: "Setting up the case", done: "Set up the case" },
+  start_outreach: {
+    doing: "Starting outreach to the providers",
+    done: "Started outreach to the providers",
+  },
+};
+
+const STEP_FALLBACK = { doing: "Working on it", done: "Finished that step" };
+
+/**
+ * When each message first appeared, kept outside React because the transport
+ * carries no timestamp of its own and a re-render must not restamp a message.
+ *
+ * Written on first render rather than from an effect: a message keeps one id
+ * across every streaming update, so the value settles on the moment the reply
+ * began arriving and never moves again.
+ */
+const firstSeen = new Map<string, string>();
+
+function firstSeenAt(id: string): string {
+  let at = firstSeen.get(id);
+  if (at === undefined) {
+    at = new Date().toISOString();
+    firstSeen.set(id, at);
+  }
+  return at;
+}
+
+function isAssistant(message: ChatMessage | undefined): message is AssistantTurn {
+  return message?.role === "assistant";
+}
+
+function hasText(message: AssistantTurn): boolean {
+  return !!message.content && message.content.trim().length > 0;
+}
+
+/** Whether a message puts anything on screen. */
+function speaks(message: ChatMessage | undefined): boolean {
+  if (!isAssistant(message)) return false;
+  return hasText(message) || !!message.toolCalls?.length;
+}
+
+/**
+ * Roles the thread never draws. They sit between the messages of one reply —
+ * a step's result arrives as its own message — so they are filtered out before
+ * anything reasons about which message came before which.
+ */
+const UNDRAWN_ROLES = new Set(["tool", "system", "developer"]);
+
+/**
+ * Whether this message opens the reply: the first message the assistant draws
+ * since the volunteer last spoke. One reply arrives as several messages — one
+ * per step it takes, then the prose — and only the opener is stamped, so an
+ * exchange carries one time rather than one per fragment of the same answer.
+ */
+function opensReply(turns: ChatMessage[], message: AssistantTurn): boolean {
+  const index = turns.findIndex((m) => m.id === message.id);
+  for (let i = index - 1; i >= 0 && isAssistant(turns[i]); i -= 1) {
+    if (speaks(turns[i])) return false;
+  }
+  return true;
+}
+
+/**
+ * The steps a message took, said as one quiet line at the thread's left edge.
+ *
+ * Steps that fire together collapse into this single line, and repeats of the
+ * same step fold into one phrase, so a burst never stacks up as a column of
+ * marks. A step only reads as finished once every call of it has a result back,
+ * so a line still waiting on one stays in the present tense and pulses.
+ */
+function StepLine({ steps, messages }: { steps: ToolStep[]; messages: ChatMessage[] }) {
+  const settledByName = new Map<string, boolean>();
+  for (const step of steps) {
+    const done = messages.some((m) => m.role === "tool" && m.toolCallId === step.id);
+    const name = step.function.name;
+    settledByName.set(name, (settledByName.get(name) ?? true) && done);
+  }
+
+  const phrases = Array.from(settledByName, ([name, done]) => {
+    const copy = STEP_COPY[name] ?? STEP_FALLBACK;
+    return done ? copy.done : copy.doing;
+  });
+  const running = Array.from(settledByName.values()).some((done) => !done);
+
+  return (
+    <p
+      className={cx(
+        type_.meta,
+        "mb-1.5 leading-relaxed",
+        running && "motion-safe:animate-pulse",
+      )}
+    >
+      {Array.from(new Set(phrases)).join(" · ")}
+    </p>
   );
 }
 
 /**
- * Assistant turn: avatar in the gutter, message beside it, and a toolbar cut
- * back to copy alone. Thumbs-up/down posts feedback nowhere, read-aloud needs a
- * voice backend, regenerate re-bills a run, and the inspector exposes raw
- * CopilotKit internals — none of them belong in front of an advocate.
+ * When a reply arrived, read off the same formatter the activity feed uses so
+ * the two panels can never drift apart, and set on the right like the feed's
+ * own column — which keeps the left edge for what the volunteer is reading.
+ *
+ * `tabular-nums` holds the digits still while a reply streams beneath it.
  */
-function AssistantMessageView({ className, ...props }: CopilotChatAssistantMessageProps) {
+function ReplyTime({ id }: { id: string }) {
+  const label = formatEventTime(firstSeenAt(id));
+  if (!label) return null;
+
+  return <p className={cx(type_.monoSmall, "mb-1.5 text-right tabular-nums")}>{label}</p>;
+}
+
+/**
+ * Assistant turn: time, then the steps behind the reply, then the reply, all on
+ * the thread's single left edge.
+ *
+ * There is no avatar. The panel header names the assistant permanently 64px
+ * above, so a mark on every turn only repeated it — and because a message
+ * carrying steps alone has no prose to sit beside, that gutter was what stacked
+ * bare glyphs down the side of the thread and pushed the text it was meant to
+ * label onto a second edge.
+ *
+ * `toolCallsView` is taken over rather than filled: the SDK renders one element
+ * per call and puts them under the prose, where the mechanism would read as part
+ * of the answer. One line, above the answer, is what this panel wants.
+ *
+ * The toolbar is cut back to copy alone. Thumbs-up/down posts feedback nowhere,
+ * read-aloud needs a voice backend, regenerate re-bills a run, and the inspector
+ * exposes raw CopilotKit internals — none of them belong in front of an advocate.
+ */
+function AssistantMessageView({
+  className,
+  message,
+  messages,
+  ...props
+}: CopilotChatAssistantMessageProps) {
+  const thread = messages ?? [];
+  const steps = message.toolCalls ?? [];
+  if (!hasText(message) && steps.length === 0) return null;
+
+  const leads = opensReply(
+    thread.filter((m) => !UNDRAWN_ROLES.has(m.role)),
+    message,
+  );
+
+  // A reply arrives in pieces. Steps stay tight against each other so they read
+  // as one list, and the prose that answers gets the gap the markdown puts
+  // between paragraphs, so the whole thing still reads as a single reply.
+  const gap = leads ? undefined : hasText(message) ? "mt-4" : "mt-1.5";
+
   return (
-    <div className="flex gap-3">
-      <AssistantAvatar />
+    <div className={cx(gap)}>
+      {leads && <ReplyTime id={message.id} />}
+      {steps.length > 0 && <StepLine steps={steps} messages={thread} />}
+
       <CopilotChatAssistantMessage
         {...props}
+        message={message}
+        messages={messages}
         thumbsUpButton={Hidden}
         thumbsDownButton={Hidden}
         readAloudButton={Hidden}
         regenerateButton={Hidden}
         inspectorButton={Hidden}
-        className={cx("min-w-0 flex-1", className)}
+        toolCallsView={Hidden}
+        className={cx("min-w-0", className)}
       />
     </div>
   );
@@ -94,6 +230,30 @@ function AssistantMessageView({ className, ...props }: CopilotChatAssistantMessa
  */
 export const AssistantMessage =
   AssistantMessageView as unknown as typeof CopilotChatAssistantMessage;
+
+/**
+ * The header mark, and on hover the bound the assistant answers under.
+ *
+ * That line used to hang off an avatar beside every turn. It belongs to the
+ * assistant as a whole rather than to any one reply, so it moved to the mark
+ * the header already spends room on, where it is stated once and still costs
+ * nothing until asked for. `aria-hidden`, because it is a restatement for the
+ * eye beside a header that already names what this panel is.
+ */
+function AssistantIdentity() {
+  return (
+    <span className="group relative shrink-0" aria-hidden="true">
+      <LogoMark size={22} />
+
+      <span className="pointer-events-none absolute top-full left-0 z-30 mt-2 w-max max-w-[210px] rounded-control border border-line bg-surface px-2.5 py-1.5 opacity-0 shadow-pop transition duration-150 group-hover:opacity-100 motion-safe:translate-y-1 motion-safe:group-hover:translate-y-0">
+        <span className="block text-[11.5px] font-medium text-ink">CaseRelay assistant</span>
+        <span className="mt-0.5 block text-[11px] leading-snug text-ink-muted">
+          Reads your view. Decides nothing.
+        </span>
+      </span>
+    </span>
+  );
+}
 
 /**
  * Presence indicator in the chat header. The dot is the product's one green,
@@ -154,7 +314,7 @@ function ChatHeaderView({ closeButton }: ChatHeaderProps) {
   return (
     <>
       <header className={cx(chrome.row, "gap-2.5 bg-surface px-4")}>
-        <LogoMark size={22} />
+        <AssistantIdentity />
 
         {/* The pill is the tallest thing on this line, so the line box is what
             holds the row to the same height as the header it sits beside. */}
