@@ -94,7 +94,7 @@ export const ACTIVITY: ActivityEvent[] = [
     kind: "tool",
     actor: "legal@statewide-legalaid.partner",
     summary: "Legal referral accepted — counsel assigned",
-    detail: "cms.lookup_referral_status → active · counsel A. Ferrand · next deadline Day 30",
+    detail: "cms.lookup_referral_status → active · staff attorney Anna Reed · next deadline Day 30",
     spanMs: 883,
   },
   {
@@ -243,7 +243,7 @@ export const ACTIVITY: ActivityEvent[] = [
     actor: "education@lincoln-usd.partner",
     summary: "Retry returned unresolved — no named owner",
     detail:
-      "sis.lookup_enrollment → unresolved · missing operational requirement: transfer packet not routed to a registrar.",
+      "sis.lookup_enrollment → unresolved · missing operational requirement: transfer packet not routed to an enrollment coordinator.",
     spanMs: 2961,
   },
   {
@@ -280,7 +280,7 @@ export const ACTIVITY: ActivityEvent[] = [
     actor: "Dana Whitfield (supervisor)",
     summary: "Escalation approved and sent",
     detail:
-      "Approval digest AP-8802 bound to the exact disclosed-field set. Sent to the district McKinney-Vento liaison.",
+      "Approval digest AP-8802 bound to the exact disclosed-field set. Sent to the district enrollment office.",
     spanMs: 0,
     outcome: "allow",
   },
@@ -293,7 +293,7 @@ export const ACTIVITY: ActivityEvent[] = [
     actor: "education@lincoln-usd.partner",
     summary: "Callback: enrollment confirmed",
     detail:
-      "enrolled · Lincoln Middle School · registrar M. Okafor · effective Day 18. Workflow resumed from checkpoint c-0011.",
+      "enrolled · Lincoln Middle School · enrollment coordinator Sarah Miller · effective Day 18. Workflow resumed from checkpoint c-0011.",
     spanMs: 318,
     idempotencyKey: "idem-3140",
   },

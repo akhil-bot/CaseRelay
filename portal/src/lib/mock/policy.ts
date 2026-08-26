@@ -159,7 +159,7 @@ export const POLICY_DECISIONS: PolicyDecision[] = [
     step: 6,
     at: "Day 17 · 09:04:53",
     outcome: "requires_human_approval",
-    subject: "Send overdue-referral escalation to the district liaison",
+    subject: "Send overdue-referral escalation to the district enrollment office",
     ruleIds: ["POL-ESC-007"],
     explanation:
       "Outbound communication to an external organization is consequential. The supervisor must see recipient, purpose, disclosed fields, withheld fields and policy basis before it is sent.",

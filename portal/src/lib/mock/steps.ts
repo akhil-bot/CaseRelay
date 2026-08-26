@@ -65,7 +65,7 @@ export const DEMO_STEPS: DemoStep[] = [
     label: "Escalation awaiting approval",
     dayLabel: "Day 17",
     narration:
-      "CaseRelay drafted a follow-up to Lincoln Unified's registrar. Dana Whitfield sees the full message, exactly what it shares, and must approve before anything is sent.",
+      "CaseRelay drafted a follow-up to Lincoln Unified's enrollment office. Dana Whitfield sees the full message, exactly what it shares, and must approve before anything is sent.",
     caseState: "approval_required",
   },
   {

@@ -30,7 +30,7 @@ const COMMITMENT_PATCHES: Record<number, Record<string, Patch>> = {
   2: {
     "CM-01": {
       status: "completed",
-      detail: "Referral accepted. Counsel A. Ferrand assigned. Next deadline Day 30.",
+      detail: "Referral accepted. Staff attorney Anna Reed assigned. Next deadline Day 30.",
       lastUpdate: "Day 3 · 11:02",
       evidence: [
         {
@@ -58,7 +58,7 @@ const COMMITMENT_PATCHES: Record<number, Record<string, Patch>> = {
     },
     "CM-03": {
       status: "unresolved",
-      detail: "District acknowledged receipt but named no responsible registrar.",
+      detail: "District acknowledged receipt but named no responsible enrollment coordinator.",
       lastUpdate: "Day 3 · 11:03",
       daysOverdue: 3,
       evidence: [
@@ -113,7 +113,7 @@ const COMMITMENT_PATCHES: Record<number, Record<string, Patch>> = {
     "CM-03": {
       status: "blocked",
       detail:
-        "Lincoln Unified's response was set aside — it tried to access information outside its scope. A follow-up was sent; no registrar has been named.",
+        "Lincoln Unified's response was set aside — it tried to access information outside its scope. A follow-up was sent; no enrollment coordinator has been named.",
       lastUpdate: "Day 17 · 09:00",
       daysOverdue: 17,
       evidence: [
@@ -130,7 +130,7 @@ const COMMITMENT_PATCHES: Record<number, Record<string, Patch>> = {
   6: {
     "CM-03": {
       status: "blocked",
-      detail: "Escalation drafted to the district liaison. Waiting on supervisor approval AP-8802.",
+      detail: "Escalation drafted to the district enrollment office. Waiting on supervisor approval AP-8802.",
       lastUpdate: "Day 17 · 09:04",
       daysOverdue: 17,
     },
@@ -139,13 +139,13 @@ const COMMITMENT_PATCHES: Record<number, Record<string, Patch>> = {
     "CM-03": {
       status: "completed",
       detail:
-        "Enrolled at Lincoln Middle School effective Day 18. Registrar M. Okafor is the named owner.",
+        "Enrolled at Lincoln Middle School effective Day 18. Enrollment coordinator Sarah Miller is the named owner.",
       lastUpdate: "Day 18 · 14:22",
       daysOverdue: undefined,
       evidence: [
         {
           id: "EV-1207",
-          label: "Callback: enrolled · registrar M. Okafor",
+          label: "Callback: enrolled · enrollment coordinator Sarah Miller",
           source: "education@lincoln-usd.partner · evt-2072",
           capturedAt: "Day 18 · 14:22",
           confidence: 0.99,
@@ -159,7 +159,7 @@ const COMMITMENT_PATCHES: Record<number, Record<string, Patch>> = {
     },
     "CM-05": {
       status: "scheduled",
-      detail: "Assessment scheduled for Day 21. Worker R. Belanger assigned.",
+      detail: "Assessment scheduled for Day 21. Caseworker Maria Lopez assigned.",
       lastUpdate: "Day 14 · 13:05",
       evidence: [
         {

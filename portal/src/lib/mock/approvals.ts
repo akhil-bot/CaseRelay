@@ -8,8 +8,8 @@ export const APPROVALS: ApprovalRequest[] = [
     childAlias: "Maya R.",
     createdAt: "Day 17 · 09:04:53",
     requestedBy: "orchestrator@caserelay.iam",
-    action: "Send overdue-referral escalation to the district homeless-liaison office",
-    recipient: "M. Okafor — McKinney-Vento Liaison, Lincoln Unified School District",
+    action: "Send overdue-referral escalation to the district enrollment office",
+    recipient: "Sarah Miller — Enrollment Coordinator, Lincoln Unified School District",
     recipientRole: "External partner organization",
     purpose: "verify_school_enrollment",
     urgency: "elevated",
@@ -20,10 +20,10 @@ Our office is the court-appointed advocate for a student referred to Lincoln Uni
 
 Evidence on file:
   • Day 0  — education referral ED-77120 submitted (district intake receipt)
-  • Day 17 — SIS lookup returned "unresolved", no registrar assigned
-  • Day 17 — transfer packet not routed to a registrar (district-reported blocker)
+  • Day 17 — SIS lookup returned "unresolved", no enrollment owner assigned
+  • Day 17 — transfer packet not routed to an enrollment coordinator (district-reported blocker)
 
-Request: confirm the responsible registrar and the enrollment status for referral ED-77120.
+Request: confirm the responsible enrollment coordinator and the current status for referral ED-77120.
 
 This message discloses only the student's first name, last initial, court reference and referral ID. No health, legal, shelter or family-services information is included.`,
     evidence: [
@@ -69,7 +69,7 @@ This message discloses only the student's first name, last initial, court refere
     createdAt: "Day 24 · 16:08:12",
     requestedBy: "orchestrator@caserelay.iam",
     action: "Send status reminder to assigned legal-aid counsel",
-    recipient: "A. Ferrand — Statewide Legal Aid Collective",
+    recipient: "Anna Reed — Staff Attorney, Statewide Legal Aid Collective",
     recipientRole: "External partner organization",
     purpose: "confirm_legal_referral_status",
     urgency: "standard",
@@ -126,7 +126,7 @@ No clinical, educational or family-assessment information is included in this me
     createdAt: "Day 8 · 10:12:37",
     requestedBy: "orchestrator@caserelay.iam",
     action: "Re-request the shelter response window from a named intake supervisor",
-    recipient: "T. Iverson — Intake Supervisor, Harborlight Youth Shelter",
+    recipient: "Tom Barnes — Intake Supervisor, Harborlight Youth Shelter",
     recipientRole: "External partner organization",
     purpose: "confirm_shelter_referral_status",
     urgency: "elevated",
@@ -204,7 +204,7 @@ This message discloses only the child's first name, last initial, court referenc
     createdAt: "Day 15 · 08:47:19",
     requestedBy: "orchestrator@caserelay.iam",
     action: "Ask the clinic to confirm the wellness visit took place",
-    recipient: "P. Ndiaye — Records Coordinator, Riverbend Community Health",
+    recipient: "David Chen — Records Coordinator, Riverbend Community Health",
     recipientRole: "External partner organization",
     purpose: "confirm_appointment_completed",
     urgency: "standard",
