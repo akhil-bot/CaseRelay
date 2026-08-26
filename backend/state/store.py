@@ -123,6 +123,17 @@ def list_runs_for_case(case_id: str) -> list[dict[str, Any]]:
     return [d.to_dict() or {} for d in docs]
 
 
+def query_active_runs() -> list[dict[str, Any]]:
+    """Return all runs in running or queued state (for reclamation checks)."""
+    if not enabled():
+        return []
+    results = []
+    for state in ("running", "queued"):
+        docs = _db().collection(RUNS).where("state", "==", state).stream()
+        results.extend(d.to_dict() for d in docs if d.to_dict())
+    return results
+
+
 def delete_runs_for_case(case_id: str) -> None:
     if not enabled():
         return
@@ -155,6 +166,87 @@ def query_due_checkpoints(now_ts) -> list[dict[str, Any]]:
         .stream()
     )
     return [d.to_dict() for d in docs if d.to_dict()]
+
+
+def query_checkpoints_for_case(case_id: str) -> list[dict[str, Any]]:
+    if not enabled():
+        return []
+    docs = _db().collection("workflow_checkpoints").where("case_id", "==", case_id).stream()
+    return [d.to_dict() for d in docs if d.to_dict()]
+
+
+def query_running_checkpoints() -> list[dict[str, Any]]:
+    """Return all checkpoints in running state (for reclamation of stranded ones)."""
+    if not enabled():
+        return []
+    docs = _db().collection("workflow_checkpoints").where("state", "==", "running").stream()
+    return [d.to_dict() for d in docs if d.to_dict()]
+
+
+_LOCK_STALE_SECONDS = 600
+
+
+def try_acquire_case_lock(case_id: str, run_id: str) -> bool:
+    """Atomically claim a per-case run lock via Firestore transaction.
+
+    Prevents two Cloud Run instances from starting concurrent runs for the same case
+    when multiple commitment deadlines fire close together. Pub/Sub is at-least-once,
+    so duplicate delivery of the same checkpoint must also be a no-op. The transaction
+    guarantees that exactly one of N racing pushes acquires the lock; the rest see
+    state="running" and return False.
+
+    A lock held longer than 10 minutes is considered stale (the owning instance likely
+    died without releasing it) and is forcibly reclaimed by the new caller.
+    """
+    if not enabled():
+        return True
+    from google.cloud import firestore as _fs
+
+    db = _db()
+    lock_ref = db.collection("case_locks").document(case_id)
+
+    @_fs.transactional
+    def _acquire(transaction):
+        snapshot = lock_ref.get(transaction=transaction)
+        if snapshot.exists:
+            data = snapshot.to_dict() or {}
+            if data.get("state") == "running":
+                acquired_at = data.get("acquired_at")
+                if acquired_at is not None:
+                    from datetime import datetime, timezone
+                    now = datetime.now(timezone.utc)
+                    if hasattr(acquired_at, "timestamp"):
+                        age = (now - acquired_at.replace(tzinfo=timezone.utc)).total_seconds()
+                    else:
+                        age = 0
+                    if age < _LOCK_STALE_SECONDS:
+                        return False
+                else:
+                    return False
+        from datetime import datetime, timezone
+        transaction.set(lock_ref, {
+            "case_id": case_id,
+            "state": "running",
+            "run_id": run_id,
+            "acquired_at": datetime.now(timezone.utc),
+        })
+        return True
+
+    try:
+        return _acquire(db.transaction())
+    except Exception:
+        return False
+
+
+def release_case_lock(case_id: str) -> None:
+    if not enabled():
+        return
+    try:
+        _db().collection("case_locks").document(case_id).set(
+            {"case_id": case_id, "state": "idle"}, merge=True,
+        )
+    except Exception:
+        pass
 
 
 # -- screening verdicts --------------------------------------------------------

@@ -427,18 +427,38 @@ async def pubsub_push(request: Request) -> JSONResponse:
         if not case_id:
             return JSONResponse(status_code=400, content={"detail": "missing case_id"})
 
+        # If the specific checkpoint is already completed, this is a genuine duplicate
+        # delivery (at-least-once semantics). Safe to ack — the work is done.
+        if workflow_id:
+            cp = workspace.get_checkpoint(workflow_id)
+            if cp and cp.get("state") == "completed":
+                _push_logger.info("wake for %s/%s acked — checkpoint already completed", case_id, workflow_id)
+                return JSONResponse({"status": "deduplicated", "reason": "checkpoint_completed"})
+
+        # If a run is already active for this case, return 409 so Pub/Sub retries with
+        # backoff. The active run's resume_wake() may not have coalesced this checkpoint
+        # yet (race between sweep and coalescing), so we must NOT ack the message —
+        # redelivery guarantees the checkpoint is eventually processed once the case is free.
         active = [
             r for r in workspace.list_runs_for_case(case_id)
             if r.get("state") in ("queued", "running")
         ]
         if active:
             _push_logger.info(
-                "wake for %s deduplicated — run %s already active",
+                "wake for %s nacked — run %s active, Pub/Sub will retry",
                 case_id, active[0].get("run_id"),
             )
-            return JSONResponse({"status": "deduplicated", "existing_run": active[0].get("run_id")})
+            return JSONResponse(
+                status_code=409,
+                content={"status": "busy", "existing_run": active[0].get("run_id")},
+            )
 
+        from backend.state import store as _store
         run_id = uuid4().hex[:12]
+        if not _store.try_acquire_case_lock(case_id, run_id):
+            _push_logger.info("wake for %s nacked — case lock held, Pub/Sub will retry", case_id)
+            return JSONResponse(status_code=409, content={"status": "busy", "reason": "lock_held"})
+
         workspace.create_run(run_id, case_id)
         from backend.runtime.context import current as _ctx
         workspace.update_run(run_id, trace_id=_ctx().trace_id)
@@ -675,17 +695,20 @@ def _build_summary(case_id: str, run_id: str, child_name: str,
                 "context": f"{_cap(partner_label)} was unable to fulfill this commitment.",
             })
 
-    wf_id = workspace._case_workflows.get(case_id)
-    if wf_id:
+    wf_ids = workspace._case_workflows.get(case_id, [])
+    next_due = None
+    for wf_id in wf_ids:
         cp = workspace.get_checkpoint(wf_id)
-        if cp and cp.get("state") not in ("fired", "cancelled", None):
-            scheduled = cp.get("due_at")
-            if scheduled:
-                due_str = scheduled.isoformat() if hasattr(scheduled, "isoformat") else str(scheduled)
-                next_actions.append({
-                    "action": f"A follow-up is already scheduled for {due_str}.",
-                    "context": "I'll automatically check back on any open commitments at that time.",
-                })
+        if cp and cp.get("state") == "waiting":
+            due = cp.get("due_at")
+            if due and (next_due is None or due < next_due):
+                next_due = due
+    if next_due is not None:
+        due_str = next_due.isoformat() if hasattr(next_due, "isoformat") else str(next_due)
+        next_actions.append({
+            "action": f"A follow-up is already scheduled for {due_str}.",
+            "context": "I'll automatically check back on any open commitments at that time.",
+        })
 
     if not next_actions:
         next_actions.append({
@@ -788,7 +811,8 @@ def _run_background(run_id: str, case_id: str, *, resume: bool = False) -> None:
     with _bind(case_id=case_id, run_id=run_id):
         child_name = workspace.get_case(case_id).get("child_name", "")
         try:
-            workspace.update_run(run_id, state="running", current_phase="intake" if not resume else "wake")
+            workspace.update_run(run_id, state="running", current_phase="intake" if not resume else "wake",
+                                 heartbeat_at=datetime.now(timezone.utc).isoformat())
             _push_event({
                 "event": "run_started", "run_id": run_id, "case_id": case_id,
                 "resumed": resume,
@@ -800,6 +824,29 @@ def _run_background(run_id: str, case_id: str, *, resume: bool = False) -> None:
             })
 
             recall_count = 0
+            child = child_name or "the child"
+
+            if _mb_enabled():
+                query = (
+                    f"partner contacts, strategies, and prior outcomes for case {case_id}'s open commitments"
+                    if resume else
+                    f"coordination history and outcomes for case {case_id}"
+                )
+                try:
+                    recalled = _mb_search(case_id, query)
+                    recall_count = len(recalled)
+                    if recall_count > 0:
+                        _push_event({
+                            "event": "memory_recall", "run_id": run_id, "case_id": case_id,
+                            "memory_count": recall_count,
+                            "previews": [m[:150] for m in recalled[:3]],
+                            "message": (
+                                f"Recalled {recall_count} note{'s' if recall_count != 1 else ''} "
+                                f"from earlier work on {child}'s case."
+                            ),
+                        })
+                except Exception:  # noqa: BLE001
+                    pass
 
             if not resume:
                 from backend.agents.intake.agent import root_agent as intake_agent
@@ -808,24 +855,6 @@ def _run_background(run_id: str, case_id: str, *, resume: bool = False) -> None:
                     "event": "phase_started", "run_id": run_id, "phase": "intake",
                     "message": _narrate("phase_started", "intake", case_id=case_id, child_name=child_name),
                 })
-
-                if _mb_enabled():
-                    child = child_name or "the child"
-                    try:
-                        recalled = _mb_search(case_id, f"coordination history and outcomes for case {case_id}")
-                        recall_count = len(recalled)
-                        if recall_count > 0:
-                            _push_event({
-                                "event": "memory_recall", "run_id": run_id, "case_id": case_id,
-                                "memory_count": recall_count,
-                                "previews": [m[:150] for m in recalled[:3]],
-                                "message": (
-                                    f"Recalled {recall_count} note{'s' if recall_count != 1 else ''} "
-                                    f"from earlier work on {child}'s case."
-                                ),
-                            })
-                    except Exception:  # noqa: BLE001
-                        pass
 
                 intake_text = _quiet_run_agent(
                     intake_agent,
@@ -873,6 +902,7 @@ def _run_background(run_id: str, case_id: str, *, resume: bool = False) -> None:
                     workspace.update_run(
                         run_id, current_phase="3-fanout",
                         commitment_states=workspace.commitment_states(case_id),
+                        heartbeat_at=datetime.now(timezone.utc).isoformat(),
                     )
                     with ThreadPoolExecutor(max_workers=len(group_phases), thread_name_prefix="fanout") as pool:
                         futures = {
@@ -925,6 +955,7 @@ def _run_background(run_id: str, case_id: str, *, resume: bool = False) -> None:
                     workspace.update_run(
                         run_id, current_phase=label,
                         commitment_states=workspace.commitment_states(case_id),
+                        heartbeat_at=datetime.now(timezone.utc).isoformat(),
                     )
                     _push_event({
                         "event": "phase_started", "run_id": run_id, "phase": label,
@@ -954,17 +985,22 @@ def _run_background(run_id: str, case_id: str, *, resume: bool = False) -> None:
                     completed_phases.add(label)
 
                     if "checkpoint" in label and not resume:
-                        child = child_name or "the child"
-                        cp = workspace.get_checkpoint(f"wf-{case_id}")
-                        cp_due = cp.get("due_at", "") if cp else ""
+                        all_cps = workspace.list_case_checkpoints(case_id)
+                        waiting = [c for c in all_cps if c.get("state") == "waiting"]
+                        if waiting:
+                            next_cp = min(waiting, key=lambda c: c.get("due_at", ""))
+                            cp_due = next_cp.get("due_at", "")
+                        else:
+                            cp_due = ""
                         if hasattr(cp_due, "isoformat"):
                             cp_due = cp_due.isoformat()
                         _push_event({
                             "event": "run_suspended", "run_id": run_id, "case_id": case_id,
+                            "checkpoint_count": len(waiting),
                             "checkpoint_due": str(cp_due),
                             "message": (
-                                f"Checkpoint saved — this run is ending. A scheduled push will resume "
-                                f"{child}'s case when commitments come due."
+                                f"Checkpoint saved — this run is ending. {len(waiting)} scheduled pushes will "
+                                f"resume {child}'s case as each commitment comes due."
                             ),
                         })
                         suspended = True
@@ -1072,6 +1108,15 @@ def _run_background(run_id: str, case_id: str, *, resume: bool = False) -> None:
                 "event": "run_failed", "run_id": run_id, "error": str(exc),
                 "message": _narrate("run_failed", "", error=str(exc), child_name=child_name),
             })
+        finally:
+            if resume:
+                for _cp in workspace.list_case_checkpoints(case_id):
+                    if _cp.get("current_step") == "awake":
+                        _cp["state"] = "completed"
+                        _cp["completed"] = True
+                        workspace.put_checkpoint(_cp["workflow_id"], _cp)
+                from backend.state import store as _fin_store
+                _fin_store.release_case_lock(case_id)
 
 
 @app.post(
