@@ -28,12 +28,18 @@ class PhaseSpec:
     ThreadPoolExecutor; all others run one at a time. When multiple ungrouped phases
     are simultaneously ready, the lowest ``priority`` value wins (deterministic tie-break).
     Every phase runs at most once per run — the engine tracks completions.
+
+    ``tools`` names the control-plane tools the orchestrator is handed for this phase, and
+    it is the only thing stopping a phase from running ahead: a model that can see
+    ``send_followup`` while it is meant to be screening a callback will sometimes chase the
+    provider there and then, collapsing two steps of the journey into one turn.
     """
     label: str
     prompt_template: str
     precondition: Callable[[str], bool]
     priority: int
     group: str | None = None
+    tools: tuple[str, ...] = ()
 
 
 # ---------------------------------------------------------------------------
@@ -153,6 +159,7 @@ PHASE_REGISTRY: list[PhaseSpec] = [
         ),
         precondition=_case_draft_with_commitments,
         priority=10,
+        tools=("activate_case",),
     ),
     *[
         PhaseSpec(
@@ -175,6 +182,7 @@ PHASE_REGISTRY: list[PhaseSpec] = [
         ),
         precondition=_specialists_have_reported,
         priority=30,
+        tools=("schedule_wake",),
     ),
     PhaseSpec(
         label="5-wake",
@@ -184,6 +192,7 @@ PHASE_REGISTRY: list[PhaseSpec] = [
         ),
         precondition=_checkpoint_committed_and_waiting,
         priority=40,
+        tools=("wake_workflow", "check_overdue"),
     ),
     PhaseSpec(
         label="6-quarantine",
@@ -202,6 +211,7 @@ PHASE_REGISTRY: list[PhaseSpec] = [
         ),
         precondition=_pending_escalation,
         priority=60,
+        tools=("approve_escalation",),
     ),
     PhaseSpec(
         label="8-followup",
@@ -222,6 +232,7 @@ PHASE_REGISTRY: list[PhaseSpec] = [
         ),
         precondition=_overdue_and_unchased,
         priority=75,
+        tools=("send_followup",),
     ),
     PhaseSpec(
         label="10-unanswered",
@@ -231,6 +242,7 @@ PHASE_REGISTRY: list[PhaseSpec] = [
         ),
         precondition=_followup_went_unanswered,
         priority=78,
+        tools=("notify_supervisor",),
     ),
     PhaseSpec(
         label="11-memory",
@@ -240,6 +252,7 @@ PHASE_REGISTRY: list[PhaseSpec] = [
         ),
         precondition=_checkpoint_awake_no_pending_escalation,
         priority=80,
+        tools=("preload_memory",),
     ),
 ]
 

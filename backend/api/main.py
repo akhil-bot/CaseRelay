@@ -834,9 +834,10 @@ def _run_background(run_id: str, case_id: str, *, resume: bool = False) -> None:
         with _run_event_lock:
             workspace.push_run_event(run_id, event)
 
-    def _run_single_phase(label: str, template: str, ctx: contextvars.Context) -> tuple[str, str | None, str]:
+    def _run_single_phase(label: str, template: str, tools: tuple[str, ...],
+                          ctx: contextvars.Context) -> tuple[str, str | None, str]:
         def _inner():
-            phase_orchestrator = _build_orchestrator()
+            phase_orchestrator = _build_orchestrator(tools)
             prompt = template.format(case_id=case_id)
             _push_event({
                 "event": "phase_started", "run_id": run_id, "phase": label,
@@ -962,7 +963,7 @@ def _run_background(run_id: str, case_id: str, *, resume: bool = False) -> None:
                     with ThreadPoolExecutor(max_workers=len(group_phases), thread_name_prefix="fanout") as pool:
                         futures = {
                             pool.submit(
-                                _run_single_phase, spec.label, spec.prompt_template,
+                                _run_single_phase, spec.label, spec.prompt_template, spec.tools,
                                 contextvars.copy_context(),
                             ): spec.label
                             for spec in group_phases
@@ -1022,7 +1023,7 @@ def _run_background(run_id: str, case_id: str, *, resume: bool = False) -> None:
                             "message": narrator.chasing(service),
                         })
                     try:
-                        phase_orch = _build_orchestrator()
+                        phase_orch = _build_orchestrator(first.tools)
                         orch_text = _quiet_run_agent(phase_orch, prompt, app_name="continuity_orchestrator")
                     except Exception as phase_exc:  # noqa: BLE001
                         phase_failures += 1

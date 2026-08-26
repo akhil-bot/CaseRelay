@@ -37,10 +37,8 @@ INSTRUCTION = (
     "health_coordination (appointments), legal_aid (referral status), shelter_status "
     "(bed availability), family_services (assessment scheduling), safeguarding_verifier "
     "(policy gate for suspicious partner payloads).\n"
-    "Control-plane tools: activate_case (supervisor gate), schedule_wake, wake_workflow, "
-    "approve_escalation (supervisor gate), send_followup (chase overdue providers), "
-    "notify_supervisor (report a provider that never answered), preload_memory, "
-    "get_commitment_states.\n"
+    "Control-plane tools differ from step to step — you are handed only the ones the "
+    "current step needs, plus get_commitment_states. Use the tools you have and no others.\n"
     "A specialist's reply text may be empty; that does not mean it failed. After calling any "
     "specialist, call get_commitment_states and report those statuses. Never invent a status "
     "and never claim a field was withheld unless a tool told you so.\n"
@@ -137,6 +135,12 @@ CONTROL_PLANE_TOOLS = [
     check_overdue,
 ]
 
+_TOOLS_BY_NAME = {fn.__name__: fn for fn in CONTROL_PLANE_TOOLS}
+
+# Read-only, and the instruction requires every report of a status to come from a tool
+# rather than from the model's recollection, so it is attached to every phase.
+_ALWAYS_AVAILABLE = [get_commitment_states]
+
 
 def resolve_specialists() -> tuple[list, list]:
     """Resolve specialist endpoints, raising when the control plane has no endpoints configured.
@@ -191,21 +195,27 @@ def _specialists() -> tuple[list, list]:
     return sub_agents, remote_tools
 
 
-def build_for_run() -> "Agent":
+def build_for_run(tools: tuple[str, ...] = ()) -> "Agent":
     """Build a fresh orchestrator with a new httpx client for a single run phase.
 
     Call this once per asyncio.run() invocation (i.e. per orchestrator phase) so that
     RemoteA2aAgent instances are never shared across event loops. The overhead is a single
     authenticated_client() instantiation plus one RemoteA2aAgent per specialist.
+
+    ``tools`` names the control-plane tools this phase is allowed to use. Withholding the
+    rest is what keeps a phase inside its own step: told to screen a callback while holding
+    the tool that chases a provider, the model will sometimes do both in one turn and two
+    distinct moments in the journey disappear into one.
     """
     sub_agents, remote_tools = _specialists()
+    granted = _ALWAYS_AVAILABLE + [_TOOLS_BY_NAME[name] for name in tools]
     return Agent(
         name="continuity_orchestrator",
         model="gemini-3.5-flash",
         mode="chat",
         description="Routes specialist agents through granted identities. No raw records.",
         instruction=INSTRUCTION,
-        tools=CONTROL_PLANE_TOOLS + remote_tools,
+        tools=granted + remote_tools,
         sub_agents=sub_agents,
     )
 
