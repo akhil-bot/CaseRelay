@@ -105,6 +105,11 @@ function LiveCaseDetail({ caseId }: { caseId: string }) {
     );
   }, [caseEvents, runState.events]);
 
+  const feedRun = useMemo(
+    () => ({ ...runState, events: mergedEvents }),
+    [runState, mergedEvents],
+  );
+
   const handleRun = async () => {
     setSubmitting(true);
     setSubmitError(null);
@@ -309,7 +314,7 @@ function LiveCaseDetail({ caseId }: { caseId: string }) {
 
       {/* Live activity feed — stitched across all runs for timeline continuity */}
       {(isStreaming || runs.length > 0 || mergedEvents.length > 0) && (
-        <LiveActivityFeed run={{ ...runState, events: mergedEvents }} />
+        <LiveActivityFeed run={feedRun} />
       )}
 
       {/* Audit trail (from initial case fetch) */}

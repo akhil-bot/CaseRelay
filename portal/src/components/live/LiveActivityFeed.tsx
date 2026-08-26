@@ -1,6 +1,6 @@
 "use client";
 
-import { Fragment, useEffect, useRef } from "react";
+import { Fragment, memo, useEffect, useRef } from "react";
 import { Icon, type IconName } from "@/components/icons";
 import { Badge, Card, DOMAIN_META, EmptyState, StatusBadge, cx } from "@/components/ui/primitives";
 import { row, tone, type Tone, type as type_ } from "@/design/tokens";
@@ -394,7 +394,13 @@ function EventRow({ ev }: { ev: RunEvent }) {
 
 // ─── Main export ──────────────────────────────────────────────────────────────
 
-export function LiveActivityFeed({ run }: { run: LiveRunState }) {
+/**
+ * Memoised on `run`, which the case hands over unchanged unless the stream or
+ * the recorded history actually moved. The feed is the longest thing on the
+ * page and the only one a volunteer is scrolling, so a change elsewhere on the
+ * case — a commitment closing, an audit line landing — must not rebuild it.
+ */
+export const LiveActivityFeed = memo(function LiveActivityFeed({ run }: { run: LiveRunState }) {
   const endRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -546,4 +552,4 @@ export function LiveActivityFeed({ run }: { run: LiveRunState }) {
       )}
     </Card>
   );
-}
+});

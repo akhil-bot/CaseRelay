@@ -1,5 +1,6 @@
 "use client";
 
+import { memo } from "react";
 import { Card, DOMAIN_META, cx } from "@/components/ui/primitives";
 import { tone, type Tone } from "@/design/tokens";
 import type { CaseRunSummary, RunEvent } from "@/lib/api";
@@ -111,7 +112,7 @@ function dayBoundaries(start: number, end: number): number[] {
   return midnights.filter((_, i) => i % step === 0);
 }
 
-export function CaseTimeline({
+export const CaseTimeline = memo(function CaseTimeline({
   caseData,
   commitments,
   runs,
@@ -226,4 +227,4 @@ export function CaseTimeline({
       </div>
     </Card>
   );
-}
+});

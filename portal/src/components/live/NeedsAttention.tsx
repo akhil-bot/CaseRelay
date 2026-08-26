@@ -1,5 +1,6 @@
 "use client";
 
+import { memo } from "react";
 import { Icon, type IconName } from "@/components/icons";
 import { Card, DOMAIN_META, Rows, cx } from "@/components/ui/primitives";
 import { row, tone, type Tone } from "@/design/tokens";
@@ -133,7 +134,7 @@ function attentionItems(
   return items.sort((a, b) => (a.variant === b.variant ? 0 : a.variant === "danger" ? -1 : 1));
 }
 
-export function NeedsAttention({
+export const NeedsAttention = memo(function NeedsAttention({
   commitments,
   events,
 }: {
@@ -176,4 +177,4 @@ export function NeedsAttention({
       </Rows>
     </Card>
   );
-}
+});

@@ -35,17 +35,80 @@ type CaseAction =
   | { type: "not_found" }
   | { type: "error"; message: string };
 
+/**
+ * The freshly parsed payload, with the identity of everything unchanged carried
+ * over from the copy already on screen.
+ *
+ * A poll parses new objects out of JSON whether or not anything happened, and a
+ * render is driven by identity, not by content: handing React a new array of the
+ * same five commitments re-renders the case as surely as a real change would. So
+ * each value is compared with its predecessor and the predecessor kept where the
+ * two say the same thing, down to the individual event and audit line. What comes
+ * back is `prev` itself when the case has not moved, one changed branch when it
+ * has, and nothing else new either way.
+ *
+ * Lists are compared position by position, which is what the case's own lists do:
+ * events and audit lines are appended, so everything already read keeps its
+ * identity and only the new entry is new.
+ */
+function reuse<T>(prev: T, next: T): T {
+  if (Object.is(prev, next)) return prev;
+  if (typeof prev !== "object" || typeof next !== "object" || prev === null || next === null) {
+    return next;
+  }
+
+  const prevIsArray = Array.isArray(prev);
+  if (prevIsArray !== Array.isArray(next)) return next;
+
+  if (prevIsArray) {
+    const before = prev as unknown[];
+    const after = next as unknown[];
+    let changed = before.length !== after.length;
+    const merged = after.map((item, i) => {
+      const kept = i < before.length ? reuse(before[i], item) : item;
+      changed ||= !Object.is(kept, before[i]);
+      return kept;
+    });
+    return (changed ? merged : prev) as T;
+  }
+
+  const before = prev as Record<string, unknown>;
+  const after = next as Record<string, unknown>;
+  const keys = Object.keys(after);
+  if (keys.length !== Object.keys(before).length) return next;
+
+  let changed = false;
+  const merged: Record<string, unknown> = {};
+  for (const key of keys) {
+    if (!(key in before)) return next;
+    const kept = reuse(before[key], after[key]);
+    changed ||= !Object.is(kept, before[key]);
+    merged[key] = kept;
+  }
+  return (changed ? merged : prev) as T;
+}
+
 function caseReducer(prev: LiveCaseState, action: CaseAction): LiveCaseState {
   switch (action.type) {
     case "loading":
       return { status: "loading" };
-    case "loaded":
-      return {
-        status: "loaded",
-        data: action.data,
-        runs: action.runs,
-        events: action.events ?? (prev.status === "loaded" ? prev.events : []),
-      };
+    case "loaded": {
+      if (prev.status !== "loaded") {
+        return {
+          status: "loaded",
+          data: action.data,
+          runs: action.runs,
+          events: action.events ?? [],
+        };
+      }
+      const data = reuse(prev.data, action.data);
+      const runs = reuse(prev.runs, action.runs);
+      const events = action.events === null ? prev.events : reuse(prev.events, action.events);
+      // Same state object back means React stops here: a poll that learned
+      // nothing costs one comparison and does not reach the screen at all.
+      if (data === prev.data && runs === prev.runs && events === prev.events) return prev;
+      return { status: "loaded", data, runs, events };
+    }
     case "not_found":
       return { status: "not_found" };
     case "error":
@@ -106,6 +169,9 @@ export function useLiveCase(caseId: string): [LiveCaseState, () => void] {
     // version of the case back on screen.
     let latest = 0;
 
+    // The only skeleton this hook ever shows. A poll is not a first load and
+    // must never present as one, so `load` below reports what it found and
+    // nothing else — an open case is never taken off the screen to be refetched.
     dispatch({ type: "loading" });
 
     const load = async () => {
