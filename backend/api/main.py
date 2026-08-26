@@ -1099,6 +1099,12 @@ def _run_background(run_id: str, case_id: str, *, resume: bool = False) -> None:
                     f"remaining={sorted(s.label for s in PHASE_REGISTRY if s.label not in completed_phases)}"
                 )
 
+            # A wake this run did not act on is still a wake this run consumed. Leaving it
+            # unacknowledged sends it back round the reclaim-and-refire loop for ever, and
+            # a case whose commitments have all closed has no phase left that would ack it.
+            if resume and not suspended:
+                durable.resume_wake(case_id)
+
             total_phases_run = len(completed_phases)
             commitments = workspace.commitment_states(case_id)
             wrote_events = finalize_run_memory(run_id, case_id)
