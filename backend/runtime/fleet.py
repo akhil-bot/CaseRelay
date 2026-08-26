@@ -77,9 +77,20 @@ def _specialists_have_reported(case_id: str) -> bool:
     return True
 
 
+def _still_open(case_id: str) -> bool:
+    states = workspace.commitment_states(case_id)
+    return any(state != "completed" for state in states.values())
+
+
 def _checkpoint_committed_and_waiting(case_id: str) -> bool:
-    """At least one per-commitment checkpoint is in running state (sweep fired it)
-    and wake_workflow has not yet set it to awake."""
+    """A per-commitment checkpoint has been fired by sweep and something is still open.
+
+    Each commitment gets its own checkpoint, so the later ones keep firing after the case
+    has already closed. Re-asking a provider that has confirmed only invites it to answer
+    differently the second time, which would reopen a settled commitment.
+    """
+    if not _still_open(case_id):
+        return False
     for cp in workspace.list_case_checkpoints(case_id):
         if cp.get("state") in ("waiting", "running") and cp.get("current_step") != "awake":
             if cp.get("commitment_states") or cp.get("commitment_type"):
@@ -92,6 +103,17 @@ def _awake(case_id: str) -> bool:
     return any(
         cp.get("current_step") == "awake"
         for cp in workspace.list_case_checkpoints(case_id)
+    )
+
+
+def _escalation_raised(case_id: str) -> bool:
+    return any(a.get("action_type") == "escalation" for a in workspace.list_approvals(case_id))
+
+
+def _escalation_decided(case_id: str) -> bool:
+    return any(
+        a.get("action_type") == "escalation" and a.get("decision") not in (None, "pending")
+        for a in workspace.list_approvals(case_id)
     )
 
 
@@ -109,8 +131,12 @@ def _pending_escalation(case_id: str) -> bool:
 
 
 def _checkpoint_awake_and_has_inject(case_id: str) -> bool:
-    """wake_workflow set current_step='awake' and the referral packet has an injected callback."""
-    if not _awake(case_id):
+    """An injected callback is waiting to be screened and has not been screened before.
+
+    Checkpoints stay awake once woken, so without the escalation check this would re-screen
+    the same callback on every later wake and raise the same safeguarding alarm again.
+    """
+    if not _awake(case_id) or _escalation_raised(case_id):
         return False
     packet = workspace.get_case(case_id).get("referral_packet", {})
     return any(r.get("inject_callback") for r in packet.get("referrals", []))
@@ -118,10 +144,7 @@ def _checkpoint_awake_and_has_inject(case_id: str) -> bool:
 
 def _escalation_decided_and_still_open(case_id: str) -> bool:
     """The escalation is ruled on and the commitment it concerns is still not delivered."""
-    if not any(
-        a.get("action_type") == "escalation" and a.get("decision") not in (None, "pending")
-        for a in workspace.list_approvals(case_id)
-    ):
+    if not _escalation_decided(case_id):
         return False
     states = workspace.commitment_states(case_id)
     packet = workspace.get_case(case_id).get("referral_packet", {})
