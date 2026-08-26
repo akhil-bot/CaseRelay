@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef } from "react";
+import { useRouter, usePathname } from "next/navigation";
 import { CopilotChatConfigurationProvider, CopilotKit } from "@copilotkit/react-core/v2";
 import type { ReactFrontendTool } from "@copilotkit/react-core/v2";
 import type { ReactNode } from "react";
@@ -27,6 +28,16 @@ function CopilotProviderInner({ children }: { children: ReactNode }) {
   const pushCaseRef = useRef(pushCase);
   useEffect(() => { findCaseRef.current = findCase; }, [findCase]);
   useEffect(() => { pushCaseRef.current = pushCase; }, [pushCase]);
+
+  // Stable refs for router and pathname so the frontendTools memo keeps a
+  // zero-length dependency array (required to avoid the "must be a stable
+  // array" warning from CopilotKit and the React Strict Mode double-mount issue).
+  const router = useRouter();
+  const pathname = usePathname();
+  const routerRef = useRef(router);
+  const pathnameRef = useRef(pathname);
+  useEffect(() => { routerRef.current = router; }, [router]);
+  useEffect(() => { pathnameRef.current = pathname; }, [pathname]);
 
   const frontendTools = useMemo(
     () => [
@@ -89,9 +100,9 @@ function CopilotProviderInner({ children }: { children: ReactNode }) {
         },
       },
       {
-        name: "run_fleet",
+        name: "start_outreach",
         description:
-          'Submit a run for a case, starting the specialist agent fleet. The case_ref can be a case_id, a child name (e.g. "maya"), or a pronoun like "it" referring to the most recently created case. Check the session case registry context to resolve names to case IDs.',
+          'Start a round of outreach for a case, contacting all service providers on the child\'s behalf. The case_ref can be a case_id, a child name (e.g. "maya"), or a pronoun like "it" referring to the most recently created case. Check the session case registry context to resolve names to case IDs. Use this when the volunteer says things like "start outreach", "reach out to the providers", "get started on this case", "chase them up", "kick it off", or "run it". When outreach starts successfully, respond with exactly one short line telling the user you\'re opening the live view for them — e.g. "Opening the live view for you now." — before any other details.',
         parameters: z.object({
           case_ref: z
             .string()
@@ -107,14 +118,26 @@ function CopilotProviderInner({ children }: { children: ReactNode }) {
             }
             const ref = await submitRun(entry.caseId);
             for (const cb of subscribersRef.current) cb.onRunStarted(ref, entry.caseId);
+
+            // Navigate to the case live view after a short pause so the AI's
+            // acknowledgment line has a moment to start streaming before the
+            // route changes. Only navigate if we're not already there.
+            const targetPath = `/cases/${entry.caseId}`;
+            if (pathnameRef.current !== targetPath) {
+              setTimeout(() => {
+                routerRef.current.push(targetPath);
+              }, 1500);
+            }
+
             return JSON.stringify({
               run_id: ref.run_id,
               case_id: entry.caseId,
               child_name: entry.childName,
               state: ref.state,
+              live_view: targetPath,
             });
           } catch (err) {
-            return `Error starting run: ${err instanceof Error ? err.message : String(err)}`;
+            return `Couldn't start outreach: ${err instanceof Error ? err.message : String(err)}`;
           }
         },
       },

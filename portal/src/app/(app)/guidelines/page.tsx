@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { Icon } from "@/components/icons";
-import { Card, Group, Mono, Rows, cx } from "@/components/ui/primitives";
+import { Card, Group, Rows, cx } from "@/components/ui/primitives";
 import { ruleCopy } from "@/design/copy";
 import { layout, row, type as type_ } from "@/design/tokens";
 import { AUTHORITY_GRANT, PLAIN_SCOPES } from "@/lib/mock/cases";
@@ -12,14 +12,9 @@ import { useViewer } from "@/lib/viewer";
 /**
  * What CaseRelay is for, what it refuses, the rules that enforce the refusals,
  * and how to work each screen — on one tab.
- *
- * This used to be a header popover plus a footnote at the bottom of six pages.
- * Guidance that appears everywhere is read nowhere, and a 340px popover could
- * not hold the walkthroughs, so it is a destination now. The pages it came from
- * carry no guidance at all, which is the point: they are for the work.
  */
 export default function GuidelinesPage() {
-  const { copy, showsTechnical } = useViewer();
+  const { copy } = useViewer();
   const { label, intro, footnote, permitted, excluded, howTo, rules, limits } = copy.guidelines;
 
   return (
@@ -28,30 +23,17 @@ export default function GuidelinesPage() {
         <div className="grid gap-5 lg:grid-cols-2">
           <Group variant="brand" icon="check" label={permitted.title}>
             <p className={cx("mb-2.5", type_.meta)}>{permitted.subtitle}</p>
-            <Scopes scopes={AUTHORITY_GRANT.scope} icon="check" technical={showsTechnical} />
+            <Scopes scopes={AUTHORITY_GRANT.scope} icon="check" />
           </Group>
-          <Group variant="danger" icon={showsTechnical ? "lock" : "close"} label={excluded.title}>
+          <Group variant="danger" icon="close" label={excluded.title}>
             <p className={cx("mb-2.5", type_.meta)}>{excluded.subtitle}</p>
-            <Scopes
-              scopes={AUTHORITY_GRANT.excluded}
-              icon={showsTechnical ? "lock" : "close"}
-              technical={showsTechnical}
-            />
+            <Scopes scopes={AUTHORITY_GRANT.excluded} icon="close" />
           </Group>
         </div>
 
         <p className={cx("mt-5 flex items-start gap-2.5 border-t border-line pt-4", type_.meta)}>
           <Icon name="shield" size={15} className="mt-px shrink-0" />
-          <span className={cx("leading-relaxed", layout.measure)}>
-            {showsTechnical ? (
-              <>
-                {footnote} Authority grant <Mono>{AUTHORITY_GRANT.id}</Mono> · verified by{" "}
-                {AUTHORITY_GRANT.verifiedBy} · expires {AUTHORITY_GRANT.expiresOn}.
-              </>
-            ) : (
-              footnote
-            )}
-          </span>
+          <span className={cx("leading-relaxed", layout.measure)}>{footnote}</span>
         </p>
       </Card>
 
@@ -65,7 +47,6 @@ export default function GuidelinesPage() {
 
               <div className="min-w-0 flex-1">
                 <h3 className={type_.cardTitle}>{item.title}</h3>
-                {/* Numbered because the order is the instruction, not decoration. */}
                 <ol className="mt-2.5 space-y-2">
                   {item.steps.map((step, index) => (
                     <li key={step} className="flex items-start gap-3">
@@ -95,13 +76,10 @@ export default function GuidelinesPage() {
       <Card icon="shield" title={rules.title} subtitle={rules.subtitle}>
         <ul className="grid gap-x-6 gap-y-5 sm:grid-cols-2 2xl:grid-cols-3 3xl:grid-cols-4">
           {POLICY_RULES.map((rule) => {
-            const text = ruleCopy(rule, showsTechnical);
+            const text = ruleCopy(rule);
             return (
               <li key={rule.id} className="min-w-0">
-                <div className="flex items-center gap-2">
-                  {showsTechnical && <Mono className="text-brand-deep">{rule.id}</Mono>}
-                  <span className="text-[12.5px] font-medium text-ink">{text.title}</span>
-                </div>
+                <span className="text-[12.5px] font-medium text-ink">{text.title}</span>
                 <p className={cx("mt-1", type_.meta)}>{text.summary}</p>
               </li>
             );
@@ -126,19 +104,12 @@ export default function GuidelinesPage() {
   );
 }
 
-/**
- * One half of the court order. Both halves are the grant itself rather than
- * prose about it — identifiers for the platform view, the same identifiers read
- * out loud for everyone else.
- */
 function Scopes({
   scopes,
   icon,
-  technical,
 }: {
   scopes: string[];
-  icon: "check" | "close" | "lock";
-  technical: boolean;
+  icon: "check" | "close";
 }) {
   return (
     <ul className="space-y-1.5">
@@ -149,11 +120,7 @@ function Scopes({
             size={13}
             className={cx("mt-1 shrink-0", icon === "check" ? "text-brand" : "text-danger")}
           />
-          {technical ? (
-            <Mono className="text-[11.5px] text-ink">{scope}</Mono>
-          ) : (
-            (PLAIN_SCOPES[scope] ?? scope.replace(/_/g, " "))
-          )}
+          {PLAIN_SCOPES[scope] ?? scope.replace(/_/g, " ")}
         </li>
       ))}
     </ul>

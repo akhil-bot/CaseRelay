@@ -6,11 +6,9 @@ import { Icon, type IconName } from "@/components/icons";
 import { Badge } from "@/components/ui/primitives";
 import { cx, surface, type as type_, type Tone } from "@/design/tokens";
 import { useDemo } from "@/lib/demo-store";
-import { useViewer } from "@/lib/viewer";
 
 export function Notifications() {
   const { pendingApprovals, commitments, activity, step } = useDemo();
-  const { showsTechnical } = useViewer();
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
 
@@ -38,7 +36,7 @@ export function Notifications() {
       id: approval.id,
       icon: "approvals" as IconName,
       variant: "accent" as Tone,
-      title: showsTechnical ? "Action held for a human principal" : "A message needs your approval",
+      title: "A message needs your approval",
       body: approval.action,
       href: "/approvals",
     })),
@@ -46,9 +44,7 @@ export function Notifications() {
       id: commitment.id,
       icon: "alert" as IconName,
       variant: "danger" as Tone,
-      title: showsTechnical
-        ? `${commitment.daysOverdue} days without an acknowledged owner`
-        : `Waiting ${commitment.daysOverdue} days with nobody responsible`,
+      title: `Waiting ${commitment.daysOverdue} days with nobody responsible`,
       body: commitment.title,
       href: "/cases/CR-1042",
     })),
@@ -59,8 +55,8 @@ export function Notifications() {
             icon: "activity" as IconName,
             variant: "brand" as Tone,
             title: latest.summary,
-            body: showsTechnical ? `${latest.at} · ${latest.actor}` : latest.at,
-            href: showsTechnical ? "/audit" : "/cases/CR-1042",
+            body: latest.at,
+            href: "/cases/CR-1042",
           },
         ]
       : []),

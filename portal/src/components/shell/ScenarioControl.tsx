@@ -6,7 +6,6 @@ import { Dot } from "@/components/ui/primitives";
 import { cx, surface, type as type_ } from "@/design/tokens";
 import { useDemo } from "@/lib/demo-store";
 import { DEMO_STEPS } from "@/lib/mock/steps";
-import { useViewer } from "@/lib/viewer";
 
 /**
  * The scenario clock. One number drives every screen, but it only exists to move
@@ -15,7 +14,6 @@ import { useViewer } from "@/lib/viewer";
  */
 export function ScenarioControl() {
   const { step, setStep, next, prev, reset, autoplay, toggleAutoplay, meta, totalSteps } = useDemo();
-  const { showsTechnical } = useViewer();
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
 
@@ -41,7 +39,7 @@ export function ScenarioControl() {
   return (
     <div className="relative" ref={ref}>
       <p className={cx("px-1 pb-1.5", type_.label)}>
-        {showsTechnical ? "Scenario clock" : "Demo timeline"}
+        {"Demo timeline"}
       </p>
 
       <div className="flex items-center gap-0.5 rounded-full border border-line bg-surface-soft p-0.5">
@@ -101,7 +99,7 @@ export function ScenarioControl() {
           <div className="flex items-start justify-between gap-2">
             <div className="min-w-0">
               <p className={type_.label}>
-                {showsTechnical ? "Scenario clock" : "Skip ahead in time"}
+                {"Skip ahead in time"}
               </p>
               <p className="mt-1 text-[13px] font-medium text-ink">{meta.label}</p>
             </div>

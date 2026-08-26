@@ -3,27 +3,19 @@
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import { Icon, type IconName } from "@/components/icons";
-import { ViewSwitcher } from "@/components/shell/ViewSwitcher";
 import { Avatar, Badge } from "@/components/ui/primitives";
 import { cx, surface, type as type_ } from "@/design/tokens";
 import { useViewer } from "@/lib/viewer";
 
-const ADVOCATE_MENU: { icon: IconName; label: string; href?: string }[] = [
+const MENU_ITEMS: { icon: IconName; label: string; href?: string }[] = [
   { icon: "user", label: "Your profile" },
   { icon: "shield", label: "Your court authority" },
   { icon: "settings", label: "Reminder settings" },
   { icon: "logout", label: "Sign out", href: "/login/advocate" },
 ];
 
-const PLATFORM_MENU: { icon: IconName; label: string; href?: string }[] = [
-  { icon: "identity", label: "Service identities" },
-  { icon: "shield", label: "Policy rule set" },
-  { icon: "settings", label: "Runtime configuration" },
-  { icon: "logout", label: "Sign out", href: "/login/platform" },
-];
-
 export function ProfileMenu() {
-  const { profile, showsTechnical } = useViewer();
+  const { profile } = useViewer();
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
 
@@ -43,8 +35,6 @@ export function ProfileMenu() {
     };
   }, [open]);
 
-  const items = showsTechnical ? PLATFORM_MENU : ADVOCATE_MENU;
-
   return (
     <div className="relative" ref={ref}>
       <button
@@ -59,7 +49,7 @@ export function ProfileMenu() {
           <span className="block text-[12.5px] leading-tight font-medium text-ink">
             {profile.name}
           </span>
-          <span className="block text-[11px] text-ink-muted">{profile.viewLabel} view</span>
+          <span className="block text-[11px] text-ink-muted">Volunteer advocate</span>
         </span>
         <Icon name="chevronDown" size={15} className="text-ink-muted" />
       </button>
@@ -83,16 +73,8 @@ export function ProfileMenu() {
             </Badge>
           </div>
 
-          {/* A hairline, not a box: the popover is already a surface, and a
-              bordered panel inside it makes the choice look like a settings
-              form rather than two of the items in this menu. */}
-          <div className="mt-2 border-t border-line pt-2">
-            <p className={cx("px-2.5 pb-1", type_.label)}>Switch view</p>
-            <ViewSwitcher />
-          </div>
-
           <ul className="mt-2 space-y-0.5">
-            {items.map((item) => {
+            {MENU_ITEMS.map((item) => {
               const itemClass =
                 "flex w-full items-center gap-2.5 rounded-control px-3 py-2 text-left text-[13px] text-ink-soft transition-colors hover:bg-surface-soft hover:text-ink";
               return (
@@ -124,7 +106,7 @@ export function ProfileMenu() {
           </ul>
 
           <p className={cx("border-t border-line px-3 pt-2.5 pb-1", type_.meta)}>
-            {showsTechnical ? "On-call: platform team" : "Supervisor: Dana Whitfield"}
+            Supervisor: Dana Whitfield
           </p>
         </div>
       )}

@@ -4,8 +4,7 @@ import { usePathname } from "next/navigation";
 import { Icon } from "@/components/icons";
 import { Notifications } from "@/components/shell/Notifications";
 import { ProfileMenu } from "@/components/shell/ProfileMenu";
-import { COPY } from "@/design/copy";
-import { pageKeyFor, PLATFORM_ONLY_ROUTES } from "@/design/personas";
+import { pageKeyFor } from "@/design/personas";
 import { chrome, control, cx, type as type_ } from "@/design/tokens";
 import { useViewer } from "@/lib/viewer";
 
@@ -19,14 +18,11 @@ export function Header({
   activityOpen: boolean;
 }) {
   const pathname = usePathname() ?? "/";
-  const { copy, showsTechnical } = useViewer();
+  const { copy } = useViewer();
   const key = pageKeyFor(pathname);
-  const isPlatformOnly = PLATFORM_ONLY_ROUTES.some((r) => pathname.startsWith(r));
-  const heading = isPlatformOnly ? COPY.platform.pages[key] : copy.pages[key];
+  const heading = copy.pages[key];
 
   return (
-    // The height sits on the element that carries the hairline, so the row is
-    // 64px including it and the sidebar's own header ends on the same line.
     <header
       className={cx(
         chrome.row,
@@ -49,22 +45,20 @@ export function Header({
 
       <Notifications />
 
-      {showsTechnical && (
-        <button
-          type="button"
-          onClick={onToggleActivity}
-          aria-pressed={activityOpen}
-          aria-label="Toggle agent activity"
-          title="Agent activity"
-          className={cx(
-            control.icon,
-            "hidden lg:inline-flex",
-            activityOpen && "border-brand/35 bg-brand-soft text-brand-deep",
-          )}
-        >
-          <Icon name="activity" size={17} />
-        </button>
-      )}
+      <button
+        type="button"
+        onClick={onToggleActivity}
+        aria-pressed={activityOpen}
+        aria-label="Toggle activity panel"
+        title="Activity panel"
+        className={cx(
+          control.icon,
+          "hidden lg:inline-flex",
+          activityOpen && "border-brand/35 bg-brand-soft text-brand-deep",
+        )}
+      >
+        <Icon name="activity" size={17} />
+      </button>
 
       <span className="hidden h-7 w-px bg-line md:block" aria-hidden="true" />
 

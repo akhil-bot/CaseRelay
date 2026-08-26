@@ -10,7 +10,6 @@ import {
   DomainIcon,
   EmptyState,
   FlagBadge,
-  Mono,
   ProgressBar,
   Rows,
   StatusBadge,
@@ -23,7 +22,7 @@ import { useViewer } from "@/lib/viewer";
 
 export default function OverviewPage() {
   const { cases, commitments, activity, pendingApprovals, meta, capabilities } = useDemo();
-  const { copy, showsTechnical } = useViewer();
+  const { copy } = useViewer();
 
   const attention = cases.filter((item) =>
     item.flags.some((flag) => flag === "overdue" || flag === "blocked"),
@@ -32,9 +31,13 @@ export default function OverviewPage() {
   const openCommitments = commitments.filter((item) => item.status !== "completed");
   const closed = commitments.length - openCommitments.length;
   const recent = [...activity].reverse().slice(0, 5);
-  const refusals = activity.filter(
-    (event) => event.outcome === "deny" || event.outcome === "quarantine",
-  ).length;
+
+  const summaryText =
+    pendingApprovals.length > 0
+      ? `${pendingApprovals.length} message${pendingApprovals.length === 1 ? "" : "s"} need your approval, and ${unowned.length === 0 ? "no step is" : `${unowned.length} step${unowned.length === 1 ? " is" : "s are"}`} still waiting for someone to take responsibility.`
+      : unowned.length > 0
+        ? `${unowned.length} step${unowned.length === 1 ? "" : "s"} still have nobody responsible for them.`
+        : "Every step on your cases has someone responsible for it.";
 
   return (
     <div className={layout.stack}>
@@ -42,17 +45,11 @@ export default function OverviewPage() {
         <div className="flex flex-wrap items-start gap-4">
           <div className="min-w-0 flex-1">
             <p className={cx(layout.measure, "text-[15px] leading-relaxed text-ink")}>
-              {showsTechnical
-                ? `${activity.length} spans recorded under one trace, ${refusals} refusal${refusals === 1 ? "" : "s"} enforced, ${capabilities.filter((item) => item.proven).length} of ${capabilities.length} governed capabilities demonstrated.`
-                : pendingApprovals.length > 0
-                  ? `${pendingApprovals.length} message${pendingApprovals.length === 1 ? "" : "s"} need your approval, and ${unowned.length === 0 ? "no step is" : `${unowned.length} step${unowned.length === 1 ? " is" : "s are"}`} still waiting for someone to take responsibility.`
-                  : unowned.length > 0
-                    ? `${unowned.length} step${unowned.length === 1 ? "" : "s"} still have nobody responsible for them.`
-                    : "Every step on your cases has someone responsible for it."}
+              {summaryText}
             </p>
           </div>
-          <Link href={showsTechnical ? "/registry" : "/cases"} className={control.primary}>
-            {showsTechnical ? "Open registry" : "See my cases"}
+          <Link href="/cases" className={control.primary}>
+            See my cases
             <Icon name="arrowRight" size={15} />
           </Link>
         </div>
@@ -103,7 +100,7 @@ export default function OverviewPage() {
           subtitle={copy.overview.attention.subtitle}
           action={
             <Link href="/cases" className={control.secondary}>
-              {showsTechnical ? "All workflows" : "All cases"}
+              All cases
             </Link>
           }
           flush={attention.length > 0}
@@ -126,11 +123,9 @@ export default function OverviewPage() {
                     <span className="min-w-0 flex-1">
                       <span className="flex flex-wrap items-center gap-2">
                         <span className="text-[13.5px] font-medium text-ink">
-                          {showsTechnical ? item.id : item.childAlias}
+                          {item.childAlias}
                         </span>
-                        <span className="font-mono text-[11px] text-ink-muted">
-                          {showsTechnical ? "wf-school-enrollment" : item.id}
-                        </span>
+                        <span className="font-mono text-[11px] text-ink-muted">{item.id}</span>
                         {item.flags.map((flag) => (
                           <FlagBadge key={flag} flag={flag} />
                         ))}
@@ -149,13 +144,6 @@ export default function OverviewPage() {
           icon="activity"
           title={copy.overview.activity.title}
           subtitle={copy.overview.activity.subtitle}
-          action={
-            showsTechnical ? (
-              <Link href="/audit" className={control.secondary}>
-                Full trace
-              </Link>
-            ) : undefined
-          }
           flush
         >
           <Rows as="ol">
@@ -176,9 +164,7 @@ export default function OverviewPage() {
                       {event.summary}
                     </span>
                     <span className="mt-0.5 block font-mono text-[10.5px] text-ink-muted">
-                      {showsTechnical
-                        ? `${event.at} · ${event.actor} · ${event.spanMs > 0 ? `${event.spanMs}ms` : "human"}`
-                        : event.at}
+                      {event.at}
                     </span>
                   </span>
                 </li>
@@ -188,31 +174,29 @@ export default function OverviewPage() {
         </Card>
       </div>
 
-      {showsTechnical && (
-        <Card
-          icon="shield"
-          title="Governed capabilities"
-          subtitle="Demonstrated at the current point in the scenario, with the evidence that proves it."
-        >
-          <ul className="grid gap-x-6 gap-y-5 sm:grid-cols-2 2xl:grid-cols-3">
-            {capabilities.map((capability) => (
-              <li key={capability.key} className="min-w-0">
-                <div className="flex flex-wrap items-center gap-2">
-                  <span className="text-[12.5px] font-medium text-ink">{capability.label}</span>
-                  <Badge
-                    variant={capability.proven ? "seal" : "neutral"}
-                    icon={capability.proven ? "checkCircle" : "clock"}
-                    className="ml-auto"
-                  >
-                    {capability.proven ? "Proven" : `Step ${capability.provenAtStep + 1}`}
-                  </Badge>
-                </div>
-                <p className={cx("mt-1.5", type_.meta)}>{capability.evidence}</p>
-              </li>
-            ))}
-          </ul>
-        </Card>
-      )}
+      <Card
+        icon="shield"
+        title="What CaseRelay has proven"
+        subtitle="Capabilities demonstrated at the current point in the scenario, with the evidence."
+      >
+        <ul className="grid gap-x-6 gap-y-5 sm:grid-cols-2 2xl:grid-cols-3">
+          {capabilities.map((capability) => (
+            <li key={capability.key} className="min-w-0">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="text-[12.5px] font-medium text-ink">{capability.label}</span>
+                <Badge
+                  variant={capability.proven ? "seal" : "neutral"}
+                  icon={capability.proven ? "checkCircle" : "clock"}
+                  className="ml-auto"
+                >
+                  {capability.proven ? "Proven" : `Step ${capability.provenAtStep + 1}`}
+                </Badge>
+              </div>
+              <p className={cx("mt-1.5", type_.meta)}>{capability.evidence}</p>
+            </li>
+          ))}
+        </ul>
+      </Card>
 
       <Card
         icon="cases"
@@ -220,7 +204,7 @@ export default function OverviewPage() {
         subtitle={copy.overview.commitments.subtitle}
         action={
           <Link href={`/cases/${PRIMARY_CASE_ID}`} className={control.secondary}>
-            {showsTechnical ? "Open workflow" : "Open case"}
+            Open case
             <Icon name="arrowRight" size={14} />
           </Link>
         }
@@ -230,7 +214,7 @@ export default function OverviewPage() {
             <ProgressBar value={closed} total={commitments.length} variant="seal" />
           </span>
           <span className={type_.meta}>
-            {closed} of {commitments.length} {showsTechnical ? "in a terminal state" : "done"}
+            {closed} of {commitments.length} done
           </span>
         </div>
 
@@ -242,11 +226,6 @@ export default function OverviewPage() {
                 <span className="block truncate text-[12.5px] font-medium text-ink">
                   {commitment.title}
                 </span>
-                {showsTechnical && (
-                  <Mono className="mt-0.5 block text-[10.5px]">
-                    {commitment.id} · {commitment.ownerAgentId}
-                  </Mono>
-                )}
                 <span className="mt-1 flex flex-wrap items-center gap-1.5">
                   <StatusBadge status={commitment.status} />
                   {(commitment.daysOverdue ?? 0) > 0 && (

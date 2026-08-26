@@ -11,17 +11,17 @@ import { COPY } from "@/design/copy";
 import { PERSONAS } from "@/design/personas";
 import { auth, cx } from "@/design/tokens";
 
-const copy = COPY.advocate.signIn;
+const copy = COPY.signIn;
 
 export default function AdvocateLoginPage() {
-  const { phase, action, signIn } = useSignIn("advocate");
+  const { phase, action, signIn } = useSignIn();
   const [email, setEmail] = useState(PERSONAS.advocate.email);
   const [password, setPassword] = useState("");
   const [remember, setRemember] = useState(true);
   const [linkSent, setLinkSent] = useState(false);
 
   return (
-    <AuthScreen persona="advocate">
+    <AuthScreen>
       <SignInProgress phase={phase} />
 
       <form onSubmit={signIn} className="space-y-4">

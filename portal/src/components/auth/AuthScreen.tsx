@@ -1,28 +1,16 @@
 import Link from "next/link";
 import type { ReactNode } from "react";
 import { AuthBackdrop, AuthPanel } from "@/components/auth/frame";
-import { PersonaSwitch } from "@/components/auth/PersonaSwitch";
 import { Logo } from "@/components/Logo";
 import { COPY } from "@/design/copy";
-import type { Persona } from "@/design/personas";
 import { auth, cx } from "@/design/tokens";
 
-/**
- * The artwork is the one place the two products are allowed to differ in kind. A
- * volunteer signs in because of a child, so she gets a child. An operator signs
- * in to a fleet, so they get the fleet.
- */
-const PANEL_ART: Record<Persona, string> = {
-  advocate: "/auth-advocate.png",
-  platform: "/auth-platform.png",
-};
-
-export function AuthScreen({ persona, children }: { persona: Persona; children: ReactNode }) {
-  const copy = COPY[persona].signIn;
+export function AuthScreen({ children }: { children: ReactNode }) {
+  const copy = COPY.signIn;
 
   return (
     <div className={auth.screen}>
-      <AuthBackdrop src={PANEL_ART[persona]} />
+      <AuthBackdrop src="/auth-advocate.png" />
 
       <AuthPanel>
         <span aria-hidden="true" className={auth.headlineQuote}>
@@ -39,7 +27,6 @@ export function AuthScreen({ persona, children }: { persona: Persona; children: 
           <Link href="/login" className="lg:invisible">
             <Logo size={30} variant="light" />
           </Link>
-          <PersonaSwitch current={persona} />
         </header>
 
         <main className="flex flex-1 items-center py-10">
@@ -59,10 +46,6 @@ export function AuthScreen({ persona, children }: { persona: Persona; children: 
   );
 }
 
-/**
- * Renders the headline with its emphasised phrase fading out. The phrase stays
- * part of the same sentence — screen readers and selection see one string.
- */
 function Claim({ text, emphasis }: { text: string; emphasis?: string }) {
   const at = emphasis ? text.indexOf(emphasis) : -1;
   if (!emphasis || at < 0) return text;

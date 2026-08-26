@@ -10,7 +10,6 @@ import {
   Card,
   EmptyState,
   FlagBadge,
-  Mono,
   ProgressBar,
   Rows,
   cx,
@@ -18,7 +17,7 @@ import {
 import { control, layout, row, surface, type as type_ } from "@/design/tokens";
 import { listCases } from "@/lib/api";
 import { useDemo } from "@/lib/demo-store";
-import { PRIMARY_CASE_ID, WORKFLOW_ID } from "@/lib/mock/cases";
+import { PRIMARY_CASE_ID } from "@/lib/mock/cases";
 import { useViewer } from "@/lib/viewer";
 import type { CaseFlag, CaseSummary } from "@/lib/types";
 
@@ -181,7 +180,7 @@ function LiveCasesSection() {
 
 function CasesView({ handoff }: { handoff: string }) {
   const { cases } = useDemo();
-  const { copy, showsTechnical } = useViewer();
+  const { copy } = useViewer();
   const [query, setQuery] = useState(handoff);
   const [filter, setFilter] = useState("all");
   const [sort, setSort] = useState<(typeof SORTS)[number]["id"]>("urgency");
@@ -327,7 +326,7 @@ function CasesView({ handoff }: { handoff: string }) {
       ) : view === "grid" ? (
         <ul className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3 3xl:grid-cols-4">
           {rows.map((item) => (
-            <CaseCard key={item.id} item={item} technical={showsTechnical} copy={copy} />
+            <CaseCard key={item.id} item={item} copy={copy} />
           ))}
         </ul>
       ) : (
@@ -335,7 +334,7 @@ function CasesView({ handoff }: { handoff: string }) {
           <ColumnHeader copy={copy} />
           <Rows>
             {rows.map((item) => (
-              <CaseRow key={item.id} item={item} technical={showsTechnical} copy={copy} />
+              <CaseRow key={item.id} item={item} copy={copy} />
             ))}
           </Rows>
         </>
@@ -475,11 +474,9 @@ function FilterMenu({
 
 function CaseRow({
   item,
-  technical,
   copy,
 }: {
   item: CaseSummary;
-  technical: boolean;
   copy: ReturnType<typeof useViewer>["copy"];
 }) {
   const isPrimary = item.id === PRIMARY_CASE_ID;
@@ -494,26 +491,22 @@ function CaseRow({
           "block border-l-2",
           row.pad,
           COLUMNS,
-          // State reads off the leading edge, the way it does on a commitment or
-          // an approval, so it costs no column width.
           urgent ? "border-l-danger" : isPrimary ? "border-l-brand" : "border-l-transparent",
           isPrimary ? row.selected : row.hover,
         )}
       >
         <div className="flex min-w-0 items-center gap-3">
           <Avatar
-            name={technical ? item.id.replace("CR-", "W ") : item.childAlias}
+            name={item.childAlias}
             size={36}
             variant={urgent ? "danger" : isPrimary ? "brand" : "neutral"}
           />
           <div className="min-w-0">
             <div className="flex min-w-0 items-baseline gap-2">
               <span className="truncate text-[13.5px] font-semibold text-ink">
-                {technical ? item.id : item.childAlias}
+                {item.childAlias}
               </span>
-              <span className="shrink-0 font-mono text-[11px] text-ink-muted">
-                {technical ? item.childAlias : item.id}
-              </span>
+              <span className="shrink-0 font-mono text-[11px] text-ink-muted">{item.id}</span>
             </div>
             <p className={cx("mt-0.5 truncate", type_.small)}>{item.headline}</p>
           </div>
@@ -522,7 +515,7 @@ function CaseRow({
         <div className="mt-3 flex flex-wrap items-center gap-1.5 lg:mt-0">
           {isPrimary && (
             <Badge variant="brand" icon="sparkle">
-              {technical ? "Scenario-bound" : "Walkthrough"}
+              Walkthrough case
             </Badge>
           )}
           {item.flags.map((flag) => (
@@ -548,13 +541,7 @@ function CaseRow({
           <Cell label={copy.cases.columns.deadline}>
             <span className="tabular-nums">{item.nextDeadline}</span>
           </Cell>
-          <Cell label={copy.cases.columns.third}>
-            {technical && isPrimary ? (
-              <Mono className="text-[11.5px]">{WORKFLOW_ID}</Mono>
-            ) : (
-              item.courtOrder
-            )}
-          </Cell>
+          <Cell label={copy.cases.columns.third}>{item.courtOrder}</Cell>
           <Cell label={copy.cases.columns.fourth}>{item.supervisor}</Cell>
         </div>
 
@@ -584,11 +571,9 @@ function Cell({ label, children }: { label: string; children: React.ReactNode })
 /** Grid view: the same case, reshaped so a wall of them stays scannable. */
 function CaseCard({
   item,
-  technical,
   copy,
 }: {
   item: CaseSummary;
-  technical: boolean;
   copy: ReturnType<typeof useViewer>["copy"];
 }) {
   const isPrimary = item.id === PRIMARY_CASE_ID;
@@ -601,9 +586,6 @@ function CaseCard({
         href={`/cases/${item.id}`}
         className={cx(
           "flex h-full flex-col rounded-control border px-4 py-3.5 transition-colors",
-          // Grid view cannot use dividers, so a card keeps its outline here — but
-          // only the outline. A fill on top of it is the second surface that made
-          // these read as boxes inside a box.
           isPrimary
             ? "border-brand/30 bg-brand-soft/50 hover:bg-brand-soft"
             : "border-line hover:bg-surface-soft",
@@ -611,16 +593,16 @@ function CaseCard({
       >
         <div className="flex items-start gap-3">
           <Avatar
-            name={technical ? item.id.replace("CR-", "W ") : item.childAlias}
+            name={item.childAlias}
             size={38}
             variant={urgent ? "danger" : isPrimary ? "brand" : "neutral"}
           />
           <div className="min-w-0 flex-1">
             <span className="block truncate text-[13.5px] font-semibold text-ink">
-              {technical ? item.id : item.childAlias}
+              {item.childAlias}
             </span>
             <span className="mt-0.5 block truncate font-mono text-[11px] text-ink-muted">
-              {technical ? item.childAlias : item.id}
+              {item.id}
             </span>
           </div>
           <Icon name="chevronRight" size={16} className="mt-1 shrink-0 text-ink-muted" />
@@ -631,7 +613,7 @@ function CaseCard({
         <div className="mt-2.5 flex flex-wrap gap-1.5">
           {isPrimary && (
             <Badge variant="brand" icon="sparkle">
-              {technical ? "Scenario-bound" : "Walkthrough case"}
+              Walkthrough case
             </Badge>
           )}
           {item.flags.map((flag) => (

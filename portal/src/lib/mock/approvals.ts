@@ -204,7 +204,7 @@ This message discloses only the child's first name, last initial, court referenc
     createdAt: "Day 15 · 08:47:19",
     requestedBy: "orchestrator@caserelay.iam",
     action: "Ask the clinic to confirm the wellness visit took place",
-    recipient: "Records desk — Riverbend Community Health",
+    recipient: "P. Ndiaye — Records Coordinator, Riverbend Community Health",
     recipientRole: "External partner organization",
     purpose: "confirm_appointment_completed",
     urgency: "standard",

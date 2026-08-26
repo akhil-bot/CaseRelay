@@ -50,7 +50,7 @@ export const CASES: CaseSummary[] = [
     openCommitments: 2,
     oldestGapDays: 6,
     nextDeadline: "Day 9",
-    headline: "Shelter partner agent timed out three times; task moved to dead-letter review.",
+    headline: "CaseRelay couldn't reach Harborlight Youth Shelter after three attempts. This step needs your attention.",
   },
   {
     id: "CR-1047",

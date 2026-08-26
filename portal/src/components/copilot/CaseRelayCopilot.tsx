@@ -75,7 +75,7 @@ function UnconfiguredChat() {
  */
 function ConnectedChat() {
   const pathname = usePathname() ?? "/";
-  const { profile, showsTechnical } = useViewer();
+  const { profile } = useViewer();
   const { cases, pendingApprovals, meta } = useDemo();
   const { caseEntries } = useToolEvents();
 
@@ -91,7 +91,7 @@ function ConnectedChat() {
 
   useAgentContext({
     description: "Current view and signed-in role",
-    value: `${profile.name}, ${profile.role} (${profile.viewLabel} view). Currently on ${pathname}.`,
+    value: `${profile.name}, ${profile.role}. Currently on ${pathname}.`,
   });
 
   useAgentContext({
@@ -125,13 +125,9 @@ function ConnectedChat() {
           showDisclaimer: false,
         }}
         labels={{
-          chatInputPlaceholder: showsTechnical
-            ? "Ask about workflows, identities, or policy decisions"
-            : "Ask about a case, a deadline, or who owns a step",
-          welcomeMessageText: showsTechnical
-            ? "I can trace delegations, identities, and policy outcomes across the fleet."
-            : "I can help you follow commitments, deadlines, and handoffs.",
-        }}
+            chatInputPlaceholder: "Ask about a case, a deadline, or who owns a step",
+            welcomeMessageText: "I can help you follow commitments, deadlines, and handoffs.",
+          }}
       />
 
       <ConversationBridge />

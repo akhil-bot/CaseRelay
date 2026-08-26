@@ -21,11 +21,11 @@ type Patch = Partial<Pick<Commitment, "status" | "detail" | "lastUpdate" | "days
 /** Per-step overrides applied on top of the Day 0 proposal, cumulatively. */
 const COMMITMENT_PATCHES: Record<number, Record<string, Patch>> = {
   1: {
-    "CM-01": { status: "pending", detail: "Task dispatched to legal@statewide-legalaid.partner.", lastUpdate: "Day 0 · 09:31" },
-    "CM-02": { status: "pending", detail: "Task dispatched to health@riverbend-health.partner.", lastUpdate: "Day 0 · 09:31" },
-    "CM-03": { status: "pending", detail: "Task dispatched to education@lincoln-usd.partner.", lastUpdate: "Day 0 · 09:31" },
-    "CM-04": { status: "pending", detail: "Task dispatched to shelter@harborlight.partner.", lastUpdate: "Day 0 · 09:31" },
-    "CM-05": { status: "pending", detail: "Task dispatched to family@mesa-family-services.partner.", lastUpdate: "Day 0 · 09:31" },
+    "CM-01": { status: "pending", detail: "Reached out to Statewide Legal Aid Collective.", lastUpdate: "Day 0 · 09:31" },
+    "CM-02": { status: "pending", detail: "Reached out to Riverbend Community Health.", lastUpdate: "Day 0 · 09:31" },
+    "CM-03": { status: "pending", detail: "Reached out to Lincoln Unified School District.", lastUpdate: "Day 0 · 09:31" },
+    "CM-04": { status: "pending", detail: "Reached out to Harborlight Youth Shelter.", lastUpdate: "Day 0 · 09:31" },
+    "CM-05": { status: "pending", detail: "Reached out to Mesa County Family Services.", lastUpdate: "Day 0 · 09:31" },
   },
   2: {
     "CM-01": {
@@ -104,7 +104,7 @@ const COMMITMENT_PATCHES: Record<number, Record<string, Patch>> = {
     "CM-03": {
       status: "unresolved",
       detail:
-        "17 days without a verified owner. Deadline sweeper resumed the workflow and re-requested enrollment status.",
+        "17 days with no named owner. CaseRelay checked back automatically and re-requested enrollment status from Lincoln Unified.",
       lastUpdate: "Day 17 · 09:00",
       daysOverdue: 17,
     },
@@ -113,7 +113,7 @@ const COMMITMENT_PATCHES: Record<number, Record<string, Patch>> = {
     "CM-03": {
       status: "blocked",
       detail:
-        "Partner response quarantined by Model Armor. Safe retry returned unresolved: transfer packet not routed to a registrar.",
+        "Lincoln Unified's response was set aside — it tried to access information outside its scope. A follow-up was sent; no registrar has been named.",
       lastUpdate: "Day 17 · 09:00",
       daysOverdue: 17,
       evidence: [

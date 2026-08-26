@@ -2,7 +2,6 @@
 
 import { useMemo, useState } from "react";
 import { Icon, type IconName } from "@/components/icons";
-import { AccessNotice } from "@/components/shell/AccessNotice";
 import {
   Badge,
   Card,
@@ -16,7 +15,6 @@ import {
 import { control, layout, row, surface, tone, type as type_, type Tone } from "@/design/tokens";
 import { useDemo } from "@/lib/demo-store";
 import { AGENTS } from "@/lib/mock/agents";
-import { useViewer } from "@/lib/viewer";
 import type { AgentCard, CapabilityKey } from "@/lib/types";
 
 const OWNER_FILTERS = [
@@ -44,7 +42,6 @@ const CAPABILITY_ICONS: Record<CapabilityKey, IconName> = {
 
 export default function AgentsPage() {
   const { step, capabilities } = useDemo();
-  const { showsTechnical } = useViewer();
   const [filter, setFilter] = useState<(typeof OWNER_FILTERS)[number]["id"]>("all");
   const [selectedId, setSelectedId] = useState(AGENTS[2].id);
 
@@ -54,10 +51,6 @@ export default function AgentsPage() {
   );
   const selected = AGENTS.find((agent) => agent.id === selectedId) ?? AGENTS[0];
   const discovered = step >= 1;
-
-  if (!showsTechnical) {
-    return <AccessNotice what="The agent registry" />;
-  }
 
   return (
     <div className={layout.stack}>

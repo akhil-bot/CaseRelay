@@ -15,7 +15,6 @@ import { Icon } from "@/components/icons";
 import { LogoMark } from "@/components/Logo";
 import { chrome, cx, tone } from "@/design/tokens";
 import { isAdkConnected } from "@/lib/copilot/config";
-import { useViewer } from "@/lib/viewer";
 
 /**
  * Slot replacements that make CopilotKit render as a CaseRelay surface.
@@ -48,8 +47,6 @@ export const Hidden = () => <></>;
  * every assistant turn to repeat what the panel header states once.
  */
 function AssistantAvatar() {
-  const { showsTechnical } = useViewer();
-
   return (
     <span className="group relative mt-0.5 shrink-0" aria-hidden="true">
       <span className="flex size-7 items-center justify-center rounded-full bg-brand-soft ring-0 ring-brand/0 transition duration-200 group-hover:ring-2 group-hover:ring-brand/25 motion-safe:group-hover:-translate-y-0.5 motion-safe:group-hover:scale-110">
@@ -57,13 +54,9 @@ function AssistantAvatar() {
       </span>
 
       <span className="pointer-events-none absolute top-full left-0 z-30 mt-2 w-max max-w-[210px] rounded-control border border-line bg-surface px-2.5 py-1.5 opacity-0 shadow-pop transition duration-150 group-hover:opacity-100 motion-safe:translate-y-1 motion-safe:group-hover:translate-y-0">
-        <span className="block text-[11.5px] font-medium text-ink">
-          {showsTechnical ? "Fleet assistant" : "CaseRelay assistant"}
-        </span>
+        <span className="block text-[11.5px] font-medium text-ink">CaseRelay assistant</span>
         <span className="mt-0.5 block text-[11px] leading-snug text-ink-muted">
-          {showsTechnical
-            ? "Reads the fleet. Changes nothing."
-            : "Reads your view. Decides nothing."}
+          Reads your view. Decides nothing.
         </span>
       </span>
     </span>
@@ -78,7 +71,7 @@ function AssistantAvatar() {
  */
 function AssistantMessageView({ className, ...props }: CopilotChatAssistantMessageProps) {
   return (
-    <div className="flex gap-2.5">
+    <div className="flex gap-3">
       <AssistantAvatar />
       <CopilotChatAssistantMessage
         {...props}
@@ -115,7 +108,7 @@ function StatusPill() {
       )}
     >
       <span className="size-1.5 rounded-full bg-live" aria-hidden="true" />
-      {isAdkConnected ? "Live fleet" : "Gemini agent"}
+      {isAdkConnected ? "Live" : "Active"}
     </span>
   );
 }
@@ -158,8 +151,6 @@ type ChatHeaderProps = Parameters<NonNullable<CopilotModalHeaderProps["children"
  * prompt in this header, so the conversation controls beside it are our own.
  */
 function ChatHeaderView({ closeButton }: ChatHeaderProps) {
-  const { showsTechnical } = useViewer();
-
   return (
     <>
       <header className={cx(chrome.row, "gap-2.5 bg-surface px-4")}>
@@ -168,9 +159,7 @@ function ChatHeaderView({ closeButton }: ChatHeaderProps) {
         {/* The pill is the tallest thing on this line, so the line box is what
             holds the row to the same height as the header it sits beside. */}
         <div className={cx(chrome.title, "flex min-w-0 flex-1 items-center gap-2")}>
-          <span className="truncate text-[13.5px] font-semibold text-ink">
-            {showsTechnical ? "Fleet assistant" : "CaseRelay assistant"}
-          </span>
+          <span className="truncate text-[13.5px] font-semibold text-ink">CaseRelay assistant</span>
           <StatusPill />
         </div>
 

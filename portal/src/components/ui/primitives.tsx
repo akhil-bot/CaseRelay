@@ -300,9 +300,9 @@ export const buttons = control;
 /* ── Domain metadata ──────────────────────────────────────────────────────── */
 
 export const DOMAIN_META: Record<Domain, { label: string; icon: IconName; variant: Tone }> = {
-  legal: { label: "Legal", icon: "legal", variant: "seal" },
-  education: { label: "Education", icon: "school", variant: "brand" },
-  health: { label: "Healthcare", icon: "health", variant: "accent" },
+  legal: { label: "Legal aid", icon: "legal", variant: "seal" },
+  education: { label: "School", icon: "school", variant: "brand" },
+  health: { label: "Clinic", icon: "health", variant: "accent" },
   shelter: { label: "Shelter", icon: "shelter", variant: "warn" },
   family_services: { label: "Family services", icon: "users", variant: "neutral" },
 };

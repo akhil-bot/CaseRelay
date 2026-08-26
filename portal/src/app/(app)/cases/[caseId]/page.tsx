@@ -9,6 +9,7 @@ import {
   Avatar,
   Badge,
   Card,
+  DOMAIN_META,
   DomainIcon,
   EmptyState,
   Field,
@@ -25,7 +26,6 @@ import { control, layout, row, surface, type as type_ } from "@/design/tokens";
 import { useDemo } from "@/lib/demo-store";
 import { submitRun, listCaseEvents, type RunEvent } from "@/lib/api";
 import { useLiveCase, useLiveRunEvents } from "@/lib/live-case";
-import { AGENTS_BY_ID } from "@/lib/mock/agents";
 import { AUTHORITY_GRANT, CASES, PRIMARY_CASE_ID } from "@/lib/mock/cases";
 import { EDUCATION_PROJECTION } from "@/lib/mock/policy";
 import { useViewer } from "@/lib/viewer";
@@ -61,7 +61,6 @@ export default function CaseDetailPage() {
 
 function LiveCaseDetail({ caseId }: { caseId: string }) {
   const liveCase = useLiveCase(caseId);
-  const { showsTechnical } = useViewer();
 
   const latestRunId = useMemo(() => {
     if (liveCase.status !== "loaded") return null;
@@ -146,7 +145,7 @@ function LiveCaseDetail({ caseId }: { caseId: string }) {
         <Card icon="cases" title={caseId}>
           <div className="flex items-center gap-3 py-8">
             <span className="inline-block size-4 animate-spin rounded-full border-2 border-brand border-t-transparent" />
-            <span className={type_.body}>Loading case from control plane…</span>
+            <span className={type_.body}>Loading case details…</span>
           </div>
         </Card>
       </div>
@@ -182,7 +181,7 @@ function LiveCaseDetail({ caseId }: { caseId: string }) {
             <Icon name="alert" size={18} className="mt-0.5 shrink-0 text-danger" />
             <div>
               <p className="text-[13px] font-medium text-danger">
-                Failed to load case from the control plane
+                Couldn&apos;t load the case details
               </p>
               <p className={cx("mt-1", type_.small)}>{liveCase.message}</p>
             </div>
@@ -212,19 +211,15 @@ function LiveCaseDetail({ caseId }: { caseId: string }) {
 
   return (
     <div className={layout.stack}>
-      <Breadcrumb label={showsTechnical ? caseId : childName} />
+      <Breadcrumb label={childName} />
 
       <section className={cx(surface.card, "overflow-hidden px-5 py-5")}>
         <div className="flex flex-wrap items-start gap-4">
           <Avatar name={childName} size={52} variant="brand" />
           <div className="min-w-0 flex-1">
             <div className="flex flex-wrap items-center gap-2">
-              <h2 className="text-[18px] font-semibold text-ink">
-                {showsTechnical ? caseId : childName}
-              </h2>
-              <Mono className="text-[12px]">
-                {showsTechnical ? childName : caseId}
-              </Mono>
+              <h2 className="text-[18px] font-semibold text-ink">{childName}</h2>
+              <Mono className="text-[12px]">{caseId}</Mono>
               <Badge variant="accent" icon="activity">Live</Badge>
               {scenario && <Badge variant="neutral">{scenario}</Badge>}
             </div>
@@ -236,7 +231,7 @@ function LiveCaseDetail({ caseId }: { caseId: string }) {
             variant={status === "closed" ? "brand" : status === "monitoring" ? "brand" : "neutral"}
             icon={status === "closed" ? "checkCircle" : "activity"}
           >
-            {status}
+            {caseStatusLabel(status)}
           </Badge>
         </div>
 
@@ -248,7 +243,7 @@ function LiveCaseDetail({ caseId }: { caseId: string }) {
             {scenario || "—"}
           </Field>
           <Field label="Status">
-            {status}
+            {caseStatusLabel(status)}
           </Field>
           <Field label="Commitments">
             {closedCount} of {commitmentEntries.length} closed
@@ -265,10 +260,10 @@ function LiveCaseDetail({ caseId }: { caseId: string }) {
             <Icon name="play" size={18} className="shrink-0" />
             <div className="min-w-0 flex-1">
               <p className="text-[13px] font-medium">
-                {runs.length === 0 ? "No runs yet" : "Start a new run"}
+                {runs.length === 0 ? "No outreach started yet" : "Start another round of outreach"}
               </p>
               <p className="mt-0.5 text-[12px] text-ink-soft">
-                Run the agent fleet against this case to see live multi-agent execution.
+                Contact all service providers and follow up on each step.
               </p>
             </div>
             <button
@@ -278,7 +273,7 @@ function LiveCaseDetail({ caseId }: { caseId: string }) {
               className={control.primary}
             >
               <Icon name="play" size={15} />
-              {submitting ? "Starting…" : "Run the fleet"}
+              {submitting ? "Starting…" : "Start outreach"}
             </button>
           </div>
         )}
@@ -310,8 +305,8 @@ function LiveCaseDetail({ caseId }: { caseId: string }) {
                 <div className="flex items-center gap-3">
                   <DomainIcon domain={type as Domain} size={32} />
                   <div className="min-w-0 flex-1">
-                    <span className="text-[13.5px] font-medium text-ink capitalize">
-                      {type.replace("_", " ")}
+                    <span className="text-[13.5px] font-medium text-ink">
+                      {DOMAIN_META[type as Domain]?.label ?? type.replace(/_/g, " ")}
                     </span>
                   </div>
                   <StatusBadge status={commitmentStatus as CommitmentStatus} />
@@ -326,7 +321,7 @@ function LiveCaseDetail({ caseId }: { caseId: string }) {
           actually completed (phase_complete), never on phase_started alone.
           All text comes from the backend's _narrate message field. */}
       {(quarantineCompleted.length > 0 || quarantineErrors.length > 0) && (
-        <Card icon="lock" title="Quarantine">
+        <Card icon="lock" title="Blocked step">
           {quarantineCompleted.length > 0 && (
             <div className="rounded-control border border-danger/25 bg-danger/5 px-4 py-3">
               <div className="flex items-start gap-3">
@@ -426,13 +421,22 @@ function Breadcrumb({ label }: { label: string }) {
   );
 }
 
+function caseStatusLabel(status: string): string {
+  if (status === "monitoring") return "CaseRelay is watching";
+  if (status === "attention_required") return "Needs attention";
+  if (status === "intake_review") return "Pending intake";
+  if (status === "approval_required") return "Waiting on you";
+  if (status === "completed" || status === "closed") return "Completed";
+  return status.replace(/_/g, " ");
+}
+
 // ═══════════════════════════════════════════════════════════════════════════
 // Mock case detail — the scripted walkthrough (unchanged from before)
 // ═══════════════════════════════════════════════════════════════════════════
 
 function MockCaseDetail({ caseId }: { caseId: string }) {
   const { step, setStep, commitments, cases } = useDemo();
-  const { copy, showsTechnical } = useViewer();
+  const { copy } = useViewer();
   const record = cases.find((item) => item.id === caseId);
 
   if (!record) {
@@ -460,10 +464,10 @@ function MockCaseDetail({ caseId }: { caseId: string }) {
     <div className={layout.stack}>
       <nav className="flex items-center gap-1.5 text-[12px] text-ink-muted">
         <Link href="/cases" className="transition-colors hover:text-ink">
-          {showsTechnical ? "Workflows" : "My cases"}
+          My cases
         </Link>
         <Icon name="chevronRight" size={13} />
-        <span className="text-ink-soft">{showsTechnical ? record.id : record.childAlias}</span>
+        <span className="text-ink-soft">{record.childAlias}</span>
       </nav>
 
       <section className={cx(surface.card, "overflow-hidden px-5 py-5")}>
@@ -471,12 +475,8 @@ function MockCaseDetail({ caseId }: { caseId: string }) {
           <Avatar name={record.childAlias} size={52} variant={activated ? "brand" : "neutral"} />
           <div className="min-w-0 flex-1">
             <div className="flex flex-wrap items-center gap-2">
-              <h2 className="text-[18px] font-semibold text-ink">
-                {showsTechnical ? record.id : record.childAlias}
-              </h2>
-              <Mono className="text-[12px]">
-                {showsTechnical ? record.childAlias : record.id}
-              </Mono>
+              <h2 className="text-[18px] font-semibold text-ink">{record.childAlias}</h2>
+              <Mono className="text-[12px]">{record.id}</Mono>
               {record.flags.map((flag) => (
                 <FlagBadge key={flag} flag={flag} />
               ))}
@@ -484,53 +484,26 @@ function MockCaseDetail({ caseId }: { caseId: string }) {
             <p className={cx("mt-1.5", layout.measure, type_.body)}>{record.headline}</p>
           </div>
           <Badge variant={activated ? "brand" : "warn"} icon={activated ? "check" : "clock"}>
-            {activated
-              ? showsTechnical
-                ? "Monitoring active"
-                : "CaseRelay is watching this"
-              : showsTechnical
-                ? "Not activated"
-                : "Not started yet"}
+            {activated ? "CaseRelay is watching this" : "Not started yet"}
           </Badge>
         </div>
 
         <dl className="mt-5 grid gap-4 border-t border-line pt-4 sm:grid-cols-2 xl:grid-cols-4">
-          <Field label={showsTechnical ? "Authority reference" : "Court order"}>
+          <Field label="Court order">
             <Mono>{record.courtOrder}</Mono>
           </Field>
-          <Field label={showsTechnical ? "Appointed principal" : "Advocate"}>
-            {record.volunteer}
-          </Field>
-          <Field label={showsTechnical ? "Approving principal" : "Your supervisor"}>
-            {record.supervisor}
-          </Field>
-          <Field label={showsTechnical ? "Authority grant" : "Permission expires"}>
-            {showsTechnical ? (
-              <>
-                <Mono>{AUTHORITY_GRANT.id}</Mono>{" "}
-                <span className="text-ink-muted">expires {AUTHORITY_GRANT.expiresOn}</span>
-              </>
-            ) : (
-              AUTHORITY_GRANT.expiresOn
-            )}
-          </Field>
+          <Field label="Advocate">{record.volunteer}</Field>
+          <Field label="Your supervisor">{record.supervisor}</Field>
+          <Field label="Permission expires">{AUTHORITY_GRANT.expiresOn}</Field>
         </dl>
 
         {isPrimary && step === 0 && (
           <ActionBar
             variant="warn"
             icon="lock"
-            title={
-              showsTechnical
-                ? "Held by POL-AUTH-004 pending a human principal"
-                : "Your supervisor needs to confirm the court order"
-            }
-            body={
-              showsTechnical
-                ? "The Intake Agent proposed five commitments. Activation requires a verified authority grant."
-                : "CaseRelay has read the referral and listed five next steps. It will not start chasing anyone until a supervisor confirms the court appointment."
-            }
-            cta={showsTechnical ? "Record authority and activate" : "Confirm and start watching"}
+            title="Your supervisor needs to confirm the court order"
+            body="CaseRelay has read the referral and listed five next steps. It will not start chasing anyone until a supervisor confirms the court appointment."
+            cta="Confirm and start watching"
             onAct={() => setStep(1)}
           />
         )}
@@ -539,17 +512,9 @@ function MockCaseDetail({ caseId }: { caseId: string }) {
           <ActionBar
             variant="accent"
             icon="sleep"
-            title={
-              showsTechnical
-                ? "Workflow suspended at checkpoint c-0007"
-                : "Nothing is due right now"
-            }
-            body={
-              showsTechnical
-                ? "No process is running and no session is held open. A scheduled deadline event resumes it."
-                : "CaseRelay has gone quiet on purpose. It will wake itself up when a date passes — you do not have to remember."
-            }
-            cta={showsTechnical ? "Fire the Day 17 deadline event" : "Jump ahead to day 17"}
+            title="Nothing is due right now"
+            body="CaseRelay has gone quiet on purpose. It will wake itself up when a date passes — you do not have to remember."
+            cta="Jump ahead to day 17"
             onAct={() => setStep(4)}
           />
         )}
@@ -571,7 +536,6 @@ function MockCaseDetail({ caseId }: { caseId: string }) {
             <CommitmentRow
               key={commitment.id}
               commitment={commitment}
-              technical={showsTechnical}
               evidenceLabel={copy.caseDetail.evidenceLabel}
             />
           ))}
@@ -583,7 +547,6 @@ function MockCaseDetail({ caseId }: { caseId: string }) {
           icon="gateway"
           title={copy.caseDetail.projection.title}
           subtitle={copy.caseDetail.projection.subtitle}
-          action={showsTechnical ? <Mono>verify_school_enrollment</Mono> : undefined}
         >
           <div className="grid gap-5 lg:grid-cols-2">
             <Group
@@ -595,11 +558,7 @@ function MockCaseDetail({ caseId }: { caseId: string }) {
               <ul className="space-y-1.5">
                 {EDUCATION_PROJECTION.disclosed.map((field) => (
                   <li key={field}>
-                    {showsTechnical ? (
-                      <Mono className="text-ink">{field}</Mono>
-                    ) : (
-                      <span className="text-[12.5px] text-ink">{fieldLabel(field, false)}</span>
-                    )}
+                    <span className="text-[12.5px] text-ink">{fieldLabel(field)}</span>
                   </li>
                 ))}
               </ul>
@@ -613,18 +572,9 @@ function MockCaseDetail({ caseId }: { caseId: string }) {
               <ul className="space-y-2">
                 {EDUCATION_PROJECTION.withheld.map((entry) => (
                   <li key={entry.field}>
-                    {showsTechnical ? (
-                      <>
-                        <Mono className="line-through decoration-danger/50">{entry.field}</Mono>
-                        <p className="text-[11.5px] text-ink-muted">
-                          {entry.reason} <Mono className="text-[11px]">{entry.ruleId}</Mono>
-                        </p>
-                      </>
-                    ) : (
-                      <span className="text-[12.5px] text-ink-soft line-through decoration-danger/40">
-                        {fieldLabel(entry.field, false)}
-                      </span>
-                    )}
+                    <span className="text-[12.5px] text-ink-soft line-through decoration-danger/40">
+                      {fieldLabel(entry.field)}
+                    </span>
                   </li>
                 ))}
               </ul>
@@ -649,21 +599,14 @@ function MockCaseDetail({ caseId }: { caseId: string }) {
             <Group
               variant="brand"
               icon="check"
-              label={showsTechnical ? "Persisted" : "Carries over to the next volunteer"}
+              label="Carries over to the next volunteer"
             >
               <ul className="space-y-1.5">
-                {(showsTechnical
-                  ? [
-                      "Five commitment states with source and timestamp",
-                      "Workflow checkpoint and scheduled wake timers",
-                      "Named partner owners and expected response dates",
-                    ]
-                  : [
-                      "Every step, and who is responsible for it",
-                      "The dates CaseRelay is still watching for",
-                      "Who to contact at each organization",
-                    ]
-                ).map((entry) => (
+                {[
+                  "Every step, and who is responsible for it",
+                  "The dates CaseRelay is still watching for",
+                  "Who to contact at each organization",
+                ].map((entry) => (
                   <li key={entry} className="flex items-start gap-2 text-[12.5px] text-ink-soft">
                     <Icon name="check" size={14} className="mt-0.5 shrink-0 text-brand" />
                     {entry}
@@ -674,21 +617,14 @@ function MockCaseDetail({ caseId }: { caseId: string }) {
             <Group
               variant="danger"
               icon="close"
-              label={showsTechnical ? "Revoked at rotation" : "Stops immediately"}
+              label="Stops immediately"
             >
               <ul className="space-y-1.5">
-                {(showsTechnical
-                  ? [
-                      "Outgoing principal's session and API tokens",
-                      "Read access to the referral packet in storage",
-                      "Approval-queue visibility for this workflow",
-                    ]
-                  : [
-                      "The previous volunteer's access to this case",
-                      "Their ability to open the referral documents",
-                      "Any approval requests still sitting with them",
-                    ]
-                ).map((entry) => (
+                {[
+                  "The previous volunteer's access to this case",
+                  "Their ability to open the referral documents",
+                  "Any approval requests still sitting with them",
+                ].map((entry) => (
                   <li key={entry} className="flex items-start gap-2 text-[12.5px] text-ink-soft">
                     <Icon name="close" size={14} className="mt-0.5 shrink-0 text-danger" />
                     {entry}
@@ -749,15 +685,12 @@ function ActionBar({
 
 function CommitmentRow({
   commitment,
-  technical,
   evidenceLabel,
 }: {
   commitment: Commitment;
-  technical: boolean;
   evidenceLabel: string;
 }) {
   const [open, setOpen] = useState(false);
-  const agent = AGENTS_BY_ID[commitment.ownerAgentId];
   const overdue = (commitment.daysOverdue ?? 0) > 0;
 
   return (
@@ -776,7 +709,6 @@ function CommitmentRow({
         <DomainIcon domain={commitment.domain} size={38} />
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-2">
-            {technical && <Mono className="text-[11.5px]">{commitment.id}</Mono>}
             <span className="text-[13.5px] font-medium text-ink">{commitment.title}</span>
             <StatusBadge status={commitment.status} />
             {overdue && (
@@ -791,15 +723,9 @@ function CommitmentRow({
               <Icon name="users" size={13} />
               {commitment.ownerOrg}
             </span>
-            {technical && agent && (
-              <span className="flex items-center gap-1.5">
-                <Icon name="identity" size={13} />
-                <Mono className="text-[11px]">{agent.identity}</Mono>
-              </span>
-            )}
             <span className="flex items-center gap-1.5">
               <Icon name="calendar" size={13} />
-              {technical ? `Due Day ${commitment.dueDay}` : `Was due on day ${commitment.dueDay}`}
+              {`Was due on day ${commitment.dueDay}`}
             </span>
             <span className="flex items-center gap-1.5">
               <Icon name="clock" size={13} />
@@ -826,20 +752,10 @@ function CommitmentRow({
               <Icon name="link" size={14} className="mt-0.5 shrink-0 text-ink-muted" />
               <div className="min-w-0">
                 <div className="flex flex-wrap items-center gap-2">
-                  {technical && <Mono className="text-brand-deep">{item.id}</Mono>}
                   <span className="text-[12.5px] text-ink">{item.label}</span>
-                  {technical && (
-                    <Badge variant="neutral">confidence {item.confidence.toFixed(2)}</Badge>
-                  )}
                 </div>
                 <p className="mt-0.5 text-[11px] text-ink-muted">
-                  {technical ? (
-                    <span className="font-mono break-all">
-                      {item.source} · captured {item.capturedAt}
-                    </span>
-                  ) : (
-                    `Recorded ${item.capturedAt}`
-                  )}
+                  {`Recorded ${item.capturedAt}`}
                 </p>
               </div>
             </li>

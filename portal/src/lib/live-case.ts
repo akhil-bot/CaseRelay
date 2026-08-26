@@ -160,7 +160,10 @@ export function useLiveRunEvents(runId: string | null): LiveRunState {
           cleanup();
           dispatch({ type: "stream_end" });
           getRunStatus(runId).then((status) => {
-            dispatch({ type: "status", status, terminal: status.state as TerminalState });
+            const terminal = ["completed", "failed", "partial_failure"].includes(status.state)
+              ? (status.state as TerminalState)
+              : undefined;
+            dispatch({ type: "status", status, terminal });
           });
         } else if (
           ev.event === "run_completed" ||

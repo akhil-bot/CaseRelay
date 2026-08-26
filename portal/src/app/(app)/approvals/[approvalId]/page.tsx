@@ -11,7 +11,6 @@ import {
   EmptyState,
   Field,
   Group,
-  Mono,
   cx,
 } from "@/components/ui/primitives";
 import { fieldLabel, purposeLabel } from "@/design/copy";
@@ -34,15 +33,12 @@ export default function ApprovalDetailPage() {
   const params = useParams<{ approvalId: string }>();
   const approvalId = params?.approvalId ?? "";
   const { step, decisions, decide } = useDemo();
-  const { copy, showsTechnical, profile } = useViewer();
+  const { copy, profile } = useViewer();
   const [showDraft, setShowDraft] = useState(true);
 
   const approval = APPROVALS.find((item) => item.id === approvalId);
   const outcome = approval ? deriveApprovalOutcome(approval, step, decisions) : undefined;
 
-  // An id that does not resolve, and one that has not been raised at this point
-  // on the scenario clock, are the same thing to the person reading: there is
-  // nothing here to approve.
   if (!approval || outcome === undefined || outcome === "not_yet_raised") {
     return (
       <Card icon="approvals" title="Not found">
@@ -70,24 +66,20 @@ export default function ApprovalDetailPage() {
           {copy.pages.approvals.title}
         </Link>
         <Icon name="chevronRight" size={13} />
-        <span className="text-ink-soft">
-          {showsTechnical ? approval.id : approval.childAlias}
-        </span>
+        <span className="text-ink-soft">{approval.childAlias}</span>
       </nav>
 
-      {/* Clipped so the decision band can bleed to the card's rounded edges. */}
       <section className={cx(surface.card, "overflow-hidden px-5 py-5")}>
         <div className="flex flex-wrap items-start gap-4">
           <Avatar name={approval.childAlias} size={48} variant={elevated ? "warn" : "accent"} />
           <div className="min-w-0 flex-1">
             <div className="flex flex-wrap items-center gap-2">
-              {showsTechnical && <Mono className="text-brand-deep">{approval.id}</Mono>}
               <Badge variant="accent" icon="user">
-                {showsTechnical ? "Held for human principal" : "Needs your approval"}
+                Needs your approval
               </Badge>
               {elevated && (
                 <Badge variant="warn" icon="alert">
-                  {showsTechnical ? "Elevated" : "Overdue"}
+                  Overdue
                 </Badge>
               )}
             </div>
@@ -95,9 +87,7 @@ export default function ApprovalDetailPage() {
               {approval.action}
             </h2>
             <p className={cx("mt-1.5", type_.meta)}>
-              {showsTechnical
-                ? `${approval.caseId} · ${approval.childAlias} · raised ${approval.createdAt}`
-                : `${approval.childAlias} · ${approval.caseId} · asked you on ${approval.createdAt}`}
+              {`${approval.childAlias} · ${approval.caseId} · asked you on ${approval.createdAt}`}
             </p>
           </div>
           <Link
@@ -105,43 +95,29 @@ export default function ApprovalDetailPage() {
             className={cx(control.secondary, "shrink-0 px-2.5 py-1.5 text-[12px]")}
           >
             <Icon name="cases" size={14} />
-            {showsTechnical ? "Open workflow" : "Open the case"}
+            Open the case
           </Link>
         </div>
 
         <dl className="mt-5 grid gap-4 border-t border-line pt-4 sm:grid-cols-2 xl:grid-cols-4">
-          <Field label={showsTechnical ? "Recipient" : "Goes to"}>{approval.recipient}</Field>
-          <Field label={showsTechnical ? "Recipient type" : "Their role"}>
-            {approval.recipientRole}
-          </Field>
-          <Field label={showsTechnical ? "Authorized purpose" : "Why"}>
-            {showsTechnical ? (
-              <Mono>{approval.purpose}</Mono>
-            ) : (
-              purposeLabel(approval.purpose, false)
-            )}
-          </Field>
-          <Field label={showsTechnical ? "Requested by" : "Drafted by"}>
-            {showsTechnical ? <Mono>{approval.requestedBy}</Mono> : "CaseRelay"}
-          </Field>
+          <Field label="Goes to">{approval.recipient}</Field>
+          <Field label="Their role">{approval.recipientRole}</Field>
+          <Field label="Why">{purposeLabel(approval.purpose)}</Field>
+          <Field label="Drafted by">CaseRelay</Field>
         </dl>
 
         <DecisionBand
           decided={decided}
           outcome={outcome}
-          actingAs={showsTechnical ? "Dana Whitfield" : profile.name}
+          actingAs={profile.name}
           onDecide={(decision) => decide(approval.id, decision)}
         />
       </section>
 
       <Card
         icon="document"
-        title={showsTechnical ? "Drafted payload" : "The message that will be sent"}
-        subtitle={
-          showsTechnical
-            ? "Verbatim, as it will be dispatched if approved."
-            : "Word for word. Nothing is added after you approve it."
-        }
+        title="The message that will be sent"
+        subtitle="Word for word. Nothing is added after you approve it."
         action={
           <button
             type="button"
@@ -155,7 +131,6 @@ export default function ApprovalDetailPage() {
         }
       >
         {showDraft ? (
-          // A verbatim payload is the one thing that still earns a container.
           <pre
             className={cx(
               surface.inset,
@@ -171,12 +146,8 @@ export default function ApprovalDetailPage() {
 
       <Card
         icon="gateway"
-        title={showsTechnical ? "Computed projection" : "Exactly what this shares"}
-        subtitle={
-          showsTechnical
-            ? "Minimum-necessary field set for the authorized purpose, with the rule that withheld each excluded field."
-            : "The message carries the left-hand list and nothing else."
-        }
+        title="Exactly what this shares"
+        subtitle="The message carries the left-hand list and nothing else."
       >
         <div className="grid gap-5 lg:grid-cols-2">
           <Group
@@ -188,11 +159,7 @@ export default function ApprovalDetailPage() {
             <ul className="space-y-1.5">
               {approval.projection.disclosed.map((field) => (
                 <li key={field}>
-                  {showsTechnical ? (
-                    <Mono className="text-ink">{field}</Mono>
-                  ) : (
-                    <span className="text-[12.5px] text-ink">{fieldLabel(field, false)}</span>
-                  )}
+                  <span className="text-[12.5px] text-ink">{fieldLabel(field)}</span>
                 </li>
               ))}
             </ul>
@@ -206,18 +173,9 @@ export default function ApprovalDetailPage() {
             <ul className="space-y-2">
               {approval.projection.withheld.map((entry) => (
                 <li key={entry.field}>
-                  {showsTechnical ? (
-                    <>
-                      <Mono className="line-through decoration-danger/50">{entry.field}</Mono>
-                      <p className="text-[11.5px] text-ink-muted">
-                        {entry.reason} <Mono className="text-[11px]">{entry.ruleId}</Mono>
-                      </p>
-                    </>
-                  ) : (
-                    <span className="text-[12.5px] text-ink-soft line-through decoration-danger/40">
-                      {fieldLabel(entry.field, false)}
-                    </span>
-                  )}
+                  <span className="text-[12.5px] text-ink-soft line-through decoration-danger/40">
+                    {fieldLabel(entry.field)}
+                  </span>
                 </li>
               ))}
             </ul>
@@ -227,31 +185,16 @@ export default function ApprovalDetailPage() {
 
       <Card
         icon="audit"
-        title={showsTechnical ? "Evidence" : "What this is based on"}
-        subtitle={
-          showsTechnical
-            ? `Applied rules ${approval.policyBasis.join(" · ")}.`
-            : "Every claim in the message traces to one of these."
-        }
+        title="What this is based on"
+        subtitle="Every claim in the message traces to one of these."
       >
         <ul className="grid gap-4 sm:grid-cols-2 2xl:grid-cols-3">
           {approval.evidence.map((item) => (
             <li key={item.id} className="flex items-start gap-2.5">
               <Icon name="link" size={14} className="mt-0.5 shrink-0 text-ink-muted" />
               <div className="min-w-0">
-                <div className="flex flex-wrap items-center gap-2">
-                  {showsTechnical && <Mono className="text-brand-deep">{item.id}</Mono>}
-                  <span className="text-[12.5px] text-ink">{item.label}</span>
-                </div>
-                <p className="mt-0.5 text-[11px] text-ink-muted">
-                  {showsTechnical ? (
-                    <span className="font-mono break-all">
-                      {item.source} · confidence {item.confidence.toFixed(2)}
-                    </span>
-                  ) : (
-                    `Recorded ${item.capturedAt}`
-                  )}
-                </p>
+                <span className="text-[12.5px] text-ink">{item.label}</span>
+                <p className="mt-0.5 text-[11px] text-ink-muted">{`Recorded ${item.capturedAt}`}</p>
               </div>
             </li>
           ))}

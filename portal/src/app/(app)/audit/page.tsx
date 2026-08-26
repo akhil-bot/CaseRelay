@@ -2,7 +2,6 @@
 
 import { useMemo, useState } from "react";
 import { Icon, type IconName } from "@/components/icons";
-import { AccessNotice } from "@/components/shell/AccessNotice";
 import { KIND_META } from "@/components/shell/ActivityPanel";
 import {
   Badge,
@@ -18,7 +17,6 @@ import {
 import { control, layout, row, tone, type as type_ } from "@/design/tokens";
 import { useDemo } from "@/lib/demo-store";
 import { WORKFLOW_ID } from "@/lib/mock/cases";
-import { useViewer } from "@/lib/viewer";
 import type { ActivityEvent, ActivityKind } from "@/lib/types";
 
 const GROUPS: { id: string; label: string; icon: IconName; kinds: ActivityKind[] }[] = [
@@ -43,7 +41,6 @@ const GROUPS: { id: string; label: string; icon: IconName; kinds: ActivityKind[]
 
 export default function ActivityLogPage() {
   const { activity, policyDecisions } = useDemo();
-  const { showsTechnical } = useViewer();
   const [group, setGroup] = useState("all");
 
   const filtered = useMemo(() => {
@@ -57,10 +54,6 @@ export default function ActivityLogPage() {
   const refusals = activity.filter(
     (event) => event.outcome === "deny" || event.outcome === "quarantine",
   ).length;
-
-  if (!showsTechnical) {
-    return <AccessNotice what="The trace and audit log" />;
-  }
 
   return (
     <div className={layout.stack}>

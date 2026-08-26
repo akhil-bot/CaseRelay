@@ -66,6 +66,8 @@ export interface RunEvent {
   summary?: string;
   /** Plain-English narration of what is happening, added by the backend agent. */
   message?: string;
+  /** ISO-8601 timestamp set by the backend on every emitted event. */
+  timestamp?: string;
   failed_phases?: string[];
   error?: string;
   [key: string]: unknown;

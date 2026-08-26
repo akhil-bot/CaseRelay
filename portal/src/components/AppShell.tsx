@@ -7,16 +7,11 @@ import { ActivityPanel } from "@/components/shell/ActivityPanel";
 import { Header } from "@/components/shell/Header";
 import { Sidebar } from "@/components/shell/Sidebar";
 import { cx, layout } from "@/design/tokens";
-import { useViewer } from "@/lib/viewer";
 
 export function AppShell({ children }: { children: ReactNode }) {
   const pathname = usePathname();
-  const { persona, showsTechnical } = useViewer();
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [activityOpen, setActivityOpen] = useState(true);
-
-  // The agent activity feed is spans, identities and trace IDs: platform view only.
-  const showActivity = showsTechnical && activityOpen;
 
   return (
     <div className="flex min-h-screen">
@@ -57,12 +52,12 @@ export function AppShell({ children }: { children: ReactNode }) {
 
         <div className="flex min-h-0 flex-1">
           <main className="min-w-0 flex-1">
-            <div key={`${persona}-${pathname}`} className={cx(layout.page, "animate-rise")}>
+            <div key={pathname} className={cx(layout.page, "animate-rise")}>
               {children}
             </div>
           </main>
 
-          {showActivity && (
+          {activityOpen && (
             <div className="hidden w-[300px] shrink-0 lg:block 2xl:w-[340px]">
               <div className="sticky top-16 h-[calc(100vh-4rem)]">
                 <ActivityPanel onClose={() => setActivityOpen(false)} />

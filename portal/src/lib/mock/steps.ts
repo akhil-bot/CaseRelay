@@ -11,43 +11,43 @@ export const DEMO_STEPS: DemoStep[] = [
     label: "Intake review",
     dayLabel: "Day 0",
     narration:
-      "The Intake & Authority Agent extracted five operational commitments from the referral packet. Nothing is active until a supervisor verifies court authority.",
+      "CaseRelay read the Nguyen family's referral packet and identified five steps needed for Maya's case. Nothing starts until Dana Whitfield confirms the court order.",
     caseState: "intake_review",
   },
   {
     index: 1,
     id: "activated",
-    label: "Authority verified",
+    label: "Court order confirmed",
     dayLabel: "Day 0",
     narration:
-      "The supervisor verified Order 2026-JV-0417 and activated monitoring. The Orchestrator resolved five separately owned partner agents through the registry.",
+      "Dana Whitfield verified the court order and activated the case. CaseRelay reached out to five service providers, each with their own contact and scope.",
     caseState: "monitoring",
   },
   {
     index: 2,
     id: "delegated",
-    label: "Partners respond",
+    label: "Service providers respond",
     dayLabel: "Day 3",
     narration:
-      "Legal reports the referral accepted. Health reports the visit scheduled. Shelter and family services report pending. Education has no verified owner.",
+      "Statewide Legal Aid Collective accepted the referral. Riverbend Community Health has the wellness visit scheduled. Harborlight and family services are pending. Lincoln Unified has no named contact for Maya's enrollment.",
     caseState: "monitoring",
   },
   {
     index: 3,
     id: "asleep",
-    label: "Workflow checkpointed",
+    label: "Case paused",
     dayLabel: "Day 4",
     narration:
-      "The workflow wrote a durable checkpoint to memory and went to sleep. No chat session stays open and no browser has to stay connected.",
+      "CaseRelay saved the case and paused. No app needs to stay open — it will check back automatically on day 17 when the follow-up date arrives.",
     caseState: "monitoring_asleep",
   },
   {
     index: 4,
     id: "wake",
-    label: "Day 17 wake",
+    label: "Automatic follow-up",
     dayLabel: "Day 17",
     narration:
-      "A scheduled deadline event resumed the same workflow with nobody prompting it. The Gateway projected only the fields needed to verify enrollment.",
+      "On day 17, CaseRelay checked back automatically — no one had to remember. It contacted Lincoln Unified with only the fields needed to verify Maya's enrollment.",
     caseState: "attention_required",
   },
   {
@@ -56,25 +56,25 @@ export const DEMO_STEPS: DemoStep[] = [
     label: "Unsafe response refused",
     dayLabel: "Day 17",
     narration:
-      "The school payload carried an instruction to retrieve medical notes. Model Armor quarantined it and the Verifier issued a policy-compliant retry.",
+      "Lincoln Unified's response tried to access Maya's medical records. CaseRelay blocked that request and followed up with only the information the school is allowed to see.",
     caseState: "attention_required",
   },
   {
     index: 6,
     id: "approval",
-    label: "Escalation awaiting human",
+    label: "Escalation awaiting approval",
     dayLabel: "Day 17",
     narration:
-      "CaseRelay drafted an evidence-backed escalation. The supervisor sees recipient, purpose, disclosed fields, withheld fields, and policy basis before approving.",
+      "CaseRelay drafted a follow-up to Lincoln Unified's registrar. Dana Whitfield sees the full message, exactly what it shares, and must approve before anything is sent.",
     caseState: "approval_required",
   },
   {
     index: 7,
     id: "resolved",
-    label: "Callback closes the gap",
+    label: "Enrollment confirmed",
     dayLabel: "Day 18",
     narration:
-      "The school confirmed enrollment. The callback resumed the same workflow idempotently, closed the commitment, and a duplicate callback changed nothing.",
+      "Lincoln Unified confirmed Maya's enrollment. CaseRelay recorded it, closed the step, and automatically blocked a duplicate confirmation.",
     caseState: "monitoring",
   },
 ];
