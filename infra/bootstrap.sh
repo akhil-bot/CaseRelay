@@ -71,10 +71,10 @@ gcloud scheduler jobs describe caserelay-sweep \
   || gcloud scheduler jobs create pubsub caserelay-sweep \
        --project="$PROJECT" \
        --location="$REGION" \
-       --schedule="*/5 * * * *" \
+       --schedule="* * * * *" \
        --topic=caserelay-events \
        --message-body='{"action":"sweep"}' \
-       --description="Triggers the CaseRelay workflow sweep every 5 minutes"
+       --description="Triggers the CaseRelay workflow sweep every minute"
 
 echo "=== Firestore indexes ==="
 gcloud firestore indexes composite list --project="$PROJECT" --database=caserelay --format=json 2>/dev/null | grep -q "due_at" \
