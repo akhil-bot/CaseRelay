@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import React, { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Icon } from "@/components/icons";
 import { CaseTimeline } from "@/components/live/CaseTimeline";
 import { LiveActivityFeed } from "@/components/live/LiveActivityFeed";
@@ -27,7 +27,7 @@ import { fieldLabel, purposeLabel } from "@/design/copy";
 import { control, layout, row, surface, tone, type as type_ } from "@/design/tokens";
 import { auditView, formatEventTime } from "@/lib/case-events";
 import { useDemo } from "@/lib/demo-store";
-import { submitRun, listCaseEvents, type RunEvent } from "@/lib/api";
+import { submitRun, type CaseRunSummary, type RunEvent } from "@/lib/api";
 import { useLiveCase, useLiveRunEvents } from "@/lib/live-case";
 import { AUTHORITY_GRANT, CASES, PRIMARY_CASE_ID } from "@/lib/mock/cases";
 import { EDUCATION_PROJECTION } from "@/lib/mock/policy";
@@ -62,60 +62,56 @@ export default function CaseDetailPage() {
 // Live case detail — fetched from the control plane
 // ═══════════════════════════════════════════════════════════════════════════
 
+const NO_RUNS: CaseRunSummary[] = [];
+const NO_EVENTS: RunEvent[] = [];
+
+const eventKey = (e: RunEvent) => `${e.run_id}-${e.event}-${e.phase ?? ""}-${e.timestamp ?? ""}`;
+
 function LiveCaseDetail({ caseId }: { caseId: string }) {
-  const liveCase = useLiveCase(caseId);
-
-  const latestRunId = useMemo(() => {
-    if (liveCase.status !== "loaded") return null;
-    const activeRun = liveCase.runs.find(
-      (r) => r.state === "running" || r.state === "queued",
-    );
-    if (activeRun) return activeRun.run_id;
-    return liveCase.runs[0]?.run_id ?? null;
-  }, [liveCase]);
-
-  const runState = useLiveRunEvents(latestRunId);
+  const [liveCase, refreshCase] = useLiveCase(caseId);
 
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
-  const [manualRunId, setManualRunId] = useState<string | null>(null);
+  const [startedRunId, setStartedRunId] = useState<string | null>(null);
 
-  const manualRunState = useLiveRunEvents(
-    manualRunId && manualRunId !== latestRunId ? manualRunId : null,
-  );
+  const runs = liveCase.status === "loaded" ? liveCase.runs : NO_RUNS;
+  const caseEvents = liveCase.status === "loaded" ? liveCase.events : NO_EVENTS;
 
-  const activeRunState = manualRunId && manualRunId !== latestRunId
-    ? manualRunState
-    : runState;
+  // Which run to listen to. The newest one, because a suspended run is replaced
+  // by its successor the moment a scheduled wake fires — except for a run just
+  // started from this page, which the case does not know about yet.
+  const watchedRunId = useMemo(() => {
+    if (startedRunId && !runs.some((r) => r.run_id === startedRunId)) return startedRunId;
+    const active = runs.find((r) => r.state === "running" || r.state === "queued");
+    return (active ?? runs[0])?.run_id ?? null;
+  }, [runs, startedRunId]);
 
-  const [crossRunEvents, setCrossRunEvents] = useState<RunEvent[]>([]);
+  const runState = useLiveRunEvents(watchedRunId);
 
-  React.useEffect(() => {
-    if (liveCase.status !== "loaded") return;
-    let cancelled = false;
-    listCaseEvents(caseId)
-      .then((events) => { if (!cancelled) setCrossRunEvents(events); })
-      .catch(() => {});
-    return () => { cancelled = true; };
-  }, [caseId, liveCase.status, activeRunState.terminalState]);
+  useEffect(() => {
+    // A round of outreach that has just finished has changed the commitments
+    // underneath the page. Read them now rather than at the next poll.
+    if (!runState.streaming && runState.terminalState) refreshCase();
+  }, [runState.streaming, runState.terminalState, refreshCase]);
 
+  // The recorded history covers every run; the stream covers the one being
+  // watched, and gets there first. Both together, oldest first, no duplicates.
   const mergedEvents = useMemo(() => {
-    if (crossRunEvents.length === 0) return activeRunState.events;
-    const seen = new Set(crossRunEvents.map((e) => `${e.run_id}-${e.event}-${e.timestamp ?? ""}`));
-    const extra = activeRunState.events.filter(
-      (e) => !seen.has(`${e.run_id}-${e.event}-${e.timestamp ?? ""}`),
-    );
-    return [...crossRunEvents, ...extra].sort(
+    if (caseEvents.length === 0) return runState.events;
+    const seen = new Set(caseEvents.map(eventKey));
+    const live = runState.events.filter((e) => !seen.has(eventKey(e)));
+    return [...caseEvents, ...live].sort(
       (a, b) => String(a.timestamp ?? "").localeCompare(String(b.timestamp ?? "")),
     );
-  }, [crossRunEvents, activeRunState.events]);
+  }, [caseEvents, runState.events]);
 
   const handleRun = async () => {
     setSubmitting(true);
     setSubmitError(null);
     try {
       const ref = await submitRun(caseId);
-      setManualRunId(ref.run_id);
+      setStartedRunId(ref.run_id);
+      refreshCase();
     } catch (err: unknown) {
       setSubmitError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -181,7 +177,7 @@ function LiveCaseDetail({ caseId }: { caseId: string }) {
     );
   }
 
-  const { data, runs } = liveCase;
+  const { data } = liveCase;
   const caseData = data.case;
   const childName = String(caseData.child_name ?? caseId);
   const referral = (caseData.referral_packet ?? {}) as Record<string, unknown>;
@@ -192,7 +188,7 @@ function LiveCaseDetail({ caseId }: { caseId: string }) {
   const TERMINAL_STATUSES = new Set(["completed", "blocked", "unresolved"]);
   const closedCount = commitmentEntries.filter(([, v]) => TERMINAL_STATUSES.has(v)).length;
   const hasActiveRun = runs.some((r) => r.state === "running" || r.state === "queued");
-  const isStreaming = activeRunState.streaming || hasActiveRun;
+  const isStreaming = runState.streaming || hasActiveRun;
 
   return (
     <div className={layout.stack}>
@@ -235,7 +231,7 @@ function LiveCaseDetail({ caseId }: { caseId: string }) {
           </Field>
         </dl>
 
-        {!hasActiveRun && !activeRunState.streaming && (
+        {!hasActiveRun && !runState.streaming && (
           <div
             className={cx(
               "-mx-5 -mb-5 mt-5 flex flex-wrap items-center gap-3 border-t px-5 py-4",
@@ -312,8 +308,8 @@ function LiveCaseDetail({ caseId }: { caseId: string }) {
       )}
 
       {/* Live activity feed — stitched across all runs for timeline continuity */}
-      {(isStreaming || mergedEvents.length > 0) && (
-        <LiveActivityFeed run={{ ...activeRunState, events: mergedEvents }} />
+      {(isStreaming || runs.length > 0 || mergedEvents.length > 0) && (
+        <LiveActivityFeed run={{ ...runState, events: mergedEvents }} />
       )}
 
       {/* Audit trail (from initial case fetch) */}

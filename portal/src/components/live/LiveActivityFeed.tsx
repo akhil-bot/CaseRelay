@@ -2,7 +2,7 @@
 
 import { Fragment, useEffect, useRef } from "react";
 import { Icon, type IconName } from "@/components/icons";
-import { Badge, Card, DOMAIN_META, StatusBadge, cx } from "@/components/ui/primitives";
+import { Badge, Card, DOMAIN_META, EmptyState, StatusBadge, cx } from "@/components/ui/primitives";
 import { row, tone, type Tone, type as type_ } from "@/design/tokens";
 import type { RunEvent } from "@/lib/api";
 import {
@@ -482,6 +482,17 @@ export function LiveActivityFeed({ run }: { run: LiveRunState }) {
           <span className="inline-block size-3 animate-spin rounded-full border-2 border-brand border-t-transparent" />
           <span className={type_.body}>Opening the case…</span>
         </div>
+      )}
+
+      {/* The case has been worked on — the page only shows this feed once it has
+          runs — but nothing of it survives to read. Say that, rather than leaving
+          a blank column that reads as nothing having happened. */}
+      {visibleEvents.length === 0 && !run.streaming && (
+        <EmptyState
+          icon="history"
+          title="No record of this case's activity."
+          hint="It has been worked on before, but the account of what happened is not available to show."
+        />
       )}
 
       {visibleEvents.length > 0 && (

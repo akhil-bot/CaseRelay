@@ -88,8 +88,10 @@ function buildMarks(
     });
   }
 
+  // Only while it is still ahead. Once the wake has fired the case has already
+  // checked back, and the round that did it is on the rail as its own band.
   const followUp = nextFollowUpAt(events);
-  if (followUp !== null && !marks.some((m) => m.at === followUp)) {
+  if (followUp !== null && followUp > now && !marks.some((m) => m.at === followUp)) {
     marks.push({ at: followUp, label: "Next follow-up", variant: "accent" });
   }
 
