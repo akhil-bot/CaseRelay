@@ -65,12 +65,14 @@ def _specialists_have_reported(case_id: str) -> bool:
 def _checkpoint_committed_and_waiting(case_id: str) -> bool:
     """schedule_wake stored a commitment snapshot on the checkpoint and it hasn't fired.
 
-    The initial checkpoint written at case creation has empty commitment_states (intake
-    hasn't run yet). schedule_wake re-writes it with the live snapshot, flipping this
-    predicate exactly once — after the checkpoint phase and before wake.
+    Accepts state "waiting" (checkpoint just written) or "running" (sweep marked it due
+    and the push handler started a resumed run). The guard on current_step prevents
+    re-triggering after wake_workflow has already set it to "awake".
     """
     cp = workspace.get_checkpoint(f"wf-{case_id}")
-    if not cp or cp.get("state") != "waiting":
+    if not cp or cp.get("state") not in ("waiting", "running"):
+        return False
+    if cp.get("current_step") == "awake":
         return False
     return bool(cp.get("commitment_states"))
 

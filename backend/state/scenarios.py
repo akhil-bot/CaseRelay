@@ -28,6 +28,8 @@ class ScenarioSpec:
     due_offsets: dict[str, int] = field(default_factory=dict)
     # Default workflow deadline in days for write_checkpoint.
     default_due_days: int = 17
+    # Short-form due_in override (e.g. "60s") for demo runs with visible wait gaps.
+    default_due_in: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -39,6 +41,7 @@ class ScenarioSpec:
             "expected_outcome": self.expected_outcome,
             "partner_behaviours": self.partner_behaviours,
             "default_due_days": self.default_due_days,
+            "default_due_in": self.default_due_in,
         }
 
 
@@ -50,6 +53,7 @@ SCENARIOS: dict[str, ScenarioSpec] = {
         title="Clean path — all partners respond",
         description="Every partner responds on the first attempt. All five commitments close.",
         expected_outcome="All five commitments reach completed or resolved status.",
+        default_due_in="60s",
     ),
     "priya": ScenarioSpec(
         id="priya",
@@ -118,6 +122,7 @@ SCENARIOS: dict[str, ScenarioSpec] = {
         inject_callback={"education": True},
         partner_behaviours={"education": "inject"},
         default_due_days=17,
+        default_due_in="60s",
     ),
     "kai": ScenarioSpec(
         id="kai",

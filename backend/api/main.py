@@ -128,11 +128,23 @@ def _parse_duration(s: str) -> timedelta:
     raise ValueError(f"cannot parse duration {s!r}; expected e.g. '45s', '17d'")
 
 
+def _resolve_due_in(due_in: str | None, scenario_name: str | None) -> str | None:
+    """Resolve the effective due_in string. Stored on the case for checkpoint anchoring."""
+    if due_in:
+        return due_in
+    spec = _scenarios_mod.get_scenario(scenario_name) if scenario_name else None
+    if spec and getattr(spec, "default_due_in", None):
+        return spec.default_due_in
+    return None
+
+
 def _resolve_deadline(due_in: str | None, scenario_name: str | None) -> datetime:
     """Compute due_at once at creation time. Never called on an existing case."""
     if due_in:
         return datetime.now(timezone.utc) + _parse_duration(due_in)
     spec = _scenarios_mod.get_scenario(scenario_name) if scenario_name else None
+    if spec and getattr(spec, "default_due_in", None):
+        return datetime.now(timezone.utc) + _parse_duration(spec.default_due_in)
     days = getattr(spec, "default_due_days", 17) if spec else 17
     return datetime.now(timezone.utc) + timedelta(days=days)
 
@@ -261,13 +273,20 @@ def create_case(body: dict[str, Any]) -> dict:
             raise HTTPException(status_code=400, detail=f"unknown scenario {scenario_name!r}")
         dataset.create_case(case_id, scenario=scenario_name)
     else:
-        # Raw referral-packet intake.
         packet = {k: v for k, v in body.items() if k not in ("case_id", "due_in")}
         packet["case_id"] = case_id
         workspace.create_case(case_id, packet)
 
+    effective_due_in = _resolve_due_in(due_in_str, scenario_name)
+    case = workspace.get_case(case_id)
+    if effective_due_in:
+        case["due_in"] = effective_due_in
+
     deadline = _resolve_deadline(due_in_str, scenario_name)
     cp = durable.write_checkpoint(case_id, deadline)
+
+    from backend.state import store
+    store.save_case(case_id, case)
 
     return {
         "case_id": case_id,
@@ -327,6 +346,109 @@ def wake_workflow(workflow_id: str) -> dict:
         raise HTTPException(status_code=404, detail=f"workflow {workflow_id!r} not found")
     case_id = cp.get("case_id", "")
     return durable.resume_wake(case_id, workflow_id)
+
+
+import base64
+import logging as _push_logging
+
+_push_logger = _push_logging.getLogger("caserelay.pubsub_push")
+
+
+def _verify_oidc_token(request: Request) -> dict | None:
+    """Verify the OIDC token on an authenticated Pub/Sub push.
+
+    Returns the decoded claims on success, None on failure. In non-deployed
+    environments (no CASERELAY_CONTROL_PLANE), skips verification so local
+    testing with curl works without a real token.
+    """
+    if os.environ.get("CASERELAY_CONTROL_PLANE", "").strip() != "1":
+        return {"email": "local-test@caserelay.local"}
+
+    auth = request.headers.get("authorization", "")
+    if not auth.startswith("Bearer "):
+        _push_logger.warning("push rejected: no Bearer token")
+        return None
+    token = auth[7:]
+
+    try:
+        from google.auth.transport import requests as google_requests
+        from google.oauth2 import id_token
+        url_file = os.path.join(os.path.dirname(__file__), "../../infra/control_plane_url.txt")
+        audience = os.environ.get("CASERELAY_PUSH_AUDIENCE", "")
+        if not audience:
+            try:
+                with open(url_file) as f:
+                    audience = f.read().strip()
+            except FileNotFoundError:
+                audience = ""
+        claims = id_token.verify_oauth2_token(token, google_requests.Request(), audience=audience or None)
+        return claims
+    except Exception as exc:
+        _push_logger.warning("OIDC verification failed: %s", exc)
+        return None
+
+
+@app.post("/v1/pubsub/push")
+async def pubsub_push(request: Request) -> JSONResponse:
+    """Authenticated Pub/Sub push handler. Processes sweep triggers and wake messages.
+
+    Idempotency: a wake for a case that already has an active run is acknowledged
+    without starting a duplicate. Duplicate Pub/Sub deliveries produce exactly one run.
+    """
+    claims = _verify_oidc_token(request)
+    if claims is None:
+        return JSONResponse(status_code=403, content={"detail": "invalid OIDC token"})
+
+    try:
+        envelope = await request.json()
+    except Exception:
+        return JSONResponse(status_code=400, content={"detail": "invalid JSON"})
+
+    raw = envelope.get("message", {}).get("data", "")
+    if raw:
+        try:
+            payload = json.loads(base64.b64decode(raw))
+        except Exception:
+            payload = {}
+    else:
+        payload = {}
+
+    action = payload.get("action", "")
+    event_type = payload.get("event_type", "")
+
+    if action == "sweep":
+        fired = durable.sweep()
+        _push_logger.info("sweep fired %d workflows", len(fired))
+        return JSONResponse({"fired": fired, "count": len(fired)})
+
+    if event_type == "workflow_wake":
+        case_id = payload.get("case_id", "")
+        workflow_id = payload.get("workflow_id", "")
+        if not case_id:
+            return JSONResponse(status_code=400, content={"detail": "missing case_id"})
+
+        active = [
+            r for r in workspace.list_runs_for_case(case_id)
+            if r.get("state") in ("queued", "running")
+        ]
+        if active:
+            _push_logger.info(
+                "wake for %s deduplicated — run %s already active",
+                case_id, active[0].get("run_id"),
+            )
+            return JSONResponse({"status": "deduplicated", "existing_run": active[0].get("run_id")})
+
+        run_id = uuid4().hex[:12]
+        workspace.create_run(run_id, case_id)
+        from backend.runtime.context import current as _ctx
+        workspace.update_run(run_id, trace_id=_ctx().trace_id)
+        _push_logger.info("starting resumed run %s for case %s (wake %s)", run_id, case_id, workflow_id)
+        t = threading.Thread(target=_run_background, args=(run_id, case_id), kwargs={"resume": True}, daemon=True)
+        t.start()
+        return JSONResponse({"status": "resumed", "run_id": run_id, "case_id": case_id})
+
+    _push_logger.info("push message with unknown type: action=%r event_type=%r", action, event_type)
+    return JSONResponse({"status": "ignored"})
 
 
 # ---------------------------------------------------------------------------
@@ -598,31 +720,25 @@ def _build_summary(case_id: str, run_id: str, child_name: str,
     return result
 
 
-def _run_background(run_id: str, case_id: str) -> None:
+def _run_background(run_id: str, case_id: str, *, resume: bool = False) -> None:
     """Drive the real agent fleet end-to-end: intake, then precondition-driven engine.
 
-    The phase registry in backend/runtime/fleet.py declares a precondition for every phase.
-    After intake, the engine repeatedly evaluates all not-yet-run phases, dispatches
-    whichever is unlocked, and repeats until nothing is ready. Phases in the same group
-    (the five specialist fan-outs) are dispatched concurrently via ThreadPoolExecutor;
-    all others run one at a time with the lowest priority number winning ties.
+    When resume=False (first run): runs intake through the checkpoint phase, then suspends.
+    Durable state is in Firestore; a Pub/Sub push will start a new run to continue.
 
-    Termination guarantee: each phase runs at most once (tracked by completed_phases).
-    The registry has N phases, so the engine needs at most N+1 iterations (one per phase
-    plus a final evaluation that finds nothing ready). Exceeding that raises immediately.
-
-    Thread safety: workspace access is protected by a per-case RLock in Workspace._lock_for().
-    The _run_event_lock protects run event appends (keyed by run_id, not case_id).
+    When resume=True (push-initiated): skips intake, evaluates preconditions from scratch.
+    The wake phase fires because the checkpoint is in running state (sweep set it) with
+    current_step still at sleeping, and reconciliation runs before continuing.
     """
     import logging
     import warnings
 
-    from backend.agents.intake.agent import root_agent as intake_agent
     from backend.agents.orchestrator.agent import build_for_run as _build_orchestrator
     from backend.memory.platform import enabled as _mb_enabled, search_sync as _mb_search
     from backend.runtime.context import bind as _bind
     from backend.runtime.fleet import PHASE_REGISTRY
     from backend.runtime.invoke import finalize_run_memory, run_agent
+    from backend.workflows.durable import reconcile_commitments
 
     _adk_logger = logging.getLogger("google.adk")
 
@@ -642,11 +758,6 @@ def _run_background(run_id: str, case_id: str) -> None:
             workspace.push_run_event(run_id, event)
 
     def _run_single_phase(label: str, template: str, ctx: contextvars.Context) -> tuple[str, str | None, str]:
-        """Execute one orchestrator phase inside the given context. Returns (label, error_or_None, orch_text).
-
-        Used for concurrent fan-out dispatch. A fresh orchestrator is built per call so that
-        each asyncio.run() invocation gets its own httpx.AsyncClient.
-        """
         def _inner():
             phase_orchestrator = _build_orchestrator()
             prompt = template.format(case_id=case_id)
@@ -677,63 +788,73 @@ def _run_background(run_id: str, case_id: str) -> None:
     with _bind(case_id=case_id, run_id=run_id):
         child_name = workspace.get_case(case_id).get("child_name", "")
         try:
-            workspace.update_run(run_id, state="running", current_phase="intake")
+            workspace.update_run(run_id, state="running", current_phase="intake" if not resume else "wake")
             _push_event({
                 "event": "run_started", "run_id": run_id, "case_id": case_id,
-                "message": _narrate("run_started", "intake", case_id=case_id, child_name=child_name),
-            })
-
-            _push_event({
-                "event": "phase_started", "run_id": run_id, "phase": "intake",
-                "message": _narrate("phase_started", "intake", case_id=case_id, child_name=child_name),
+                "resumed": resume,
+                "message": (
+                    _narrate("phase_started", "wake", case_id=case_id, child_name=child_name)
+                    if resume else
+                    _narrate("run_started", "intake", case_id=case_id, child_name=child_name)
+                ),
             })
 
             recall_count = 0
-            if _mb_enabled():
-                child = child_name or "the child"
-                try:
-                    recalled = _mb_search(case_id, f"coordination history and outcomes for case {case_id}")
-                    recall_count = len(recalled)
-                    if recall_count > 0:
-                        _push_event({
-                            "event": "memory_recall", "run_id": run_id, "case_id": case_id,
-                            "memory_count": recall_count,
-                            "previews": [m[:150] for m in recalled[:3]],
-                            "message": (
-                                f"Recalled {recall_count} note{'s' if recall_count != 1 else ''} "
-                                f"from earlier work on {child}'s case."
-                            ),
-                        })
-                except Exception:  # noqa: BLE001
-                    pass
 
-            intake_text = _quiet_run_agent(
-                intake_agent,
-                f"Process the referral packet for case {case_id}. Extract commitments and propose grants.",
-                app_name="intake_authority",
-            )
-            if not intake_text:
-                cmt_count = len(workspace.commitments.get(case_id) or [])
-                grant_count = len(workspace.grants.get(case_id) or [])
-                intake_text = (
-                    f"Intake processed for case {case_id}: "
-                    f"{cmt_count} commitments extracted, {grant_count} grants proposed."
+            if not resume:
+                from backend.agents.intake.agent import root_agent as intake_agent
+
+                _push_event({
+                    "event": "phase_started", "run_id": run_id, "phase": "intake",
+                    "message": _narrate("phase_started", "intake", case_id=case_id, child_name=child_name),
+                })
+
+                if _mb_enabled():
+                    child = child_name or "the child"
+                    try:
+                        recalled = _mb_search(case_id, f"coordination history and outcomes for case {case_id}")
+                        recall_count = len(recalled)
+                        if recall_count > 0:
+                            _push_event({
+                                "event": "memory_recall", "run_id": run_id, "case_id": case_id,
+                                "memory_count": recall_count,
+                                "previews": [m[:150] for m in recalled[:3]],
+                                "message": (
+                                    f"Recalled {recall_count} note{'s' if recall_count != 1 else ''} "
+                                    f"from earlier work on {child}'s case."
+                                ),
+                            })
+                    except Exception:  # noqa: BLE001
+                        pass
+
+                intake_text = _quiet_run_agent(
+                    intake_agent,
+                    f"Process the referral packet for case {case_id}. Extract commitments and propose grants.",
+                    app_name="intake_authority",
                 )
-            states = workspace.commitment_states(case_id)
-            _push_event({
-                "event": "phase_complete", "run_id": run_id,
-                "phase": "intake", "summary": intake_text[:300],
-                "commitment_states": states,
-                "message": _narrate("phase_complete", "intake", commitment_states=states, child_name=child_name),
-            })
+                if not intake_text:
+                    cmt_count = len(workspace.commitments.get(case_id) or [])
+                    grant_count = len(workspace.grants.get(case_id) or [])
+                    intake_text = (
+                        f"Intake processed for case {case_id}: "
+                        f"{cmt_count} commitments extracted, {grant_count} grants proposed."
+                    )
+                states = workspace.commitment_states(case_id)
+                _push_event({
+                    "event": "phase_complete", "run_id": run_id,
+                    "phase": "intake", "summary": intake_text[:300],
+                    "commitment_states": states,
+                    "message": _narrate("phase_complete", "intake", commitment_states=states, child_name=child_name),
+                })
 
-            if not workspace.commitments.get(case_id) or not workspace.grants.get(case_id):
-                raise RuntimeError(f"intake did not persist commitments/grants: {intake_text[:400]}")
+                if not workspace.commitments.get(case_id) or not workspace.grants.get(case_id):
+                    raise RuntimeError(f"intake did not persist commitments/grants: {intake_text[:400]}")
 
             # ---- Precondition-driven engine ----
             completed_phases: set[str] = set()
             phase_failures = 0
             failed_phases: list[str] = []
+            suspended = False
 
             for _engine_iter in range(len(PHASE_REGISTRY) + 1):
                 ready = [
@@ -772,56 +893,31 @@ def _run_background(run_id: str, case_id: str) -> None:
                 else:
                     label = first.label
 
-                    if label == "5-wake":
-                        from backend.workflows.durable import await_deadline
-
-                        cp = workspace.get_checkpoint(f"wf-{case_id}")
-                        cp_deadline = cp.get("due_at") if cp else None
-                        if cp_deadline:
-                            if isinstance(cp_deadline, str):
-                                cp_deadline = datetime.fromisoformat(cp_deadline.replace("Z", "+00:00"))
-                            scheduled_at = datetime.now(timezone.utc)
-                            wait_secs = max(0, (cp_deadline - scheduled_at).total_seconds())
-                            child = child_name or "the child"
+                    if label == "5-wake" and resume:
+                        recon = reconcile_commitments(case_id)
+                        overdue = [r for r in recon if r.get("overdue")]
+                        child = child_name or "the child"
+                        _push_event({
+                            "event": "reconciliation", "run_id": run_id, "case_id": case_id,
+                            "results": recon,
+                            "overdue_count": len(overdue),
+                            "message": (
+                                f"Reconciled {child}'s commitments: "
+                                f"{len(overdue)} overdue, {len(recon) - len(overdue)} on track."
+                            ),
+                        })
+                        for r in overdue:
+                            ctype = r.get("type", "")
+                            partner = _DOMAIN_LABELS.get(ctype, ctype)
+                            noun = _COMMITMENT_NOUNS.get(ctype, ctype)
                             _push_event({
-                                "event": "wake_scheduled", "run_id": run_id, "case_id": case_id,
-                                "checkpoint_due": cp_deadline.isoformat(),
-                                "wait_seconds": round(wait_secs, 1),
+                                "event": "commitment_overdue", "run_id": run_id, "case_id": case_id,
+                                "commitment_type": ctype,
+                                "deadline": r.get("deadline", ""),
+                                "status": r.get("status", ""),
                                 "message": (
-                                    f"Follow-up reminder set for {int(wait_secs)}s from now — "
-                                    f"waiting for the deadline before checking back on {child}'s commitments."
-                                ) if wait_secs > 0 else (
-                                    f"Deadline already reached — checking back on {child}'s commitments now."
-                                ),
-                            })
-                            workspace.update_run(run_id, current_phase="waiting-for-wake")
-
-                            if wait_secs > 0:
-                                try:
-                                    wake_result = await_deadline(case_id, poll_interval=2.0, max_wait=300.0)
-                                except (TimeoutError, ValueError) as wake_exc:
-                                    _push_event({
-                                        "event": "phase_error", "run_id": run_id,
-                                        "phase": "5-wake", "error": str(wake_exc),
-                                        "message": f"The scheduled follow-up could not fire: {wake_exc}",
-                                    })
-                                    phase_failures += 1
-                                    failed_phases.append("5-wake")
-                                    completed_phases.add(label)
-                                    continue
-                            else:
-                                workspace.update_checkpoint_state(f"wf-{case_id}", "running")
-                                wake_result = {"waited_seconds": 0}
-
-                            fired_at = datetime.now(timezone.utc)
-                            elapsed = wake_result.get("waited_seconds", 0)
-                            _push_event({
-                                "event": "wake_fired", "run_id": run_id, "case_id": case_id,
-                                "fired_at": fired_at.isoformat(),
-                                "elapsed_seconds": elapsed,
-                                "message": (
-                                    f"Reminder fired after {elapsed:.0f}s — "
-                                    f"now following up on {child}'s open commitments."
+                                    f"{_cap(partner)}'s {noun} for {child} is overdue — "
+                                    f"deadline was {r.get('deadline', 'unknown')}, status is {r.get('status', 'unknown')}."
                                 ),
                             })
 
@@ -857,6 +953,23 @@ def _run_background(run_id: str, case_id: str) -> None:
                     })
                     completed_phases.add(label)
 
+                    if "checkpoint" in label and not resume:
+                        child = child_name or "the child"
+                        cp = workspace.get_checkpoint(f"wf-{case_id}")
+                        cp_due = cp.get("due_at", "") if cp else ""
+                        if hasattr(cp_due, "isoformat"):
+                            cp_due = cp_due.isoformat()
+                        _push_event({
+                            "event": "run_suspended", "run_id": run_id, "case_id": case_id,
+                            "checkpoint_due": str(cp_due),
+                            "message": (
+                                f"Checkpoint saved — this run is ending. A scheduled push will resume "
+                                f"{child}'s case when commitments come due."
+                            ),
+                        })
+                        suspended = True
+                        break
+
             else:
                 raise RuntimeError(
                     f"precondition engine exceeded {len(PHASE_REGISTRY) + 1} iterations — "
@@ -878,6 +991,19 @@ def _run_background(run_id: str, case_id: str) -> None:
                         f"partner contacts, shortcuts, and strategies will be available next time."
                     ),
                 })
+
+            if suspended:
+                workspace.update_run(
+                    run_id, state="suspended", current_phase="checkpoint",
+                    commitment_states=commitments,
+                )
+                _push_event({
+                    "event": "run_completed", "run_id": run_id, "case_id": case_id,
+                    "commitment_states": commitments,
+                    "outcome": "suspended",
+                    "message": _narrate("phase_complete", "checkpoint", commitment_states=commitments, child_name=child_name),
+                })
+                return
 
             pending_commitments = [k for k, v in commitments.items() if v == "pending"]
             has_unresolved = bool(pending_commitments)
@@ -983,6 +1109,29 @@ def list_case_runs(case_id: str) -> list[dict]:
 
 
 @app.get(
+    "/v1/cases/{case_id}/events",
+    responses={404: {"description": "Case not found"}},
+)
+def list_case_events(case_id: str) -> list[dict]:
+    """All run events across every run for a case, in chronological order.
+
+    The portal uses this to stitch a continuous timeline across the pre-checkpoint
+    and post-wake runs, reading a single case's full history regardless of how
+    many runs it spans.
+    """
+    workspace.get_case(case_id)
+    all_events: list[dict] = []
+    for run in workspace.list_runs_for_case(case_id):
+        rid = run.get("run_id", "")
+        for ev in run.get("events", []):
+            ev_copy = dict(ev)
+            ev_copy.setdefault("run_id", rid)
+            all_events.append(ev_copy)
+    all_events.sort(key=lambda e: e.get("timestamp", ""))
+    return all_events
+
+
+@app.get(
     "/v1/runs/{run_id}",
     responses={404: {"description": "Run not found"}},
 )
@@ -1004,7 +1153,7 @@ def get_run(run_id: str) -> dict:
     return result
 
 
-_TERMINAL_STATES = {"completed", "failed", "partial_failure"}
+_TERMINAL_STATES = {"completed", "failed", "partial_failure", "suspended"}
 
 _SSE_HEARTBEAT_INTERVAL = 15
 _SSE_MAX_DURATION = 1800

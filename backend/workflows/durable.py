@@ -9,6 +9,20 @@ from backend.runtime.workspace import workspace
 _DEFAULT_DUE_DAYS = 17
 
 
+def _parse_duration(s: str) -> timedelta:
+    """Parse a duration string like '45s', '5m', '2h', '17d' into a timedelta."""
+    s = s.strip()
+    if s.endswith("s"):
+        return timedelta(seconds=int(s[:-1]))
+    if s.endswith("m"):
+        return timedelta(minutes=int(s[:-1]))
+    if s.endswith("h"):
+        return timedelta(hours=int(s[:-1]))
+    if s.endswith("d"):
+        return timedelta(days=int(s[:-1]))
+    raise ValueError(f"cannot parse duration {s!r}; expected e.g. '45s', '17d'")
+
+
 def write_checkpoint(case_id: str, due_at: datetime | None = None) -> dict:
     """Persist a workflow checkpoint for case_id.
 
@@ -31,12 +45,70 @@ def write_checkpoint(case_id: str, due_at: datetime | None = None) -> dict:
     }
     workspace.put_checkpoint(workflow_id, body)
     memory.write(case_id, "checkpoint", {"workflow_id": workflow_id, "current_step": "sleeping"})
-    _publish_wake(case_id, workflow_id)
+    return body
+
+
+def schedule_commitment_checkpoints(case_id: str) -> dict:
+    """Write a checkpoint anchored at NOW with per-commitment deadlines.
+
+    Called by the orchestrator's schedule_wake tool during the checkpoint phase, AFTER
+    fan-out has populated commitment states. The due_at is anchored at this moment —
+    not at case creation — so a short due_in always produces a visible gap between the
+    run ending and the push arriving.
+
+    Stores commitment_deadlines (from the referral packet) for reconciliation at wake time.
+    The checkpoint's due_at is either now + due_in (demo) or the earliest commitment
+    deadline (real), whichever applies.
+    """
+    now = datetime.now(timezone.utc)
+    case = workspace.get_case(case_id)
+    due_in_str = case.get("due_in")
+
+    commitments = workspace.commitments.get(case_id, [])
+    commitment_deadlines: dict[str, str] = {}
+    for c in commitments:
+        ctype = c.get("type", "")
+        deadline = c.get("deadline", "")
+        if ctype and deadline:
+            commitment_deadlines[ctype] = deadline
+
+    if due_in_str:
+        due_at = now + _parse_duration(due_in_str)
+    elif commitment_deadlines:
+        parsed = []
+        for dl in commitment_deadlines.values():
+            if isinstance(dl, str):
+                dt = datetime.fromisoformat(dl.replace("Z", "+00:00"))
+            else:
+                dt = dl
+            if not getattr(dt, "tzinfo", None):
+                dt = dt.replace(tzinfo=timezone.utc)
+            parsed.append(dt)
+        due_at = min(parsed)
+        if due_at <= now:
+            due_at = now + timedelta(seconds=5)
+    else:
+        due_at = now + timedelta(days=_DEFAULT_DUE_DAYS)
+
+    workflow_id = f"wf-{case_id}"
+    body = {
+        "workflow_id": workflow_id,
+        "case_id": case_id,
+        "current_step": "sleeping",
+        "commitment_states": workspace.commitment_states(case_id),
+        "commitment_deadlines": commitment_deadlines,
+        "due_at": due_at,
+        "state": "waiting",
+        "retry_count": 0,
+        "completed": False,
+    }
+    workspace.put_checkpoint(workflow_id, body)
+    memory.write(case_id, "checkpoint", {"workflow_id": workflow_id, "current_step": "sleeping"})
     return body
 
 
 def _publish_wake(case_id: str, workflow_id: str) -> None:
-    """Publish a wake event. Skipped in memory mode — no subscriber exists."""
+    """Publish a wake event to Pub/Sub for consumption by the push handler."""
     from backend.state import store as _store
     if not _store.enabled():
         return
@@ -100,58 +172,6 @@ def sweep(now: datetime | None = None) -> list[str]:
     return fired
 
 
-def await_deadline(case_id: str, poll_interval: float = 2.0, max_wait: float = 300.0) -> dict:
-    """Block until the case's checkpoint becomes due, then fire it.
-
-    This is the demo-friendly path: the run genuinely waits for wall-clock time to pass.
-    Returns the checkpoint dict with actual timing metadata. Raises TimeoutError if
-    max_wait is exceeded before the deadline arrives (safety valve for Cloud Run's 900s limit).
-    """
-    import time
-
-    workflow_id = f"wf-{case_id}"
-    cp = workspace.get_checkpoint(workflow_id)
-    if not cp:
-        raise ValueError(f"no checkpoint for {case_id}")
-
-    due_at = cp.get("due_at")
-    if due_at is None:
-        raise ValueError(f"checkpoint {workflow_id} has no due_at")
-    if isinstance(due_at, str):
-        due_at = datetime.fromisoformat(due_at.replace("Z", "+00:00"))
-    if not due_at.tzinfo:
-        due_at = due_at.replace(tzinfo=timezone.utc)
-
-    start = time.monotonic()
-    scheduled_at = datetime.now(timezone.utc)
-
-    while True:
-        now = datetime.now(timezone.utc)
-        if now >= due_at:
-            break
-        elapsed = time.monotonic() - start
-        if elapsed >= max_wait:
-            raise TimeoutError(
-                f"waited {elapsed:.1f}s for checkpoint {workflow_id} "
-                f"(due_at={due_at.isoformat()}, now={now.isoformat()})"
-            )
-        remaining = (due_at - now).total_seconds()
-        time.sleep(min(poll_interval, remaining + 0.1))
-
-    fired_at = datetime.now(timezone.utc)
-    elapsed_seconds = (fired_at - scheduled_at).total_seconds()
-
-    workspace.update_checkpoint_state(workflow_id, "running")
-    return {
-        "workflow_id": workflow_id,
-        "case_id": case_id,
-        "due_at": due_at,
-        "fired_at": fired_at,
-        "waited_seconds": round(elapsed_seconds, 1),
-        "state": "running",
-    }
-
-
 def resume_wake(case_id: str, workflow_id: str | None = None) -> dict:
     """Resume a workflow from its checkpoint, writing a scheduler audit event."""
     if workflow_id is None:
@@ -174,3 +194,57 @@ def resume_wake(case_id: str, workflow_id: str | None = None) -> dict:
         },
     )
     return checkpoint
+
+
+def reconcile_commitments(case_id: str) -> list[dict]:
+    """Compare each commitment's deadline against the clock and its actual status.
+
+    A commitment is overdue when its deadline has passed AND the partner has not
+    delivered (status is still pending, unresolved, or blocked). A completed commitment
+    is never overdue regardless of whether the deadline has passed — the partner
+    delivered, which is what matters.
+    """
+    now = datetime.now(timezone.utc)
+    workflow_id = f"wf-{case_id}"
+    cp = workspace.get_checkpoint(workflow_id)
+    commitment_deadlines = (cp or {}).get("commitment_deadlines", {})
+    states = workspace.commitment_states(case_id)
+    results = []
+
+    for ctype, status in states.items():
+        deadline_str = commitment_deadlines.get(ctype, "")
+        if not deadline_str:
+            results.append({
+                "type": ctype, "status": status,
+                "deadline": None, "overdue": False,
+                "verdict": "no_deadline",
+            })
+            continue
+
+        if isinstance(deadline_str, str):
+            deadline = datetime.fromisoformat(deadline_str.replace("Z", "+00:00"))
+        else:
+            deadline = deadline_str
+        if not getattr(deadline, "tzinfo", None):
+            deadline = deadline.replace(tzinfo=timezone.utc)
+
+        deadline_passed = now >= deadline
+        delivered = status in ("completed",)
+        overdue = deadline_passed and not delivered
+
+        if delivered:
+            verdict = "completed_on_time" if not deadline_passed else "completed_late"
+        elif deadline_passed:
+            verdict = "overdue"
+        else:
+            verdict = "within_deadline"
+
+        results.append({
+            "type": ctype,
+            "status": status,
+            "deadline": deadline.isoformat(),
+            "deadline_passed": deadline_passed,
+            "overdue": overdue,
+            "verdict": verdict,
+        })
+    return results

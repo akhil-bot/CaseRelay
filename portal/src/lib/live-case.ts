@@ -4,6 +4,7 @@ import { useCallback, useEffect, useReducer, useRef } from "react";
 import {
   getCase,
   listCaseRuns,
+  listCaseEvents,
   streamRunEvents,
   getRunStatus,
   type LiveCaseDetail,

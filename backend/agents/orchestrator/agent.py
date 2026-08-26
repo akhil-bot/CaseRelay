@@ -14,7 +14,7 @@ from backend.memory.platform import enabled as memory_bank_enabled, search_sync 
 
 logger = logging.getLogger(__name__)
 from backend.runtime.workspace import workspace
-from backend.workflows.durable import resume_wake, write_checkpoint
+from backend.workflows.durable import reconcile_commitments, resume_wake, schedule_commitment_checkpoints, write_checkpoint
 
 # Each specialist is a separately deployed endpoint. The env var holds its base URL; when it is
 # absent the orchestrator falls back to an in-process copy so local runs need no cloud.
@@ -55,15 +55,12 @@ def activate_case(case_id: str) -> dict:
 
 
 def schedule_wake(case_id: str) -> dict:
-    """Checkpoint the workflow, preserving the deadline set at case creation.
+    """Checkpoint the workflow with per-commitment deadlines, anchored at NOW.
 
-    The user's chosen deadline (via due_in at creation) is authoritative. If a checkpoint
-    already exists for this case, its due_at is carried forward. Only when no checkpoint
-    exists (shouldn't happen — create_case writes one) does the 17-day default apply.
+    due_at is computed at checkpoint write time — not at case creation — so a short
+    due_in always produces a visible gap between the run ending and the push arriving.
     """
-    existing = workspace.get_checkpoint(f"wf-{case_id}")
-    due_at = existing.get("due_at") if existing else None
-    return write_checkpoint(case_id, due_at=due_at)
+    return schedule_commitment_checkpoints(case_id)
 
 
 def wake_workflow(case_id: str) -> dict:
@@ -96,6 +93,15 @@ def get_commitment_states(case_id: str) -> dict:
     reads the statuses the specialists actually persisted rather than repeating their reply.
     """
     return workspace.commitment_states(case_id)
+
+
+def check_overdue(case_id: str) -> list:
+    """Compare each commitment's real deadline against the clock and its response state.
+
+    Returns per-commitment verdicts: overdue (deadline passed, partner did not deliver),
+    completed_on_time, completed_late, or within_deadline.
+    """
+    return reconcile_commitments(case_id)
 
 
 def approve_escalation(case_id: str) -> dict:
@@ -177,6 +183,7 @@ def build_for_run() -> "Agent":
             approve_escalation,
             preload_memory,
             get_commitment_states,
+            check_overdue,
         ]
         + remote_tools,
         sub_agents=sub_agents,
@@ -198,6 +205,7 @@ root_agent = Agent(
         approve_escalation,
         preload_memory,
         get_commitment_states,
+        check_overdue,
     ]
     + _remote_tools,
     sub_agents=_sub_agents,

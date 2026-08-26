@@ -53,7 +53,7 @@ if [ -f "$CP_URL_FILE" ]; then
     || gcloud pubsub subscriptions create caserelay-events-push \
          --project="$PROJECT" \
          --topic=caserelay-events \
-         --push-endpoint="${CP_URL}/v1/workflows/sweep" \
+         --push-endpoint="${CP_URL}/v1/pubsub/push" \
          --push-auth-service-account="${PUSH_SA}" \
          --push-auth-token-audience="${CP_URL}" \
          --ack-deadline=60 \

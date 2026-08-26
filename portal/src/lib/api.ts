@@ -48,7 +48,7 @@ export interface RunRef {
 
 export interface RunStatus {
   run_id: string;
-  state: "queued" | "running" | "completed" | "partial_failure" | "failed";
+  state: "queued" | "running" | "completed" | "partial_failure" | "failed" | "suspended";
   current_phase?: string;
   commitment_states?: Record<string, string>;
   failed_phases?: string[];
@@ -119,6 +119,10 @@ export async function getCase(caseId: string): Promise<LiveCaseDetail> {
 
 export async function listCaseRuns(caseId: string): Promise<CaseRunSummary[]> {
   return request(`/v1/cases/${caseId}/runs`);
+}
+
+export async function listCaseEvents(caseId: string): Promise<RunEvent[]> {
+  return request(`/v1/cases/${caseId}/events`);
 }
 
 /**

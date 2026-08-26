@@ -600,6 +600,23 @@
         }
       }
     },
+    "/v1/pubsub/push": {
+      "post": {
+        "summary": "Pubsub Push",
+        "description": "Authenticated Pub/Sub push handler. Processes sweep triggers and wake messages.\n\nIdempotency: a wake for a case that already has an active run is acknowledged\nwithout starting a duplicate. Duplicate Pub/Sub deliveries produce exactly one run.",
+        "operationId": "pubsub_push_v1_pubsub_push_post",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/scenarios": {
       "get": {
         "summary": "List Scenarios",
@@ -693,6 +710,54 @@
                     "additionalProperties": true
                   },
                   "title": "Response List Case Runs V1 Cases  Case Id  Runs Get"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Case not found"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/cases/{case_id}/events": {
+      "get": {
+        "summary": "List Case Events",
+        "description": "All run events across every run for a case, in chronological order.\n\nThe portal uses this to stitch a continuous timeline across the pre-checkpoint\nand post-wake runs, reading a single case's full history regardless of how\nmany runs it spans.",
+        "operationId": "list_case_events_v1_cases__case_id__events_get",
+        "parameters": [
+          {
+            "name": "case_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Case Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": true
+                  },
+                  "title": "Response List Case Events V1 Cases  Case Id  Events Get"
                 }
               }
             }

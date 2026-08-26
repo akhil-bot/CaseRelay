@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import { useMemo, useState } from "react";
+import React, { useMemo, useState } from "react";
 import { Icon } from "@/components/icons";
 import { LiveActivityFeed } from "@/components/live/LiveActivityFeed";
 import {
@@ -23,7 +23,7 @@ import {
 import { fieldLabel } from "@/design/copy";
 import { control, layout, row, surface, type as type_ } from "@/design/tokens";
 import { useDemo } from "@/lib/demo-store";
-import { submitRun, type RunEvent } from "@/lib/api";
+import { submitRun, listCaseEvents, type RunEvent } from "@/lib/api";
 import { useLiveCase, useLiveRunEvents } from "@/lib/live-case";
 import { AGENTS_BY_ID } from "@/lib/mock/agents";
 import { AUTHORITY_GRANT, CASES, PRIMARY_CASE_ID } from "@/lib/mock/cases";
@@ -86,23 +86,45 @@ function LiveCaseDetail({ caseId }: { caseId: string }) {
     ? manualRunState
     : runState;
 
+  const [crossRunEvents, setCrossRunEvents] = useState<RunEvent[]>([]);
+
+  React.useEffect(() => {
+    if (liveCase.status !== "loaded") return;
+    let cancelled = false;
+    listCaseEvents(caseId)
+      .then((events) => { if (!cancelled) setCrossRunEvents(events); })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [caseId, liveCase.status, activeRunState.terminalState]);
+
+  const mergedEvents = useMemo(() => {
+    if (crossRunEvents.length === 0) return activeRunState.events;
+    const seen = new Set(crossRunEvents.map((e) => `${e.run_id}-${e.event}-${e.timestamp ?? ""}`));
+    const extra = activeRunState.events.filter(
+      (e) => !seen.has(`${e.run_id}-${e.event}-${e.timestamp ?? ""}`),
+    );
+    return [...crossRunEvents, ...extra].sort(
+      (a, b) => String(a.timestamp ?? "").localeCompare(String(b.timestamp ?? "")),
+    );
+  }, [crossRunEvents, activeRunState.events]);
+
   const quarantineCompleted = useMemo(() =>
-    activeRunState.events.filter((ev: RunEvent) =>
+    mergedEvents.filter((ev: RunEvent) =>
       ev.event === "phase_complete" && (ev.phase ?? "").includes("quarantine"),
     ),
-  [activeRunState.events]);
+  [mergedEvents]);
 
   const quarantineErrors = useMemo(() =>
-    activeRunState.events.filter((ev: RunEvent) =>
+    mergedEvents.filter((ev: RunEvent) =>
       ev.event === "phase_error" && (ev.phase ?? "").includes("quarantine"),
     ),
-  [activeRunState.events]);
+  [mergedEvents]);
 
   const escalationCompleted = useMemo(() =>
-    activeRunState.events.filter((ev: RunEvent) =>
+    mergedEvents.filter((ev: RunEvent) =>
       ev.event === "phase_complete" && (ev.phase ?? "").includes("approve"),
     ),
-  [activeRunState.events]);
+  [mergedEvents]);
 
   const handleRun = async () => {
     setSubmitting(true);
@@ -350,9 +372,9 @@ function LiveCaseDetail({ caseId }: { caseId: string }) {
         </Card>
       )}
 
-      {/* Live activity feed */}
-      {(isStreaming || activeRunState.events.length > 0) && (
-        <LiveActivityFeed run={activeRunState} />
+      {/* Live activity feed — stitched across all runs for timeline continuity */}
+      {(isStreaming || mergedEvents.length > 0) && (
+        <LiveActivityFeed run={{ ...activeRunState, events: mergedEvents }} />
       )}
 
       {/* Audit trail (from initial case fetch) */}
