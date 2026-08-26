@@ -2,77 +2,211 @@
 
 import { Fragment, useEffect, useRef } from "react";
 import { Icon, type IconName } from "@/components/icons";
-import { Badge, Card, cx } from "@/components/ui/primitives";
-import { row, type as type_ } from "@/design/tokens";
+import { Badge, Card, DOMAIN_META, StatusBadge, cx } from "@/components/ui/primitives";
+import { row, tone, type Tone, type as type_ } from "@/design/tokens";
 import type { RunEvent } from "@/lib/api";
 import type { LiveRunState } from "@/lib/live-case";
+import type { CommitmentStatus, Domain } from "@/lib/types";
 
-const _HIDDEN_EVENTS = new Set(["connected", "stream_end", "stream_timeout"]);
+const HIDDEN_EVENTS = new Set([
+  "connected",
+  "stream_end",
+  "stream_timeout",
+  // The memory phase already reports that the notes were written.
+  "memory_write",
+]);
 
-// ─── Icon mapping ─────────────────────────────────────────────────────────────
+/** Fan-out phases are labelled by specialist; a volunteer reads them as services. */
+const SPECIALIST_DOMAIN: Record<string, Domain> = {
+  education_liaison: "education",
+  health_coordination: "health",
+  legal_aid: "legal",
+  shelter_status: "shelter",
+  family_services: "family_services",
+};
 
-function eventIcon(event: string): { name: IconName; color: string } {
-  switch (event) {
-    case "run_started":
-      return { name: "play", color: "text-brand" };
-    case "phase_started":
-      return { name: "arrowRight", color: "text-ink-muted" };
-    case "phase_complete":
-      return { name: "check", color: "text-brand" };
-    case "phase_error":
-      return { name: "alert", color: "text-danger" };
-    case "run_completed":
-      return { name: "checkCircle", color: "text-brand" };
-    case "run_partial_failure":
-      return { name: "alert", color: "text-warn" };
-    case "run_failed":
-      return { name: "close", color: "text-danger" };
-    case "run_summary":
-      return { name: "list", color: "text-brand" };
-    case "memory_recall":
-    case "memory_write":
-      return { name: "memory", color: "text-accent-deep" };
-    case "wake_scheduled":
-      return { name: "sleep", color: "text-accent-deep" };
-    case "wake_fired":
-      return { name: "play", color: "text-accent" };
-    default:
-      return { name: "activity", color: "text-ink-muted" };
-  }
-}
-
-// ─── Significance ─────────────────────────────────────────────────────────────
-
-type Significance = "routine" | "notable" | "critical";
+/** Commitment state decides the colour; the domain decides the glyph. */
+const STATUS_TONE: Record<string, Tone> = {
+  completed: "seal",
+  blocked: "danger",
+  unresolved: "warn",
+  scheduled: "accent",
+};
 
 /**
- * Grades each event so visual weight follows importance rather than decoration.
- * Quarantine and errors are critical. Approvals, completions, and wake events are
- * notable. Everything else (progress ticks, memory operations) is routine.
+ * Why a commitment ever comes back blocked: the only path to that state is an
+ * agent refusing a reply that reached past what it was allowed to answer.
  */
-function getSignificance(ev: RunEvent): Significance {
+const GUARDRAIL_NOTE =
+  "Their reply asked for medical records while answering a question about enrollment, so it was held back and passed to your supervisor.";
+
+// ─── Reading one event ────────────────────────────────────────────────────────
+
+function eventDomain(ev: RunEvent): Domain | null {
+  const commitmentType = typeof ev.commitment_type === "string" ? ev.commitment_type : "";
+  if (commitmentType in DOMAIN_META) return commitmentType as Domain;
+
   const phase = ev.phase ?? "";
-  const event = ev.event;
-  if (
-    phase.includes("quarantine") ||
-    event === "phase_error" ||
-    event === "run_failed"
-  )
-    return "critical";
-  if (
-    phase.includes("approve") ||
-    event === "run_completed" ||
-    event === "run_partial_failure" ||
-    event === "run_summary" ||
-    event === "wake_fired"
-  )
-    return "notable";
-  return "routine";
+  if (phase.startsWith("3-fanout-")) {
+    return SPECIALIST_DOMAIN[phase.slice("3-fanout-".length)] ?? null;
+  }
+  // The post-approval follow-up belongs to the school, matching the backend's
+  // own phase-to-service map.
+  if (phase === "8-followup") return "education";
+  return null;
 }
 
-function isMemoryEvent(ev: RunEvent): boolean {
-  return ev.event === "memory_recall" || ev.event === "memory_write";
+function commitmentStatus(ev: RunEvent, domain: Domain | null): string {
+  if (!domain) return "";
+  const states = ev.commitment_states as Record<string, string> | undefined;
+  return states?.[domain] ?? "";
 }
+
+function genericIcon(ev: RunEvent): IconName {
+  const phase = ev.phase ?? "";
+  if (phase === "intake") return "document";
+  if (phase.includes("activate")) return "approvals";
+  if (phase.includes("wake")) return "sleep";
+  if (phase.includes("nudge")) return "mail";
+  if (ev.event === "run_started") return "play";
+  if (ev.event === "run_completed") return "checkCircle";
+  return "activity";
+}
+
+/** How long the case sat idle, and what it is now waiting on. */
+function suspendedLine(ev: RunEvent): string {
+  const open = Number(ev.checkpoint_count ?? 0);
+  if (open === 0) return "Nothing left to follow up on right now.";
+  if (open === 1) return "One commitment is still open, with a follow-up date set.";
+  return `${open} commitments are still open, each with its own follow-up date.`;
+}
+
+type Weight = "alert" | "attention" | "normal" | "quiet";
+
+interface EventView {
+  weight: Weight;
+  icon: IconName;
+  variant: Tone;
+  message: string;
+  /** A second line, only where the headline leaves an obvious question open. */
+  note?: string;
+  /** Rendered as a badge, only for the states a volunteer has to act on. */
+  status?: CommitmentStatus;
+}
+
+/**
+ * Grades one event and picks its glyph.
+ *
+ * Weight is the only input to row styling, so the two things a volunteer must
+ * not miss — a reply the guardrail caught, and a commitment that cannot move —
+ * are the only rows carrying a rule and a tint. Wording is the backend's
+ * narration except where that narration repeats its neighbour or names
+ * machinery nobody outside the system has words for.
+ */
+function describe(ev: RunEvent): EventView {
+  const phase = ev.phase ?? "";
+  const domain = eventDomain(ev);
+  const status = commitmentStatus(ev, domain);
+  const message = (typeof ev.message === "string" && ev.message) || ev.event.replace(/_/g, " ");
+  const domainIcon = domain ? DOMAIN_META[domain].icon : null;
+
+  if (ev.event === "run_suspended") {
+    return { weight: "quiet", icon: "sleep", variant: "accent", message: suspendedLine(ev) };
+  }
+
+  if (phase.includes("quarantine")) {
+    return { weight: "alert", icon: "shield", variant: "danger", message };
+  }
+
+  if (status === "blocked") {
+    return {
+      weight: "alert",
+      icon: domainIcon ?? "shield",
+      variant: "danger",
+      message,
+      note: GUARDRAIL_NOTE,
+      status: "blocked",
+    };
+  }
+
+  if (ev.event === "phase_error" || ev.event === "run_failed") {
+    return { weight: "alert", icon: domainIcon ?? "alert", variant: "danger", message };
+  }
+
+  if (ev.event === "reconciliation") {
+    const overdue = Number(ev.overdue_count ?? 0);
+    const total = Array.isArray(ev.results) ? ev.results.length : 0;
+    return overdue > 0
+      ? {
+          weight: "attention",
+          icon: "clock",
+          variant: "warn",
+          message: `${overdue} of ${total} commitments are past their date.`,
+        }
+      : { weight: "quiet", icon: "list", variant: "neutral", message: "Checked every date — nothing overdue." };
+  }
+
+  if (
+    phase.includes("approve") ||
+    phase.includes("unanswered") ||
+    ev.event === "supervisor_notified" ||
+    ev.event === "followup_ignored" ||
+    ev.event === "commitment_overdue" ||
+    ev.event === "run_partial_failure" ||
+    status === "unresolved"
+  ) {
+    return {
+      weight: "attention",
+      icon: domainIcon ?? (ev.event === "supervisor_notified" ? "user" : "alert"),
+      variant: "warn",
+      message,
+      status: status === "unresolved" ? "unresolved" : undefined,
+    };
+  }
+
+  if (phase.includes("memory") || ev.event === "memory_recall") {
+    return {
+      weight: "quiet",
+      icon: "memory",
+      variant: "neutral",
+      message: ev.event === "phase_complete" ? "Case notes updated." : message,
+    };
+  }
+
+  if (ev.event === "run_started") {
+    return { weight: "quiet", icon: "play", variant: "neutral", message };
+  }
+
+  return {
+    weight: "normal",
+    icon: domainIcon ?? genericIcon(ev),
+    variant: STATUS_TONE[status] ?? (domain ? DOMAIN_META[domain].variant : "neutral"),
+    message,
+  };
+}
+
+// ─── Weight → styling ─────────────────────────────────────────────────────────
+
+const WEIGHT_ROW: Record<Weight, string> = {
+  alert: "border-l-2 border-l-danger/70 bg-danger/[0.04] py-3",
+  attention: "border-l-2 border-l-warn/60 bg-warn-soft/30 py-2.5",
+  normal: cx("py-2", row.hover),
+  quiet: cx("py-1.5", row.hover),
+};
+
+const WEIGHT_TEXT: Record<Weight, string> = {
+  alert: "text-[13px] font-semibold leading-relaxed text-ink",
+  attention: "text-[12.5px] font-medium leading-relaxed text-ink",
+  normal: "text-[12.5px] leading-relaxed text-ink-soft",
+  quiet: "text-[11.5px] leading-relaxed text-ink-muted",
+};
+
+const WEIGHT_ICON_SIZE: Record<Weight, number> = {
+  alert: 15,
+  attention: 14,
+  normal: 14,
+  quiet: 12,
+};
 
 // ─── Time helpers ─────────────────────────────────────────────────────────────
 
@@ -103,9 +237,27 @@ function formatElapsed(fromTs: string | undefined, toTs: string | undefined): st
   }
 }
 
-// ─── Badge/icon helpers (terminal and commitment) ─────────────────────────────
+/** A follow-up date, said the way someone would say it out loud. */
+function formatFollowUp(ts: string | undefined): string {
+  if (!ts) return "";
+  const due = new Date(ts);
+  if (Number.isNaN(due.getTime())) return "";
+  if (due.toDateString() === new Date().toDateString()) {
+    return `today at ${due.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`;
+  }
+  return due.toLocaleDateString([], { day: "numeric", month: "short" });
+}
 
-function terminalBadgeVariant(state: string): "brand" | "warn" | "danger" | "neutral" {
+// ─── Terminal-state helpers ───────────────────────────────────────────────────
+
+function terminalStateLabel(state: string): string {
+  if (state === "completed") return "All steps complete";
+  if (state === "partial_failure") return "Some steps still open";
+  if (state === "failed") return "Could not complete";
+  return state.replace(/_/g, " ");
+}
+
+function terminalBadgeVariant(state: string): Tone {
   if (state === "completed") return "brand";
   if (state === "partial_failure") return "warn";
   if (state === "failed") return "danger";
@@ -116,20 +268,6 @@ function terminalIcon(state: string): IconName {
   if (state === "completed") return "checkCircle";
   if (state === "partial_failure") return "alert";
   if (state === "failed") return "close";
-  return "clock";
-}
-
-function statusVariant(status: string): "brand" | "warn" | "danger" | "neutral" {
-  if (status === "completed") return "brand";
-  if (status === "blocked") return "danger";
-  if (status === "unresolved") return "warn";
-  return "neutral";
-}
-
-function statusIcon(status: string): IconName {
-  if (status === "completed") return "check";
-  if (status === "blocked") return "lock";
-  if (status === "unresolved") return "alert";
   return "clock";
 }
 
@@ -178,26 +316,20 @@ function SummaryCard({ ev }: { ev: RunEvent }) {
 
           {commitments.length > 0 && (
             <div className="mt-3 space-y-2">
-              {commitments.map((c) => (
-                <div key={c.domain} className="flex items-center gap-2.5">
-                  <Icon
-                    name={statusIcon(c.status)}
-                    size={13}
-                    className={cx(
-                      "shrink-0",
-                      statusVariant(c.status) === "brand"
-                        ? "text-brand"
-                        : statusVariant(c.status) === "danger"
-                          ? "text-danger"
-                          : statusVariant(c.status) === "warn"
-                            ? "text-warn"
-                            : "text-ink-muted",
-                    )}
-                  />
-                  <span className="text-[12.5px] text-ink">{c.label}</span>
-                  <Badge variant={statusVariant(c.status)}>{c.status}</Badge>
-                </div>
-              ))}
+              {commitments.map((c) => {
+                const meta = DOMAIN_META[c.domain as Domain];
+                return (
+                  <div key={c.domain} className="flex flex-wrap items-center gap-2.5">
+                    <Icon
+                      name={meta?.icon ?? "activity"}
+                      size={13}
+                      className={cx("shrink-0", tone[STATUS_TONE[c.status] ?? "neutral"].text)}
+                    />
+                    <span className="text-[12.5px] text-ink">{c.label}</span>
+                    <StatusBadge status={c.status as CommitmentStatus} />
+                  </div>
+                );
+              })}
             </div>
           )}
 
@@ -220,24 +352,6 @@ function SummaryCard({ ev }: { ev: RunEvent }) {
               </ul>
             </div>
           )}
-
-          {ev.memory != null &&
-            (() => {
-              const mem = ev.memory as { recalled: number; wrote: boolean };
-              const parts: string[] = [];
-              if (mem.recalled > 0)
-                parts.push(
-                  `Recalled ${mem.recalled} note${mem.recalled !== 1 ? "s" : ""} from earlier work`,
-                );
-              if (mem.wrote) parts.push("Saved notes for next time");
-              if (parts.length === 0) return null;
-              return (
-                <p className="mt-3 flex items-center gap-1.5 border-t border-line pt-3 text-[11.5px] text-ink-muted">
-                  <Icon name="memory" size={12} className="shrink-0 text-accent" />
-                  {parts.join(" · ")}
-                </p>
-              );
-            })()}
         </div>
 
         {ts && (
@@ -254,9 +368,9 @@ function SummaryCard({ ev }: { ev: RunEvent }) {
 }
 
 /**
- * Visual divider between events from two different runs.
- * Makes the temporal gap legible: a judge can see that real time passed between
- * the last event of run 1 and the first event of run 2.
+ * Visual divider between events from two different runs. Makes the temporal gap
+ * legible: real time passed between the last event of one round and the first
+ * event of the next.
  */
 function RunGapMarker({
   fromTs,
@@ -271,42 +385,32 @@ function RunGapMarker({
     <li
       className="flex items-center gap-3 py-4"
       role="separator"
-      aria-label="Case was waiting on follow-up between rounds of outreach"
+      aria-label="The case waited, then checked back on its own"
     >
       <div className="h-px flex-1 bg-line" aria-hidden="true" />
       <span className="flex shrink-0 items-center gap-1.5 text-[11.5px] text-ink-muted">
         <Icon name="sleep" size={12} className="shrink-0 text-accent-deep" />
-        {elapsed ? `waiting on follow-up\u202f·\u202f${elapsed}` : "checked back"}
-        {" — checked back automatically"}
+        {elapsed ? `Checked back ${elapsed} later` : "Checked back later"}
       </span>
       <div className="h-px flex-1 bg-line" aria-hidden="true" />
     </li>
   );
 }
 
-/**
- * Shown at the bottom of the feed when the run state is "suspended".
- * Communicates that the system is deliberately idle, not broken, and that
- * resumption is automatic — the key claim for the multi-week async operation story.
- */
-function DormantBanner({ wakeScheduledAt }: { wakeScheduledAt?: string }) {
+/** Shown at the foot of the feed while the case is deliberately idle. */
+function DormantBanner({ nextFollowUp }: { nextFollowUp?: string }) {
   return (
     <div className="flex items-start gap-3 rounded-lg border border-accent/25 bg-accent-soft px-4 py-4">
       <Icon name="sleep" size={18} className="mt-0.5 shrink-0 text-accent-deep" />
       <div className="min-w-0 flex-1">
-        <p className="text-[13px] font-semibold text-accent-deep">
-          Waiting on follow-up — checking back automatically
-        </p>
+        <p className="text-[13px] font-semibold text-accent-deep">Nothing due right now</p>
         <p className="mt-1 text-[12.5px] leading-relaxed text-ink-soft">
-          Outreach has been sent to all service providers. CaseRelay is watching
-          the follow-up dates and will check back automatically — no one needs to
-          remember to do it.
+          The case starts itself again when the next follow-up date arrives.
         </p>
-        {wakeScheduledAt && (
+        {nextFollowUp && (
           <p className="mt-2.5 flex items-center gap-1.5 text-[11.5px] text-ink-muted">
             <Icon name="clock" size={12} className="shrink-0" />
-            Follow-up scheduled for{" "}
-            <span className="font-mono tabular-nums">{wakeScheduledAt}</span>
+            Next follow-up {nextFollowUp}
           </p>
         )}
       </div>
@@ -314,71 +418,40 @@ function DormantBanner({ wakeScheduledAt }: { wakeScheduledAt?: string }) {
   );
 }
 
-/** One event row. Visual weight is determined by significance; badges are used only in the summary card. */
 function EventRow({ ev }: { ev: RunEvent }) {
-  const sig = getSignificance(ev);
-  const mem = isMemoryEvent(ev);
-  const quarantine = (ev.phase ?? "").includes("quarantine");
-  const escalation = (ev.phase ?? "").includes("approve");
-  const { name, color } = eventIcon(ev.event);
+  const view = describe(ev);
   const ts = formatEventTime(ev.timestamp);
-
-  // Outer container — left border and background only for the two genuinely high-stakes
-  // categories (quarantine, escalation). Memory and notable events carry weight via
-  // typography alone, keeping the border device rare and therefore meaningful.
-  const outerCls = cx(
-    "flex items-start gap-3 rounded px-3",
-    quarantine
-      ? "border-l-2 border-l-danger bg-danger/[0.04] py-3"
-      : escalation
-        ? "border-l-2 border-l-warn bg-warn-soft/35 py-3"
-        : sig === "notable"
-          ? "py-2.5"
-          : mem
-            ? "bg-accent-soft/10 py-2"
-            : cx("py-2", row.hover),
-  );
-
-  // Message typography — weight and colour do the work, not chips or borders.
-  const msgCls = cx(
-    "leading-relaxed",
-    quarantine || escalation
-      ? "text-[13px] font-semibold text-ink"
-      : sig === "notable"
-        ? "text-[13px] font-medium text-ink"
-        : "text-[12.5px] text-ink-soft",
-  );
+  const previews =
+    ev.event === "memory_recall" && Array.isArray(ev.previews) ? (ev.previews as string[]) : [];
 
   return (
-    <li className={outerCls}>
+    <li className={cx("flex items-start gap-3 rounded px-3", WEIGHT_ROW[view.weight])}>
       <Icon
-        name={name}
-        size={sig !== "routine" ? 15 : 14}
-        className={cx("mt-px shrink-0", color)}
+        name={view.icon}
+        size={WEIGHT_ICON_SIZE[view.weight]}
+        className={cx(
+          "mt-px shrink-0",
+          view.weight === "quiet" ? "text-ink-muted" : tone[view.variant].text,
+        )}
       />
       <div className="min-w-0 flex-1">
-        {ev.message ? (
-          <>
-            <p className={msgCls}>{String(ev.message)}</p>
-            {mem &&
-              ev.event === "memory_recall" &&
-              Array.isArray(ev.previews) &&
-              ev.previews.length > 0 && (
-                <ul className="mt-1.5 space-y-0.5">
-                  {(ev.previews as string[]).slice(0, 3).map((p, idx) => (
-                    <li key={idx} className="truncate text-[11.5px] italic text-ink-muted">
-                      &ldquo;{String(p)}&rdquo;
-                    </li>
-                  ))}
-                </ul>
-              )}
-          </>
-        ) : (
-          <p className="text-[12.5px] text-ink-muted">—</p>
+        <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+          <p className={WEIGHT_TEXT[view.weight]}>{view.message}</p>
+          {view.status && <StatusBadge status={view.status} />}
+        </div>
+        {view.note && (
+          <p className="mt-1 text-[12px] leading-relaxed text-ink-soft">{view.note}</p>
         )}
-        {ev.error && (
-          <p className="mt-0.5 text-[11.5px] text-danger">{ev.error}</p>
+        {previews.length > 0 && (
+          <ul className="mt-1.5 space-y-0.5">
+            {previews.slice(0, 3).map((p, idx) => (
+              <li key={idx} className="truncate text-[11.5px] italic text-ink-muted">
+                &ldquo;{String(p)}&rdquo;
+              </li>
+            ))}
+          </ul>
         )}
+        {ev.error && <p className="mt-0.5 text-[11.5px] text-danger">{String(ev.error)}</p>}
       </div>
 
       {/* Timestamp: right-gutter, mono, recessive. Tabular-nums keeps the column
@@ -408,12 +481,12 @@ export function LiveActivityFeed({ run }: { run: LiveRunState }) {
 
   if (run.error) {
     return (
-      <Card icon="alert" title="Event Stream Error">
+      <Card icon="alert" title="Case Activity">
         <div className="flex items-start gap-3 rounded-control border border-danger/25 bg-danger/5 px-4 py-3">
           <Icon name="alert" size={18} className="mt-0.5 shrink-0 text-danger" />
           <div>
             <p className="text-[13px] font-medium text-danger">
-              Failed to connect to event stream
+              Couldn&apos;t load what has happened on this case
             </p>
             <p className={cx("mt-1", type_.small)}>{run.error}</p>
           </div>
@@ -422,7 +495,26 @@ export function LiveActivityFeed({ run }: { run: LiveRunState }) {
     );
   }
 
-  const visibleEvents = run.events.filter((ev) => !_HIDDEN_EVENTS.has(ev.event));
+  // A phase that has since finished does not also need its "starting" line, so
+  // each round of outreach leaves one row per provider rather than two.
+  const settledPhases = new Set<string>();
+  for (const ev of run.events) {
+    if (ev.event === "phase_complete" || ev.event === "phase_error") {
+      settledPhases.add(`${ev.run_id ?? ""}:${ev.phase ?? ""}`);
+    }
+  }
+
+  const visibleEvents = run.events.filter((ev) => {
+    if (HIDDEN_EVENTS.has(ev.event)) return false;
+    // The checkpoint pair, and the completion that closes a suspended run, all
+    // restate the one fact the `run_suspended` line already carries.
+    if ((ev.phase ?? "").includes("checkpoint")) return false;
+    if (ev.event === "run_completed" && String(ev.outcome) === "suspended") return false;
+    if (ev.event === "phase_started" && settledPhases.has(`${ev.run_id ?? ""}:${ev.phase ?? ""}`)) {
+      return false;
+    }
+    return true;
+  });
 
   // Find boundaries where run_id transitions — these become visual gap markers.
   const runGapIndices = new Set<number>();
@@ -434,36 +526,24 @@ export function LiveActivityFeed({ run }: { run: LiveRunState }) {
     }
   }
 
-  // When suspended, surface the latest scheduled wake time in the dormant banner.
-  const wakeScheduledEv = isSuspended
-    ? [...visibleEvents].reverse().find((ev) => ev.event === "wake_scheduled")
+  // The suspension event carries the date of the next follow-up, so the banner
+  // can name it rather than claiming one exists.
+  const nextFollowUp = isSuspended
+    ? formatFollowUp(
+        [...visibleEvents]
+          .reverse()
+          .find((ev) => ev.event === "run_suspended")
+          ?.checkpoint_due as string | undefined,
+      )
     : undefined;
-  const wakeScheduledAt = wakeScheduledEv?.timestamp
-    ? formatEventTime(wakeScheduledEv.timestamp)
-    : undefined;
 
-  function terminalStateLabel(state: string): string {
-    if (state === "completed") return "All steps complete";
-    if (state === "partial_failure") return "Some steps still open";
-    if (state === "failed") return "Could not complete";
-    return state.replace(/_/g, " ");
-  }
-
-  const headerSubtitle = run.streaming
-    ? "Working on the case…"
-    : isSuspended
-      ? "Waiting on follow-up — will check back automatically"
-      : run.terminalState
-        ? terminalStateLabel(run.terminalState)
-        : undefined;
-
-  const headerAction = run.terminalState ? (
-    <Badge variant={terminalBadgeVariant(run.terminalState)} icon={terminalIcon(run.terminalState)}>
-      {terminalStateLabel(run.terminalState)}
-    </Badge>
-  ) : isSuspended ? (
+  const headerAction = isSuspended ? (
     <Badge variant="accent" icon="sleep">
       Waiting
+    </Badge>
+  ) : run.terminalState ? (
+    <Badge variant={terminalBadgeVariant(run.terminalState)} icon={terminalIcon(run.terminalState)}>
+      {terminalStateLabel(run.terminalState)}
     </Badge>
   ) : run.streaming ? (
     <span className="flex items-center gap-2 text-[12px] text-brand">
@@ -476,13 +556,13 @@ export function LiveActivityFeed({ run }: { run: LiveRunState }) {
     <Card
       icon="activity"
       title="Case Activity"
-      subtitle={headerSubtitle}
+      subtitle="Everything that has happened on this case, oldest first."
       action={headerAction}
     >
       {visibleEvents.length === 0 && run.streaming && (
         <div className="flex items-center gap-3 py-8">
           <span className="inline-block size-3 animate-spin rounded-full border-2 border-brand border-t-transparent" />
-          <span className={type_.body}>Connecting to event stream…</span>
+          <span className={type_.body}>Opening the case…</span>
         </div>
       )}
 
@@ -523,36 +603,17 @@ export function LiveActivityFeed({ run }: { run: LiveRunState }) {
       )}
 
       {/* Dormant state: shown instead of the terminal footer so there is no risk
-          of confusing "suspended" with a failed or completed run. */}
+          of confusing "waiting" with a failed or completed run. */}
       {isSuspended && (
         <div className={cx(visibleEvents.length > 0 && "mt-4 border-t border-line pt-4")}>
-          <DormantBanner wakeScheduledAt={wakeScheduledAt} />
+          <DormantBanner nextFollowUp={nextFollowUp} />
         </div>
       )}
 
-      {run.runStatus && !isSuspended && (
-        <div className="mt-4 border-t border-line pt-4">
-          <dl className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-            <div>
-              <dt className={type_.label}>Outcome</dt>
-              <dd className="mt-1 text-[13px] text-ink">{terminalStateLabel(run.runStatus.state)}</dd>
-            </div>
-            {run.runStatus.error && (
-              <div>
-                <dt className={type_.label}>Error</dt>
-                <dd className="mt-1 text-[13px] text-danger">{run.runStatus.error}</dd>
-              </div>
-            )}
-            {run.runStatus.trace_id && (
-              <div>
-                <dt className={type_.label}>Trace ID</dt>
-                <dd className="mt-1 break-all font-mono text-[12px] text-ink-soft">
-                  {run.runStatus.trace_id}
-                </dd>
-              </div>
-            )}
-          </dl>
-        </div>
+      {run.runStatus?.error && !isSuspended && (
+        <p className="mt-4 border-t border-line pt-4 text-[12.5px] text-danger">
+          {run.runStatus.error}
+        </p>
       )}
     </Card>
   );

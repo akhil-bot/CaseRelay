@@ -321,7 +321,11 @@ function LiveCaseDetail({ caseId }: { caseId: string }) {
           actually completed (phase_complete), never on phase_started alone.
           All text comes from the backend's _narrate message field. */}
       {(quarantineCompleted.length > 0 || quarantineErrors.length > 0) && (
-        <Card icon="lock" title="Blocked step">
+        <Card
+          icon="shield"
+          title="Held for review"
+          subtitle="A reply was stopped before anyone acted on it."
+        >
           {quarantineCompleted.length > 0 && (
             <div className="rounded-control border border-danger/25 bg-danger/5 px-4 py-3">
               <div className="flex items-start gap-3">
@@ -332,6 +336,10 @@ function LiveCaseDetail({ caseId }: { caseId: string }) {
                       {String(ev.message ?? ev.event)}
                     </p>
                   ))}
+                  <p className="mt-1.5 text-[12.5px] leading-relaxed text-ink-soft">
+                    Nothing was sent on and nothing was acted on. Your supervisor decides what
+                    happens next.
+                  </p>
                 </div>
               </div>
             </div>
