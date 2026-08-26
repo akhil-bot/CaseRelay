@@ -4,7 +4,9 @@ import Link from "next/link";
 import { useParams } from "next/navigation";
 import React, { useMemo, useState } from "react";
 import { Icon } from "@/components/icons";
+import { CaseTimeline } from "@/components/live/CaseTimeline";
 import { LiveActivityFeed } from "@/components/live/LiveActivityFeed";
+import { NeedsAttention } from "@/components/live/NeedsAttention";
 import {
   Avatar,
   Badge,
@@ -21,8 +23,9 @@ import {
   StatusBadge,
   cx,
 } from "@/components/ui/primitives";
-import { fieldLabel } from "@/design/copy";
-import { control, layout, row, surface, type as type_ } from "@/design/tokens";
+import { fieldLabel, purposeLabel } from "@/design/copy";
+import { control, layout, row, surface, tone, type as type_ } from "@/design/tokens";
+import { auditView, formatEventTime } from "@/lib/case-events";
 import { useDemo } from "@/lib/demo-store";
 import { submitRun, listCaseEvents, type RunEvent } from "@/lib/api";
 import { useLiveCase, useLiveRunEvents } from "@/lib/live-case";
@@ -106,24 +109,6 @@ function LiveCaseDetail({ caseId }: { caseId: string }) {
       (a, b) => String(a.timestamp ?? "").localeCompare(String(b.timestamp ?? "")),
     );
   }, [crossRunEvents, activeRunState.events]);
-
-  const quarantineCompleted = useMemo(() =>
-    mergedEvents.filter((ev: RunEvent) =>
-      ev.event === "phase_complete" && (ev.phase ?? "").includes("quarantine"),
-    ),
-  [mergedEvents]);
-
-  const quarantineErrors = useMemo(() =>
-    mergedEvents.filter((ev: RunEvent) =>
-      ev.event === "phase_error" && (ev.phase ?? "").includes("quarantine"),
-    ),
-  [mergedEvents]);
-
-  const escalationCompleted = useMemo(() =>
-    mergedEvents.filter((ev: RunEvent) =>
-      ev.event === "phase_complete" && (ev.phase ?? "").includes("approve"),
-    ),
-  [mergedEvents]);
 
   const handleRun = async () => {
     setSubmitting(true);
@@ -282,6 +267,15 @@ function LiveCaseDetail({ caseId }: { caseId: string }) {
         )}
       </section>
 
+      <NeedsAttention commitments={commitmentStates} events={mergedEvents} />
+
+      <CaseTimeline
+        caseData={caseData}
+        commitments={commitmentStates}
+        runs={runs}
+        events={mergedEvents}
+      />
+
       {/* Commitment states from backend */}
       {commitmentEntries.length > 0 && (
         <Card
@@ -317,64 +311,6 @@ function LiveCaseDetail({ caseId }: { caseId: string }) {
         </Card>
       )}
 
-      {/* Quarantine / escalation highlight — only rendered when the phase
-          actually completed (phase_complete), never on phase_started alone.
-          All text comes from the backend's _narrate message field. */}
-      {(quarantineCompleted.length > 0 || quarantineErrors.length > 0) && (
-        <Card
-          icon="shield"
-          title="Held for review"
-          subtitle="A reply was stopped before anyone acted on it."
-        >
-          {quarantineCompleted.length > 0 && (
-            <div className="rounded-control border border-danger/25 bg-danger/5 px-4 py-3">
-              <div className="flex items-start gap-3">
-                <Icon name="shield" size={20} className="mt-0.5 shrink-0 text-danger" />
-                <div>
-                  {quarantineCompleted.map((ev, i) => (
-                    <p key={i} className={cx("text-[13px]", i === 0 ? "font-medium text-danger" : "mt-1 text-ink-soft")}>
-                      {String(ev.message ?? ev.event)}
-                    </p>
-                  ))}
-                  <p className="mt-1.5 text-[12.5px] leading-relaxed text-ink-soft">
-                    Nothing was sent on and nothing was acted on. Your supervisor decides what
-                    happens next.
-                  </p>
-                </div>
-              </div>
-            </div>
-          )}
-          {quarantineErrors.length > 0 && (
-            <div className={cx(quarantineCompleted.length > 0 && "mt-3", "rounded-control border border-danger/25 bg-danger/5 px-4 py-3")}>
-              <div className="flex items-start gap-3">
-                <Icon name="alert" size={20} className="mt-0.5 shrink-0 text-danger" />
-                <div>
-                  {quarantineErrors.map((ev, i) => (
-                    <p key={i} className="text-[13px] text-danger">
-                      {String(ev.message ?? ev.error ?? ev.event)}
-                    </p>
-                  ))}
-                </div>
-              </div>
-            </div>
-          )}
-          {escalationCompleted.length > 0 && (
-            <div className="mt-3 rounded-control border border-warn/25 bg-warn-soft px-4 py-3">
-              <div className="flex items-start gap-3">
-                <Icon name="user" size={20} className="mt-0.5 shrink-0 text-warn" />
-                <div>
-                  {escalationCompleted.map((ev, i) => (
-                    <p key={i} className={cx("text-[13px]", i === 0 ? "font-medium text-warn" : "mt-1 text-ink-soft")}>
-                      {String(ev.message ?? ev.event)}
-                    </p>
-                  ))}
-                </div>
-              </div>
-            </div>
-          )}
-        </Card>
-      )}
-
       {/* Live activity feed — stitched across all runs for timeline continuity */}
       {(isStreaming || mergedEvents.length > 0) && (
         <LiveActivityFeed run={{ ...activeRunState, events: mergedEvents }} />
@@ -382,38 +318,56 @@ function LiveCaseDetail({ caseId }: { caseId: string }) {
 
       {/* Audit trail (from initial case fetch) */}
       {data.timeline.length > 0 && (
-        <Card icon="audit" title="Audit Trail" subtitle={`${data.timeline.length} events`} flush>
+        <Card
+          icon="audit"
+          title="Audit trail"
+          subtitle="What was shared, what was refused, and when."
+          flush
+        >
           <Rows>
-            {data.timeline.map((entry, i) => {
-              const e = entry as Record<string, string>;
-              return (
-                <li key={i} className={cx(row.pad, "flex items-start gap-3")}>
-                  <Icon name="document" size={14} className="mt-1 shrink-0 text-ink-muted" />
-                  <div className="min-w-0 flex-1">
-                    <span className="text-[12.5px] font-medium text-ink">
-                      {e.event_type ?? e.type ?? "event"}
-                    </span>
-                    {e.agent_identity && (
-                      <Mono className="ml-2 text-[11px] text-ink-muted">
-                        {e.agent_identity}
-                      </Mono>
-                    )}
-                    {(e.detail || e.explanation) && (
-                      <p className={cx("mt-0.5", type_.meta)}>{e.detail || e.explanation}</p>
-                    )}
-                  </div>
-                  {e.timestamp && (
-                    <span className="shrink-0 font-mono text-[10px] text-ink-muted">
-                      {e.timestamp}
-                    </span>
-                  )}
-                </li>
-              );
-            })}
+            {data.timeline.map((entry, i) => (
+              <AuditRow key={i} entry={entry} />
+            ))}
           </Rows>
         </Card>
       )}
     </div>
+  );
+}
+
+/**
+ * One line of the audit log. The backend writes it as a machine event type with
+ * an agent identity attached; both are read here through the same vocabulary the
+ * activity feed uses, so one moment is not named twice on one page.
+ */
+function AuditRow({ entry }: { entry: Record<string, unknown> }) {
+  const e = entry as Record<string, string>;
+  const view = auditView(String(e.event_type ?? e.type ?? ""));
+  const domain = e.commitment_type in DOMAIN_META ? (e.commitment_type as Domain) : null;
+  const detail = e.explanation || e.detail || (e.purpose ? purposeLabel(e.purpose) : "");
+  const at = formatEventTime(e.timestamp);
+
+  return (
+    <li className={cx(row.pad, "flex items-start gap-3")}>
+      <span
+        className={cx(
+          "mt-0.5 flex size-7 shrink-0 items-center justify-center rounded-full border",
+          tone[view.variant].badge,
+        )}
+      >
+        <Icon name={view.icon} size={13} />
+      </span>
+      <div className="min-w-0 flex-1">
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="text-[12.5px] font-medium text-ink">{view.label}</span>
+          {domain && <Badge variant="neutral">{DOMAIN_META[domain].label}</Badge>}
+        </div>
+        {detail && <p className={cx("mt-0.5", type_.meta)}>{detail}</p>}
+      </div>
+      {at && (
+        <span className="shrink-0 font-mono text-[10.5px] tabular-nums text-ink-muted">{at}</span>
+      )}
+    </li>
   );
 }
 

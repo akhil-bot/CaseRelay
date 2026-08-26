@@ -5,6 +5,16 @@ import { Icon, type IconName } from "@/components/icons";
 import { Badge, Card, DOMAIN_META, StatusBadge, cx } from "@/components/ui/primitives";
 import { row, tone, type Tone, type as type_ } from "@/design/tokens";
 import type { RunEvent } from "@/lib/api";
+import {
+  GUARDRAIL_NOTE,
+  STATUS_TONE,
+  commitmentStatus,
+  eventDomain,
+  formatElapsed,
+  formatEventTime,
+  formatFollowUp,
+  nextFollowUpAt,
+} from "@/lib/case-events";
 import type { LiveRunState } from "@/lib/live-case";
 import type { CommitmentStatus, Domain } from "@/lib/types";
 
@@ -15,52 +25,6 @@ const HIDDEN_EVENTS = new Set([
   // The memory phase already reports that the notes were written.
   "memory_write",
 ]);
-
-/** Fan-out phases are labelled by specialist; a volunteer reads them as services. */
-const SPECIALIST_DOMAIN: Record<string, Domain> = {
-  education_liaison: "education",
-  health_coordination: "health",
-  legal_aid: "legal",
-  shelter_status: "shelter",
-  family_services: "family_services",
-};
-
-/** Commitment state decides the colour; the domain decides the glyph. */
-const STATUS_TONE: Record<string, Tone> = {
-  completed: "seal",
-  blocked: "danger",
-  unresolved: "warn",
-  scheduled: "accent",
-};
-
-/**
- * Why a commitment ever comes back blocked: the only path to that state is an
- * agent refusing a reply that reached past what it was allowed to answer.
- */
-const GUARDRAIL_NOTE =
-  "Their reply asked for medical records while answering a question about enrollment, so it was held back and passed to your supervisor.";
-
-// ─── Reading one event ────────────────────────────────────────────────────────
-
-function eventDomain(ev: RunEvent): Domain | null {
-  const commitmentType = typeof ev.commitment_type === "string" ? ev.commitment_type : "";
-  if (commitmentType in DOMAIN_META) return commitmentType as Domain;
-
-  const phase = ev.phase ?? "";
-  if (phase.startsWith("3-fanout-")) {
-    return SPECIALIST_DOMAIN[phase.slice("3-fanout-".length)] ?? null;
-  }
-  // The post-approval follow-up belongs to the school, matching the backend's
-  // own phase-to-service map.
-  if (phase === "8-followup") return "education";
-  return null;
-}
-
-function commitmentStatus(ev: RunEvent, domain: Domain | null): string {
-  if (!domain) return "";
-  const states = ev.commitment_states as Record<string, string> | undefined;
-  return states?.[domain] ?? "";
-}
 
 function genericIcon(ev: RunEvent): IconName {
   const phase = ev.phase ?? "";
@@ -207,46 +171,6 @@ const WEIGHT_ICON_SIZE: Record<Weight, number> = {
   normal: 14,
   quiet: 12,
 };
-
-// ─── Time helpers ─────────────────────────────────────────────────────────────
-
-function formatEventTime(ts: string | undefined): string {
-  if (!ts) return "";
-  try {
-    return new Date(ts).toLocaleTimeString([], {
-      hour: "2-digit",
-      minute: "2-digit",
-      second: "2-digit",
-    });
-  } catch {
-    return "";
-  }
-}
-
-function formatElapsed(fromTs: string | undefined, toTs: string | undefined): string {
-  if (!fromTs || !toTs) return "";
-  try {
-    const diff = Math.abs(new Date(toTs).getTime() - new Date(fromTs).getTime());
-    const secs = Math.round(diff / 1000);
-    if (secs < 60) return `${secs}s`;
-    const mins = Math.round(secs / 60);
-    if (mins < 60) return `${mins}m`;
-    return `${Math.floor(mins / 60)}h\u202f${mins % 60}m`;
-  } catch {
-    return "";
-  }
-}
-
-/** A follow-up date, said the way someone would say it out loud. */
-function formatFollowUp(ts: string | undefined): string {
-  if (!ts) return "";
-  const due = new Date(ts);
-  if (Number.isNaN(due.getTime())) return "";
-  if (due.toDateString() === new Date().toDateString()) {
-    return `today at ${due.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`;
-  }
-  return due.toLocaleDateString([], { day: "numeric", month: "short" });
-}
 
 // ─── Terminal-state helpers ───────────────────────────────────────────────────
 
@@ -528,14 +452,8 @@ export function LiveActivityFeed({ run }: { run: LiveRunState }) {
 
   // The suspension event carries the date of the next follow-up, so the banner
   // can name it rather than claiming one exists.
-  const nextFollowUp = isSuspended
-    ? formatFollowUp(
-        [...visibleEvents]
-          .reverse()
-          .find((ev) => ev.event === "run_suspended")
-          ?.checkpoint_due as string | undefined,
-      )
-    : undefined;
+  const followUpAt = isSuspended ? nextFollowUpAt(visibleEvents) : null;
+  const nextFollowUp = followUpAt === null ? undefined : formatFollowUp(followUpAt);
 
   const headerAction = isSuspended ? (
     <Badge variant="accent" icon="sleep">
