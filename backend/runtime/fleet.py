@@ -50,37 +50,43 @@ def _case_draft_with_commitments(case_id: str) -> bool:
 
 
 def _case_is_monitoring(case_id: str) -> bool:
-    """Supervisor approved grants and the case advanced to monitoring."""
-    return workspace.get_case(case_id)["status"] == "monitoring"
-
-
-def _specialists_have_reported(case_id: str) -> bool:
-    """At least one specialist moved its commitment past the initial pending state."""
+    """Supervisor approved grants AND no specialist has reported yet (first fanout only)."""
     if workspace.get_case(case_id)["status"] != "monitoring":
         return False
     states = workspace.commitment_states(case_id)
-    return bool(states) and any(v != "pending" for v in states.values())
+    return not states or all(v == "pending" for v in states.values())
+
+
+def _specialists_have_reported(case_id: str) -> bool:
+    """At least one specialist moved its commitment past the initial pending state,
+    and no per-commitment checkpoints exist yet (prevents re-checkpointing on wake)."""
+    if workspace.get_case(case_id)["status"] != "monitoring":
+        return False
+    states = workspace.commitment_states(case_id)
+    if not states or not any(v != "pending" for v in states.values()):
+        return False
+    if any(cp.get("commitment_type") for cp in workspace.list_case_checkpoints(case_id)):
+        return False
+    return True
 
 
 def _checkpoint_committed_and_waiting(case_id: str) -> bool:
-    """schedule_wake stored a commitment snapshot on the checkpoint and it hasn't fired.
-
-    Accepts state "waiting" (checkpoint just written) or "running" (sweep marked it due
-    and the push handler started a resumed run). The guard on current_step prevents
-    re-triggering after wake_workflow has already set it to "awake".
-    """
-    cp = workspace.get_checkpoint(f"wf-{case_id}")
-    if not cp or cp.get("state") not in ("waiting", "running"):
-        return False
-    if cp.get("current_step") == "awake":
-        return False
-    return bool(cp.get("commitment_states"))
+    """At least one per-commitment checkpoint is in running state (sweep fired it)
+    and wake_workflow has not yet set it to awake."""
+    for cp in workspace.list_case_checkpoints(case_id):
+        if cp.get("state") in ("waiting", "running") and cp.get("current_step") != "awake":
+            if cp.get("commitment_states") or cp.get("commitment_type"):
+                return True
+    return False
 
 
 def _checkpoint_awake_and_has_inject(case_id: str) -> bool:
     """wake_workflow set current_step='awake' and the referral packet has an injected callback."""
-    cp = workspace.get_checkpoint(f"wf-{case_id}")
-    if not cp or cp.get("current_step") != "awake":
+    awake = any(
+        cp.get("current_step") == "awake"
+        for cp in workspace.list_case_checkpoints(case_id)
+    )
+    if not awake:
         return False
     packet = workspace.get_case(case_id).get("referral_packet", {})
     return any(r.get("inject_callback") for r in packet.get("referrals", []))
@@ -105,8 +111,11 @@ def _approval_decided_and_has_inject(case_id: str) -> bool:
 
 def _checkpoint_awake_no_pending_approvals(case_id: str) -> bool:
     """Wake has fired and no approvals are blocking — safe to write final memory."""
-    cp = workspace.get_checkpoint(f"wf-{case_id}")
-    if not cp or cp.get("current_step") != "awake":
+    awake = any(
+        cp.get("current_step") == "awake"
+        for cp in workspace.list_case_checkpoints(case_id)
+    )
+    if not awake:
         return False
     return not any(
         a.get("decision") == "pending"

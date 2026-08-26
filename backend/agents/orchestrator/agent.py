@@ -54,11 +54,10 @@ def activate_case(case_id: str) -> dict:
     return {"case_id": case_id, "status": workspace.activate(case_id)["status"]}
 
 
-def schedule_wake(case_id: str) -> dict:
-    """Checkpoint the workflow with per-commitment deadlines, anchored at NOW.
+def schedule_wake(case_id: str) -> list:
+    """Write one checkpoint per commitment, each with its own due_at anchored at NOW.
 
-    due_at is computed at checkpoint write time — not at case creation — so a short
-    due_in always produces a visible gap between the run ending and the push arriving.
+    Returns a list of checkpoint dicts, one per commitment, with staggered deadlines.
     """
     return schedule_commitment_checkpoints(case_id)
 

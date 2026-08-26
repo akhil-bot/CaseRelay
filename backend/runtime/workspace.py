@@ -39,7 +39,7 @@ class Workspace:
         self.approvals: dict[str, list[dict[str, Any]]] = {}
         self._audit_log: dict[str, list[dict[str, Any]]] = {}
         self.checkpoints: dict[str, dict[str, Any]] = {}
-        self._case_workflows: dict[str, str] = {}
+        self._case_workflows: dict[str, list[str]] = {}
         self.memory: dict[str, dict[str, dict[str, Any]]] = {}
         self.runs: dict[str, dict[str, Any]] = {}
         self._case_locks: dict[str, threading.RLock] = {}
@@ -67,8 +67,8 @@ class Workspace:
             run_ids_to_remove = [rid for rid, r in self.runs.items() if r.get("case_id") == case_id]
             for rid in run_ids_to_remove:
                 self.runs.pop(rid, None)
-            wf_id = self._case_workflows.pop(case_id, None)
-            if wf_id:
+            wf_ids = self._case_workflows.pop(case_id, [])
+            for wf_id in wf_ids:
                 self.checkpoints.pop(wf_id, None)
 
     def load(self, case_id: str) -> None:
@@ -250,7 +250,9 @@ class Workspace:
         self.checkpoints[workflow_id] = body
         case_id = body.get("case_id", "")
         if case_id:
-            self._case_workflows[case_id] = workflow_id
+            wf_ids = self._case_workflows.setdefault(case_id, [])
+            if workflow_id not in wf_ids:
+                wf_ids.append(workflow_id)
         store.save_checkpoint(workflow_id, body)
 
     def get_checkpoint(self, workflow_id: str) -> dict[str, Any] | None:
@@ -265,6 +267,23 @@ class Workspace:
         if cp is not None:
             cp["state"] = state
             store.save_checkpoint(workflow_id, cp)
+
+    def list_case_checkpoints(self, case_id: str) -> list[dict[str, Any]]:
+        """All checkpoints for a case, merging in-memory and Firestore."""
+        known: dict[str, dict[str, Any]] = {}
+        for wf_id in self._case_workflows.get(case_id, []):
+            cp = self.checkpoints.get(wf_id)
+            if cp:
+                known[wf_id] = cp
+        for cp in store.query_checkpoints_for_case(case_id):
+            wf_id = cp.get("workflow_id", "")
+            if wf_id and wf_id not in known:
+                known[wf_id] = cp
+                self.checkpoints[wf_id] = cp
+                wf_ids = self._case_workflows.setdefault(case_id, [])
+                if wf_id not in wf_ids:
+                    wf_ids.append(wf_id)
+        return list(known.values())
 
     def set_memory(self, case_id: str, purpose: str, cleaned: dict[str, Any]) -> None:
         with self._lock_for(case_id):
