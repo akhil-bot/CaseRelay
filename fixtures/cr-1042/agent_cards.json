@@ -38,7 +38,7 @@
   {
     "agent_id": "health-coordination-v1",
     "display_name": "Health Coordination",
-    "owner_org": "Harbor Pediatric Clinic",
+    "owner_org": "Riverbend Community Health",
     "version": "1.0.0",
     "purpose": "Report appointment status only",
     "tools": ["check_appointment", "report_callback"],
@@ -50,7 +50,7 @@
   {
     "agent_id": "legal-aid-v1",
     "display_name": "Legal Aid",
-    "owner_org": "County Legal Aid",
+    "owner_org": "Statewide Legal Aid Collective",
     "version": "1.0.0",
     "purpose": "Report referral acceptance and deadlines",
     "tools": ["check_referral_status", "report_callback"],
@@ -62,7 +62,7 @@
   {
     "agent_id": "shelter-status-v1",
     "display_name": "Shelter Status",
-    "owner_org": "Safe Harbor Youth Shelter",
+    "owner_org": "Harborlight Youth Shelter",
     "version": "1.0.0",
     "purpose": "Report availability and scheduling",
     "tools": ["check_availability", "report_callback"],
@@ -74,7 +74,7 @@
   {
     "agent_id": "family-services-v1",
     "display_name": "Family Services",
-    "owner_org": "County Family Services",
+    "owner_org": "Mesa County Family Services",
     "version": "1.0.0",
     "purpose": "Report assessment scheduling only",
     "tools": ["check_assessment", "report_callback"],

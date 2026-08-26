@@ -6,7 +6,9 @@
     "dob": "2017-04-12"
   },
   "volunteer_id": "elena-volunteer-001",
+  "volunteer_name": "Elena Vasquez",
   "supervisor_id": "supervisor-001",
+  "supervisor_name": "Dana Whitfield",
   "retention_policy": "standard_7y",
   "source_document_ref": "gs://caserelay-fixtures/cr-1042/referral-packet.pdf",
   "court": {
@@ -14,11 +16,18 @@
     "appointment_date": "2026-07-01",
     "judge_name": "Hon. Rivera"
   },
+  "foster_family": {
+    "household_name": "Nguyen",
+    "placement_date": "2026-07-15",
+    "caregiver_name": "Linh Nguyen"
+  },
   "referrals": [
     {
       "type": "education",
       "referral_id": "edu-1042",
       "target_org": "Lincoln Unified School District",
+      "target_org_short": "Lincoln Unified",
+      "contact": null,
       "referral_date": "2026-07-15",
       "due_date": "2026-08-01",
       "status": "sent",
@@ -28,7 +37,12 @@
     {
       "type": "health",
       "referral_id": "hlth-1042",
-      "target_org": "Harbor Pediatric Clinic",
+      "target_org": "Riverbend Community Health",
+      "target_org_short": "Riverbend",
+      "contact": {
+        "name": "P. Ndiaye",
+        "role": "Records Coordinator"
+      },
       "referral_date": "2026-07-15",
       "due_date": "2026-08-08",
       "status": "sent"
@@ -36,7 +50,12 @@
     {
       "type": "legal",
       "referral_id": "leg-1042",
-      "target_org": "County Legal Aid",
+      "target_org": "Statewide Legal Aid Collective",
+      "target_org_short": "Statewide Legal Aid",
+      "contact": {
+        "name": "A. Ferrand",
+        "role": null
+      },
       "referral_date": "2026-07-15",
       "due_date": "2026-07-29",
       "status": "sent"
@@ -44,7 +63,12 @@
     {
       "type": "shelter",
       "referral_id": "shl-1042",
-      "target_org": "Safe Harbor Youth Shelter",
+      "target_org": "Harborlight Youth Shelter",
+      "target_org_short": "Harborlight",
+      "contact": {
+        "name": "T. Iverson",
+        "role": "Intake Supervisor"
+      },
       "referral_date": "2026-07-15",
       "due_date": "2026-08-15",
       "status": "sent"
@@ -52,7 +76,12 @@
     {
       "type": "family_services",
       "referral_id": "fam-1042",
-      "target_org": "County Family Services",
+      "target_org": "Mesa County Family Services",
+      "target_org_short": "Mesa County",
+      "contact": {
+        "name": "C. Reyes",
+        "role": null
+      },
       "referral_date": "2026-07-15",
       "due_date": "2026-08-20",
       "status": "sent"

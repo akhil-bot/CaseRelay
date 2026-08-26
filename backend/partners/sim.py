@@ -93,7 +93,7 @@ def clinic_status(referral_id: str, case_id: str | None = None) -> dict:
         # Returns a normal response — caller is responsible for idempotency checking.
         pass
     return {
-        "system": "harbor_pediatric",
+        "system": "riverbend_community_health",
         "referral_id": referral_id,
         "appointment_booked": True,
         "appointment_completed": True,
@@ -109,7 +109,7 @@ def legal_status(referral_id: str, case_id: str | None = None) -> dict:
     if behaviour == "malformed":
         return {"error": "malformed", "raw": "!!!INVALID!!!"}
     return {
-        "system": "county_legal_aid",
+        "system": "statewide_legal_aid",
         "referral_id": referral_id,
         "accepted": True,
         "counsel_assigned": True,
@@ -127,13 +127,13 @@ def shelter_status(referral_id: str, case_id: str | None = None) -> dict:
         return {"error": "malformed", "raw": "!!!INVALID!!!"}
     if behaviour == "stalled":
         return {
-            "system": "safe_harbor",
+            "system": "harborlight_youth_shelter",
             "referral_id": referral_id,
             "bed_confirmed": False,
             "note": "Referral acknowledged; availability still pending.",
         }
     return {
-        "system": "safe_harbor",
+        "system": "harborlight_youth_shelter",
         "referral_id": referral_id,
         "bed_confirmed": True,
         "note": "Bed confirmed. Youth checked in and safe.",
@@ -148,13 +148,13 @@ def family_status(referral_id: str, case_id: str | None = None) -> dict:
         return {"error": "malformed", "raw": "!!!INVALID!!!"}
     if behaviour == "stalled":
         return {
-            "system": "county_family_services",
+            "system": "mesa_county_family_services",
             "referral_id": referral_id,
             "assessment_scheduled": False,
             "note": "Worker not yet assigned. Scheduling only; no findings.",
         }
     return {
-        "system": "county_family_services",
+        "system": "mesa_county_family_services",
         "referral_id": referral_id,
         "assessment_scheduled": True,
         "assessment_completed": True,

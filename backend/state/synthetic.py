@@ -68,11 +68,35 @@ SERVICES: list[tuple[str, str, str, str, str, list[str], str]] = [
 
 ORGS = {
     "education": "Lincoln Unified School District",
-    "health": "Harbor Pediatric Clinic",
-    "legal": "County Legal Aid",
-    "shelter": "Safe Harbor Youth Shelter",
-    "family_services": "County Family Services",
+    "health": "Riverbend Community Health",
+    "legal": "Statewide Legal Aid Collective",
+    "shelter": "Harborlight Youth Shelter",
+    "family_services": "Mesa County Family Services",
 }
+
+# How each organisation is referred to once it has already been named in full.
+ORG_SHORT_NAMES = {
+    "education": "Lincoln Unified",
+    "health": "Riverbend",
+    "legal": "Statewide Legal Aid",
+    "shelter": "Harborlight",
+    "family_services": "Mesa County",
+}
+
+# The person who owns the referral at each organisation. A referral whose contact is None
+# has nobody named on the other side yet, which is a fact about the case, not missing data.
+CONTACTS: dict[str, dict[str, str | None]] = {
+    "education": {"name": "M. Okafor", "role": "McKinney-Vento Liaison"},
+    "health": {"name": "P. Ndiaye", "role": "Records Coordinator"},
+    "legal": {"name": "A. Ferrand", "role": None},
+    "shelter": {"name": "T. Iverson", "role": "Intake Supervisor"},
+    "family_services": {"name": "C. Reyes", "role": None},
+}
+
+VOLUNTEER_NAME = "Elena Vasquez"
+SUPERVISOR_NAME = "Dana Whitfield"
+
+FOSTER_FAMILY = {"household_name": "Nguyen", "caregiver_name": "Linh Nguyen"}
 
 OWNER_AGENTS = {
     "education": "education-liaison-v1",
@@ -132,6 +156,7 @@ def build_packet(case_id: str, scenario: str | None = None) -> dict[str, Any]:
 
     partner_behaviours = (spec.partner_behaviours if spec else {}) or {}
     inject_map = (spec.inject_callback if spec else {}) or {}
+    unnamed_contacts = set(spec.unnamed_contacts if spec else ())
 
     referrals = []
     for service, ref_prefix, _grant, _identity, _purpose, _fields, _basis in SERVICES:
@@ -140,6 +165,8 @@ def build_packet(case_id: str, scenario: str | None = None) -> dict[str, Any]:
             "type": service,
             "referral_id": f"{ref_prefix}-{suffix}",
             "target_org": ORGS[service],
+            "target_org_short": ORG_SHORT_NAMES[service],
+            "contact": None if service in unnamed_contacts else dict(CONTACTS[service]),
             "referral_date": referral_date.date().isoformat(),
             "due_date": due.date().isoformat(),
             "status": "sent",
@@ -167,13 +194,20 @@ def build_packet(case_id: str, scenario: str | None = None) -> dict[str, Any]:
             "dob": dob.date().isoformat(),
         },
         "volunteer_id": "caserelay-system",
+        "volunteer_name": VOLUNTEER_NAME,
         "supervisor_id": "supervisor-001",
+        "supervisor_name": SUPERVISOR_NAME,
         "retention_policy": "standard_7y",
         "source_document_ref": f"gs://caserelay-fixtures/{case_id.lower()}/referral-packet.pdf",
         "court": {
             "docket_number": f"JV-2026-{suffix}",
             "appointment_date": referral_date.date().isoformat(),
             "judge_name": "Hon. Rivera",
+        },
+        "foster_family": {
+            "household_name": FOSTER_FAMILY["household_name"],
+            "placement_date": referral_date.date().isoformat(),
+            "caregiver_name": FOSTER_FAMILY["caregiver_name"],
         },
         "referrals": referrals,
         "synthetic": True,

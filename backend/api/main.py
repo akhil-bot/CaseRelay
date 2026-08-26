@@ -505,23 +505,23 @@ def delete_case(case_id: str) -> dict:
 # ---------------------------------------------------------------------------
 
 
-_DOMAIN_LABELS: dict[str, str] = {
-    "education": "the school",
-    "health": "the clinic",
+_SERVICE_WORDS: dict[str, str] = {
+    "education": "school",
+    "health": "clinic",
     "legal": "legal aid",
-    "shelter": "the shelter",
+    "shelter": "shelter",
     "family_services": "family services",
 }
 
-_COMMITMENT_NOUNS: dict[str, str] = {
+_SERVICE_NOUNS: dict[str, str] = {
     "education": "enrollment",
-    "health": "health check-up",
-    "legal": "legal representation",
+    "health": "visit",
+    "legal": "referral",
     "shelter": "placement",
     "family_services": "assessment",
 }
 
-_SPECIALIST_TO_DOMAIN: dict[str, str] = {
+_SPECIALIST_TO_SERVICE: dict[str, str] = {
     "education_liaison": "education",
     "health_coordination": "health",
     "legal_aid": "legal",
@@ -529,218 +529,230 @@ _SPECIALIST_TO_DOMAIN: dict[str, str] = {
     "family_services": "family_services",
 }
 
+# The enrollment-callback phase belongs to one service, so its lines resolve the
+# organisation and contact the same way a fanout phase's lines do.
+_PHASE_SERVICES: dict[str, str] = {"8-enrolled": "education"}
+
 _run_event_lock = threading.Lock()
 
 
-def _cap(s: str) -> str:
-    return s[0].upper() + s[1:] if s else s
+class _Narrator:
+    """Plain-language wording for one run's events.
 
-
-def _narrate(event: str, phase: str, *, summary: str = "", commitment_states: dict | None = None,
-             error: str = "", case_id: str = "", child_name: str = "") -> str:
-    """Derive a single plain-language sentence for a volunteer advocate.
-
-    Never surfaces internal phase ids, system jargon, or technical labels.
-    Uses the child's name and partner descriptions derived from real case state.
+    Organisation and contact names are read from this case's referral packet, never
+    written into a template: a name baked into a string would follow that string onto
+    every other child's case. An organisation is named in full the first time a run
+    mentions it and by its short name after that, so repeated lines stay readable.
     """
-    child = child_name or "the child"
-    specialist = None
-    domain = None
-    if phase.startswith("3-fanout-"):
-        specialist = phase.removeprefix("3-fanout-")
-        domain = _SPECIALIST_TO_DOMAIN.get(specialist)
 
-    partner = _DOMAIN_LABELS.get(domain, "the partner") if domain else None
-    noun = _COMMITMENT_NOUNS.get(domain, "commitment") if domain else None
+    def __init__(self, case_id: str, child_name: str) -> None:
+        packet = workspace.packet(case_id)
+        self.case_id = case_id
+        self.child = child_name or "the child"
+        self._referrals = {r.get("type", ""): r for r in packet.get("referrals", [])}
+        self._supervisor = packet.get("supervisor_name", "") or "your supervisor"
+        self._household = packet.get("foster_family", {}).get("household_name", "")
+        self._introduced: set[str] = set()
+        self._lock = threading.Lock()
 
-    if event == "run_started":
-        return f"Opening {child}'s case and reviewing what each partner has promised."
+    # -- packet lookups ----------------------------------------------------
 
-    if event == "run_completed":
-        closed = sum(1 for v in (commitment_states or {}).values() if v == "completed")
-        total = len(commitment_states or {})
-        if closed == total and total > 0:
-            return f"All {total} commitments for {child} are fulfilled."
-        if total == 0:
-            return "Finished reviewing the case."
-        parts = []
-        for k, v in (commitment_states or {}).items():
-            if v != "completed":
-                label = _DOMAIN_LABELS.get(k, k.replace("_", " "))
-                c_noun = _COMMITMENT_NOUNS.get(k, k.replace("_", " "))
-                parts.append(f"{child}'s {c_noun} with {label} is {v}")
-        return f"{closed} of {total} commitments fulfilled; {'; '.join(parts)}."
+    def _subject(self, service: str) -> str:
+        """What the line is about, e.g. "school enrollment" — always names the service."""
+        word = _SERVICE_WORDS.get(service, service.replace("_", " "))
+        return f"{word} {_SERVICE_NOUNS.get(service, 'request')}"
 
-    if event == "run_failed":
-        if error:
-            return f"Something went wrong and {child}'s case could not be processed: {error}."
-        return f"Something went wrong and {child}'s case could not be processed."
+    def _org(self, service: str) -> str:
+        referral = self._referrals.get(service) or {}
+        full = referral.get("target_org", "")
+        with self._lock:
+            introduced = service in self._introduced
+            self._introduced.add(service)
+        return referral.get("target_org_short", full) if introduced else full
 
-    if event == "run_partial_failure":
-        return f"Some commitments for {child} could not be fully resolved."
+    def _who(self, service: str) -> str:
+        """The named contact if the partner has given one, otherwise the organisation."""
+        contact = (self._referrals.get(service) or {}).get("contact")
+        return contact["name"] if contact else self._org(service)
 
-    if event == "phase_started":
-        if phase == "intake":
-            return f"Reading {child}'s referral and identifying the commitments each partner made."
-        if specialist:
-            return f"Reaching out to {partner} to check on {child}'s {noun}."
-        if "activate" in phase:
-            return "Sending the proposed commitments to a supervisor for review."
-        if "checkpoint" in phase:
-            return "Setting a reminder to follow up on any commitments still open."
-        if "wake" in phase:
-            return f"Reminder fired — checking back on {child}'s open commitments."
-        if "quarantine" in phase:
-            return "A partner sent a response — screening it for safety before anyone acts on it."
-        if "approve" in phase:
-            return "A supervisor is reviewing the flagged response."
-        if "enrolled" in phase:
-            return f"A new update arrived from the school — checking {child}'s enrollment."
-        if "memory" in phase:
-            return f"Recording everything that happened for {child}'s file."
-        return f"Working on {child}'s case."
+    # -- event lines -------------------------------------------------------
 
-    if event == "phase_complete":
-        if phase == "intake":
-            return f"Identified the commitments in {child}'s referral — a supervisor will review them next."
-        if "activate" in phase:
-            return f"Supervisor approved — now reaching out to every partner on {child}'s case."
-        if specialist:
-            states = commitment_states or {}
-            status = states.get(domain or "", "")
-            if status == "completed":
-                return f"{_cap(partner)} confirmed {child}'s {noun} is fulfilled."
-            if status == "unresolved":
-                return f"{_cap(partner)} could not resolve {child}'s {noun} — it's still open."
-            if status == "pending":
-                return f"{_cap(partner)} hasn't responded yet about {child}'s {noun}."
+    def overdue(self, service: str) -> str:
+        return f"{self._who(service)} is overdue on {self.child}'s {self._subject(service)}."
+
+    def line(self, event: str, phase: str, *, commitment_states: dict | None = None) -> str:
+        child = self.child
+        states = commitment_states or {}
+        service = _PHASE_SERVICES.get(phase)
+        if phase.startswith("3-fanout-"):
+            service = _SPECIALIST_TO_SERVICE.get(phase.removeprefix("3-fanout-"))
+
+        if event == "run_started":
+            return f"Opening {child}'s case and reviewing every open commitment."
+
+        if event == "run_completed":
+            closed = sum(1 for v in states.values() if v == "completed")
+            total = len(states)
+            if total == 0:
+                return f"Finished reviewing {child}'s case."
+            if closed == total:
+                return f"All {total} commitments for {child} are fulfilled."
+            return f"{closed} of {total} commitments fulfilled for {child}."
+
+        if event == "run_failed":
+            return f"Something went wrong and {child}'s case could not be processed."
+
+        if event == "run_partial_failure":
+            return f"Some commitments for {child} could not be resolved."
+
+        if event == "phase_started":
+            if phase == "intake":
+                return f"Reading the {self._household} family's referral for {child}."
+            if "activate" in phase:
+                return f"Sending the proposed commitments to {self._supervisor} for review."
+            if "checkpoint" in phase:
+                return "Setting a reminder to follow up on anything still open."
+            if "wake" in phase:
+                return f"Reminder fired — checking back on {child}'s open commitments."
+            if "quarantine" in phase:
+                return "A reply came back — screening it before anyone acts."
+            if "approve" in phase:
+                return f"{self._supervisor} is reviewing the flagged reply."
+            if service:
+                return f"Contacting {self._org(service)} about {child}'s {self._subject(service)}."
+            if "memory" in phase:
+                return f"Recording everything that happened for {child}'s file."
+            return f"Working on {child}'s case."
+
+        if event == "phase_complete":
+            if phase == "intake":
+                return f"Found {len(states)} commitments — {self._supervisor} reviews them next."
+            if "activate" in phase:
+                return f"{self._supervisor} approved — contacting every service on {child}'s case."
+            if "checkpoint" in phase:
+                return f"Reminder set — {child}'s open commitments will be chased automatically."
+            if "wake" in phase:
+                return f"Followed up on {child}'s open commitments."
+            if "quarantine" in phase:
+                return f"That reply reached outside its scope — held for {self._supervisor}."
+            if "approve" in phase:
+                return f"{self._supervisor} approved — the follow-up can now be sent."
+            if service:
+                subject = self._subject(service)
+                status = states.get(service, "")
+                if status == "completed":
+                    return f"{self._who(service)} has confirmed {child}'s {subject}."
+                if status == "unresolved":
+                    return f"{self._who(service)} could not resolve {child}'s {subject}."
+                if status == "pending":
+                    return f"Still waiting on {self._who(service)} about {child}'s {subject}."
+                if status:
+                    return f"{self._who(service)} reports {child}'s {subject} is {status}."
+                return f"{self._who(service)} finished checking {child}'s {subject}."
+            if "memory" in phase:
+                return f"Case notes updated — every status on {child}'s file is recorded."
+            return f"Finished a step on {child}'s case."
+
+        if event == "phase_error":
+            if service:
+                return f"Could not reach {self._org(service)} about {child}'s {self._subject(service)}."
+            return f"A step on {child}'s case did not complete."
+
+        return ""
+
+    # -- closing summary ---------------------------------------------------
+
+    def summary(self, run_id: str, commitment_states: dict[str, str], outcome: str,
+                *, recall_count: int = 0, wrote_memory: bool = False) -> dict:
+        """Build a structured closing summary with per-commitment status and next actions.
+
+        Next actions are derived exclusively from real case state: pending approvals,
+        unresolved commitments, and scheduled follow-ups. Nothing is fabricated.
+        """
+        child = self.child
+        commitments = [
+            {
+                "domain": service,
+                "label": self._subject(service),
+                "partner": (self._referrals.get(service) or {}).get("target_org", ""),
+                "status": status,
+            }
+            for service, status in commitment_states.items()
+        ]
+
+        next_actions: list[dict[str, str]] = []
+
+        for a in workspace.list_approvals(self.case_id):
+            if a.get("decision") == "pending":
+                next_actions.append({
+                    "action": f"An escalation is waiting for {self._supervisor}.",
+                    "context": a.get("reason", "A reply was flagged and needs a decision."),
+                })
+
+        for service, status in commitment_states.items():
+            if status not in ("blocked", "pending", "unresolved"):
+                continue
+            who = self._who(service)
+            subject = self._subject(service)
             if status == "blocked":
-                return f"{_cap(partner)} says {child}'s {noun} is blocked."
-            if status:
-                return f"{_cap(partner)} reported {child}'s {noun} is {status}."
-            return f"{_cap(partner)} completed its check on {child}'s {noun}."
-        if "checkpoint" in phase:
-            return "Reminder set — I'll check back and follow up on anything that hasn't come through."
-        if "wake" in phase:
-            return f"Followed up on {child}'s open commitments."
-        if "quarantine" in phase:
-            return "The response asked for information outside that partner's allowed access — it's been held and flagged for your supervisor."
-        if "approve" in phase:
-            return "Supervisor reviewed the flagged response and approved the escalation."
-        if "enrolled" in phase:
-            states = commitment_states or {}
-            edu_status = states.get("education", "")
-            if edu_status == "completed":
-                return f"School enrollment confirmed for {child}."
-            if edu_status == "blocked":
-                return f"School enrollment check is done, but {child}'s education is still blocked."
-            if edu_status:
-                return f"School enrollment update received — {child}'s education status is {edu_status}."
-            return f"School enrollment check complete for {child}."
-        if "memory" in phase:
-            return f"Case notes updated — all of {child}'s statuses are recorded."
-        return f"Finished a step on {child}'s case."
+                next_actions.append({
+                    "action": f"Follow up with {who} about {child}'s {subject}.",
+                    "context": "It is blocked and needs a nudge to move.",
+                })
+            elif status == "pending":
+                next_actions.append({
+                    "action": f"Check in with {who} about {child}'s {subject}.",
+                    "context": "No answer has come back yet.",
+                })
+            else:
+                next_actions.append({
+                    "action": f"Reach out to {who} about {child}'s {subject}.",
+                    "context": "They could not fulfil this commitment.",
+                })
 
-    if event == "phase_error":
-        if specialist:
-            return f"Something went wrong reaching {partner} about {child}'s {noun}: {error}."
-        return f"Something went wrong during a step on {child}'s case: {error}."
-
-    return ""
-
-
-def _build_summary(case_id: str, run_id: str, child_name: str,
-                   commitment_states: dict[str, str], outcome: str,
-                   *, recall_count: int = 0, wrote_memory: bool = False) -> dict:
-    """Build a structured closing summary with per-commitment status and next actions.
-
-    Next actions are derived exclusively from real case state: pending approvals,
-    unresolved commitments, and scheduled follow-ups. Nothing is fabricated.
-    """
-    child = child_name or "the child"
-    commitments = []
-    for domain, status in commitment_states.items():
-        commitments.append({
-            "domain": domain,
-            "label": _COMMITMENT_NOUNS.get(domain, domain.replace("_", " ")),
-            "partner": _DOMAIN_LABELS.get(domain, domain.replace("_", " ")),
-            "status": status,
-        })
-
-    next_actions: list[dict[str, str]] = []
-
-    for a in workspace.list_approvals(case_id):
-        if a.get("decision") == "pending":
+        wf_ids = workspace._case_workflows.get(self.case_id, [])
+        next_due = None
+        for wf_id in wf_ids:
+            cp = workspace.get_checkpoint(wf_id)
+            if cp and cp.get("state") == "waiting":
+                due = cp.get("due_at")
+                if due and (next_due is None or due < next_due):
+                    next_due = due
+        if next_due is not None:
+            due_str = next_due.isoformat() if hasattr(next_due, "isoformat") else str(next_due)
             next_actions.append({
-                "action": "An escalation is waiting for supervisor review.",
-                "context": a.get("reason", "A partner response was flagged and needs a decision."),
+                "action": f"A follow-up is already scheduled for {due_str}.",
+                "context": "Anything still open will be chased again at that time.",
             })
 
-    for domain, status in commitment_states.items():
-        partner_label = _DOMAIN_LABELS.get(domain, domain.replace("_", " "))
-        c_noun = _COMMITMENT_NOUNS.get(domain, domain.replace("_", " "))
-        if status == "blocked":
+        if not next_actions:
             next_actions.append({
-                "action": f"Follow up with {partner_label} about {child}'s {c_noun} — it's currently blocked.",
-                "context": f"{_cap(partner_label)} may need a nudge to move forward.",
-            })
-        elif status == "pending":
-            next_actions.append({
-                "action": f"Check in with {partner_label} about {child}'s {c_noun} — no response yet.",
-                "context": f"{_cap(partner_label)} hasn't confirmed or denied.",
-            })
-        elif status == "unresolved":
-            next_actions.append({
-                "action": f"Reach out to {partner_label} about {child}'s {c_noun} — it couldn't be resolved.",
-                "context": f"{_cap(partner_label)} was unable to fulfill this commitment.",
+                "action": f"No action needed — all of {child}'s commitments are fulfilled.",
+                "context": "",
             })
 
-    wf_ids = workspace._case_workflows.get(case_id, [])
-    next_due = None
-    for wf_id in wf_ids:
-        cp = workspace.get_checkpoint(wf_id)
-        if cp and cp.get("state") == "waiting":
-            due = cp.get("due_at")
-            if due and (next_due is None or due < next_due):
-                next_due = due
-    if next_due is not None:
-        due_str = next_due.isoformat() if hasattr(next_due, "isoformat") else str(next_due)
-        next_actions.append({
-            "action": f"A follow-up is already scheduled for {due_str}.",
-            "context": "I'll automatically check back on any open commitments at that time.",
-        })
+        closed = sum(1 for v in commitment_states.values() if v == "completed")
+        total = len(commitment_states)
+        if total == 0:
+            message = f"Finished processing {child}'s case."
+        elif closed == total:
+            message = f"All {total} commitments for {child} are fulfilled."
+        else:
+            message = f"{closed} of {total} commitments fulfilled for {child}."
 
-    if not next_actions:
-        next_actions.append({
-            "action": f"No action needed — all of {child}'s commitments are fulfilled.",
-            "context": "",
-        })
-
-    closed = sum(1 for v in commitment_states.values() if v == "completed")
-    total = len(commitment_states)
-    if closed == total and total > 0:
-        message = f"All {total} commitments for {child} are fulfilled. Nothing else is needed right now."
-    elif total > 0:
-        open_domains = [_DOMAIN_LABELS.get(k, k) for k, v in commitment_states.items() if v != "completed"]
-        message = f"{closed} of {total} commitments for {child} are fulfilled."
-        if open_domains:
-            message += f" Still open: {', '.join(open_domains)}."
-    else:
-        message = f"Finished processing {child}'s case."
-
-    result: dict = {
-        "event": "run_summary",
-        "run_id": run_id,
-        "case_id": case_id,
-        "child_name": child,
-        "message": message,
-        "outcome": outcome,
-        "commitments": commitments,
-        "next_actions": next_actions,
-    }
-    if recall_count > 0 or wrote_memory:
-        result["memory"] = {"recalled": recall_count, "wrote": wrote_memory}
-    return result
+        result: dict = {
+            "event": "run_summary",
+            "run_id": run_id,
+            "case_id": self.case_id,
+            "child_name": child,
+            "message": message,
+            "outcome": outcome,
+            "commitments": commitments,
+            "next_actions": next_actions,
+        }
+        if recall_count > 0 or wrote_memory:
+            result["memory"] = {"recalled": recall_count, "wrote": wrote_memory}
+        return result
 
 
 def _run_background(run_id: str, case_id: str, *, resume: bool = False) -> None:
@@ -786,7 +798,7 @@ def _run_background(run_id: str, case_id: str, *, resume: bool = False) -> None:
             prompt = template.format(case_id=case_id)
             _push_event({
                 "event": "phase_started", "run_id": run_id, "phase": label,
-                "message": _narrate("phase_started", label, case_id=case_id, child_name=child_name),
+                "message": narrator.line("phase_started", label),
             })
             try:
                 text = _quiet_run_agent(phase_orchestrator, prompt, app_name="continuity_orchestrator")
@@ -795,7 +807,7 @@ def _run_background(run_id: str, case_id: str, *, resume: bool = False) -> None:
                 _push_event({
                     "event": "phase_error", "run_id": run_id,
                     "phase": label, "error": err_msg,
-                    "message": _narrate("phase_error", label, error=err_msg, child_name=child_name),
+                    "message": narrator.line("phase_error", label),
                 })
                 return (label, err_msg, "")
             states = workspace.commitment_states(case_id)
@@ -803,13 +815,14 @@ def _run_background(run_id: str, case_id: str, *, resume: bool = False) -> None:
                 "event": "phase_complete", "run_id": run_id,
                 "phase": label, "summary": (text or "")[:300],
                 "commitment_states": states,
-                "message": _narrate("phase_complete", label, commitment_states=states, child_name=child_name),
+                "message": narrator.line("phase_complete", label, commitment_states=states),
             })
             return (label, None, text or "")
         return ctx.run(_inner)
 
     with _bind(case_id=case_id, run_id=run_id):
         child_name = workspace.get_case(case_id).get("child_name", "")
+        narrator = _Narrator(case_id, child_name)
         try:
             workspace.update_run(run_id, state="running", current_phase="intake" if not resume else "wake",
                                  heartbeat_at=datetime.now(timezone.utc).isoformat())
@@ -817,14 +830,14 @@ def _run_background(run_id: str, case_id: str, *, resume: bool = False) -> None:
                 "event": "run_started", "run_id": run_id, "case_id": case_id,
                 "resumed": resume,
                 "message": (
-                    _narrate("phase_started", "wake", case_id=case_id, child_name=child_name)
+                    narrator.line("phase_started", "wake")
                     if resume else
-                    _narrate("run_started", "intake", case_id=case_id, child_name=child_name)
+                    narrator.line("run_started", "intake")
                 ),
             })
 
             recall_count = 0
-            child = child_name or "the child"
+            child = narrator.child
 
             if _mb_enabled():
                 query = (
@@ -853,7 +866,7 @@ def _run_background(run_id: str, case_id: str, *, resume: bool = False) -> None:
 
                 _push_event({
                     "event": "phase_started", "run_id": run_id, "phase": "intake",
-                    "message": _narrate("phase_started", "intake", case_id=case_id, child_name=child_name),
+                    "message": narrator.line("phase_started", "intake"),
                 })
 
                 intake_text = _quiet_run_agent(
@@ -873,7 +886,7 @@ def _run_background(run_id: str, case_id: str, *, resume: bool = False) -> None:
                     "event": "phase_complete", "run_id": run_id,
                     "phase": "intake", "summary": intake_text[:300],
                     "commitment_states": states,
-                    "message": _narrate("phase_complete", "intake", commitment_states=states, child_name=child_name),
+                    "message": narrator.line("phase_complete", "intake", commitment_states=states),
                 })
 
                 if not workspace.commitments.get(case_id) or not workspace.grants.get(case_id):
@@ -926,7 +939,6 @@ def _run_background(run_id: str, case_id: str, *, resume: bool = False) -> None:
                     if label == "5-wake" and resume:
                         recon = reconcile_commitments(case_id)
                         overdue = [r for r in recon if r.get("overdue")]
-                        child = child_name or "the child"
                         _push_event({
                             "event": "reconciliation", "run_id": run_id, "case_id": case_id,
                             "results": recon,
@@ -938,17 +950,12 @@ def _run_background(run_id: str, case_id: str, *, resume: bool = False) -> None:
                         })
                         for r in overdue:
                             ctype = r.get("type", "")
-                            partner = _DOMAIN_LABELS.get(ctype, ctype)
-                            noun = _COMMITMENT_NOUNS.get(ctype, ctype)
                             _push_event({
                                 "event": "commitment_overdue", "run_id": run_id, "case_id": case_id,
                                 "commitment_type": ctype,
                                 "deadline": r.get("deadline", ""),
                                 "status": r.get("status", ""),
-                                "message": (
-                                    f"{_cap(partner)}'s {noun} for {child} is overdue — "
-                                    f"deadline was {r.get('deadline', 'unknown')}, status is {r.get('status', 'unknown')}."
-                                ),
+                                "message": narrator.overdue(ctype),
                             })
 
                     prompt = first.prompt_template.format(case_id=case_id)
@@ -959,7 +966,7 @@ def _run_background(run_id: str, case_id: str, *, resume: bool = False) -> None:
                     )
                     _push_event({
                         "event": "phase_started", "run_id": run_id, "phase": label,
-                        "message": _narrate("phase_started", label, case_id=case_id, child_name=child_name),
+                        "message": narrator.line("phase_started", label),
                     })
                     try:
                         phase_orch = _build_orchestrator()
@@ -971,7 +978,7 @@ def _run_background(run_id: str, case_id: str, *, resume: bool = False) -> None:
                         _push_event({
                             "event": "phase_error", "run_id": run_id,
                             "phase": label, "error": err_msg,
-                            "message": _narrate("phase_error", label, error=err_msg, child_name=child_name),
+                            "message": narrator.line("phase_error", label),
                         })
                         completed_phases.add(label)
                         continue
@@ -980,7 +987,7 @@ def _run_background(run_id: str, case_id: str, *, resume: bool = False) -> None:
                         "event": "phase_complete", "run_id": run_id,
                         "phase": label, "summary": (orch_text or "")[:300],
                         "commitment_states": states,
-                        "message": _narrate("phase_complete", label, commitment_states=states, child_name=child_name),
+                        "message": narrator.line("phase_complete", label, commitment_states=states),
                     })
                     completed_phases.add(label)
 
@@ -1018,7 +1025,6 @@ def _run_background(run_id: str, case_id: str, *, resume: bool = False) -> None:
             commitments = workspace.commitment_states(case_id)
             wrote_events = finalize_run_memory(run_id, case_id)
             if wrote_events > 0:
-                child = child_name or "the child"
                 _push_event({
                     "event": "memory_write", "run_id": run_id, "case_id": case_id,
                     "events_committed": wrote_events,
@@ -1037,7 +1043,7 @@ def _run_background(run_id: str, case_id: str, *, resume: bool = False) -> None:
                     "event": "run_completed", "run_id": run_id, "case_id": case_id,
                     "commitment_states": commitments,
                     "outcome": "suspended",
-                    "message": _narrate("phase_complete", "checkpoint", commitment_states=commitments, child_name=child_name),
+                    "message": narrator.line("phase_complete", "checkpoint", commitment_states=commitments),
                 })
                 return
 
@@ -1051,8 +1057,8 @@ def _run_background(run_id: str, case_id: str, *, resume: bool = False) -> None:
             else:
                 outcome = "completed"
 
-            summary_event = _build_summary(
-                case_id, run_id, child_name, commitments, outcome,
+            summary_event = narrator.summary(
+                run_id, commitments, outcome,
                 recall_count=recall_count, wrote_memory=wrote_events > 0,
             )
             summary_event["timestamp"] = datetime.now(timezone.utc).isoformat()
@@ -1070,7 +1076,7 @@ def _run_background(run_id: str, case_id: str, *, resume: bool = False) -> None:
                     "error": f"all {total_phases_run} phases failed",
                     "failed_phases": failed_phases,
                     "commitment_states": commitments,
-                    "message": _narrate("run_failed", "done", error=f"all {total_phases_run} phases failed", child_name=child_name),
+                    "message": narrator.line("run_failed", "done"),
                 })
             elif outcome == "partial_failure":
                 error_parts = []
@@ -1090,7 +1096,7 @@ def _run_background(run_id: str, case_id: str, *, resume: bool = False) -> None:
                     "error": error_msg,
                     "failed_phases": failed_phases,
                     "commitment_states": commitments,
-                    "message": _narrate("run_partial_failure", "done", error=error_msg, child_name=child_name),
+                    "message": narrator.line("run_partial_failure", "done"),
                 })
             else:
                 workspace.update_run(
@@ -1100,13 +1106,13 @@ def _run_background(run_id: str, case_id: str, *, resume: bool = False) -> None:
                 _push_event({
                     "event": "run_completed", "run_id": run_id, "case_id": case_id,
                     "commitment_states": commitments,
-                    "message": _narrate("run_completed", "done", commitment_states=commitments, child_name=child_name),
+                    "message": narrator.line("run_completed", "done", commitment_states=commitments),
                 })
         except Exception as exc:  # noqa: BLE001
             workspace.update_run(run_id, state="failed", error=str(exc))
             _push_event({
                 "event": "run_failed", "run_id": run_id, "error": str(exc),
-                "message": _narrate("run_failed", "", error=str(exc), child_name=child_name),
+                "message": narrator.line("run_failed", ""),
             })
         finally:
             if resume:

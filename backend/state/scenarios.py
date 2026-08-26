@@ -24,6 +24,8 @@ class ScenarioSpec:
     partner_behaviours: dict[str, str] = field(default_factory=dict)
     # Referral-level inject_callback flag keyed by service type.
     inject_callback: dict[str, bool] = field(default_factory=dict)
+    # Service types whose referral has nobody named on the partner side at the start.
+    unnamed_contacts: list[str] = field(default_factory=list)
     # Due-date offsets in days from creation (overrides defaults in synthetic.py).
     due_offsets: dict[str, int] = field(default_factory=dict)
     # Default workflow deadline in days for write_checkpoint.
@@ -121,6 +123,7 @@ SCENARIOS: dict[str, ScenarioSpec] = {
         ),
         inject_callback={"education": True},
         partner_behaviours={"education": "inject"},
+        unnamed_contacts=["education"],
         default_due_days=17,
         default_due_in="60s",
     ),
