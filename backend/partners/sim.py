@@ -12,6 +12,14 @@ behaviour ("stalled", "timeout", "malformed", etc.) that scenarios opt into.
 
 from backend.runtime.workspace import workspace
 
+PARTNER_SYSTEMS: dict[str, str] = {
+    "education": "lincoln_unified_sis",
+    "health": "riverbend_community_health",
+    "legal": "statewide_legal_aid",
+    "shelter": "harborlight_youth_shelter",
+    "family_services": "mesa_county_family_services",
+}
+
 
 def _behaviour(case_id: str, service: str) -> str:
     """Look up the partner behaviour configured on this case for this service type."""
@@ -23,6 +31,51 @@ def _behaviour(case_id: str, service: str) -> str:
     except Exception:  # noqa: BLE001
         pass
     return "normal"
+
+
+def _cross_scope_refused(case_id: str) -> bool:
+    """True once CaseRelay has ruled on a safeguarding escalation for this case.
+
+    A partner gets one attempt at an out-of-scope request. Once it has been quarantined
+    and ruled on, the partner stops re-sending it and answers inside its own scope
+    instead — which for a stalled referral means admitting it still has nothing.
+    """
+    return any(
+        approval.get("action_type") == "escalation"
+        and approval.get("decision") not in (None, "pending")
+        for approval in workspace.list_approvals(case_id)
+    )
+
+
+def followup(service: str, referral_id: str, case_id: str | None = None) -> dict:
+    """The provider's answer when CaseRelay chases an outstanding referral.
+
+    A provider configured to time out is unreachable, so a chase gets no further than the
+    original request did and the reply records the silence. Every other provider answers,
+    and its answer names the member of staff who has taken the referral on — the fact that
+    someone now owns it is what closes the commitment.
+    """
+    behaviour = _behaviour(case_id, service) if case_id else "normal"
+    system = PARTNER_SYSTEMS.get(service, service)
+    if behaviour == "timeout":
+        return {
+            "system": system,
+            "referral_id": referral_id,
+            "responded": False,
+            "note": "No answer to the follow-up.",
+        }
+
+    from backend.state.synthetic import CONTACTS
+
+    owner = CONTACTS.get(service) or {}
+    return {
+        "system": system,
+        "referral_id": referral_id,
+        "responded": True,
+        "resolved": True,
+        "owner": {"name": owner.get("name"), "role": owner.get("role")},
+        "note": "Follow-up answered; a named officer has taken the referral on and closed it.",
+    }
 
 
 def school_status(referral_id: str, case_id: str | None = None) -> dict:
@@ -59,6 +112,8 @@ def school_status(referral_id: str, case_id: str | None = None) -> dict:
 def school_callback(referral_id: str, case_id: str | None = None) -> dict:
     behaviour = _behaviour(case_id, "education") if case_id else "normal"
     if behaviour in ("inject", "poison"):
+        if case_id and _cross_scope_refused(case_id):
+            return school_status(referral_id, case_id)
         from backend.state.fixtures import poisoned_school_payload
         return {
             "system": "lincoln_unified_sis",

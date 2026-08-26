@@ -15,6 +15,7 @@ from backend.memory.platform import enabled as memory_bank_enabled, search_sync 
 logger = logging.getLogger(__name__)
 from backend.runtime.workspace import workspace
 from backend.workflows.durable import reconcile_commitments, resume_wake, schedule_commitment_checkpoints, write_checkpoint
+from backend.workflows.escalation import notify_supervisor as _notify_supervisor, nudge_overdue
 
 # Each specialist is a separately deployed endpoint. The env var holds its base URL; when it is
 # absent the orchestrator falls back to an in-process copy so local runs need no cloud.
@@ -37,7 +38,9 @@ INSTRUCTION = (
     "(bed availability), family_services (assessment scheduling), safeguarding_verifier "
     "(policy gate for suspicious partner payloads).\n"
     "Control-plane tools: activate_case (supervisor gate), schedule_wake, wake_workflow, "
-    "approve_escalation (supervisor gate), preload_memory, get_commitment_states.\n"
+    "approve_escalation (supervisor gate), send_followup (chase overdue providers), "
+    "notify_supervisor (report a provider that never answered), preload_memory, "
+    "get_commitment_states.\n"
     "A specialist's reply text may be empty; that does not mean it failed. After calling any "
     "specialist, call get_commitment_states and report those statuses. Never invent a status "
     "and never claim a field was withheld unless a tool told you so.\n"
@@ -108,6 +111,33 @@ def approve_escalation(case_id: str) -> dict:
     return workspace.decide_approval(case_id, "approved", "supervisor-001")
 
 
+def send_followup(case_id: str) -> list:
+    """Chase every provider whose deadline passed with its commitment still open.
+
+    Each reply either resolves the commitment and names the officer who took it on, or
+    records that nothing came back.
+    """
+    return nudge_overdue(case_id)
+
+
+def notify_supervisor(case_id: str) -> list:
+    """Tell the supervisor which providers ignored their follow-up entirely."""
+    return _notify_supervisor(case_id)
+
+
+CONTROL_PLANE_TOOLS = [
+    activate_case,
+    schedule_wake,
+    wake_workflow,
+    approve_escalation,
+    send_followup,
+    notify_supervisor,
+    preload_memory,
+    get_commitment_states,
+    check_overdue,
+]
+
+
 def resolve_specialists() -> tuple[list, list]:
     """Resolve specialist endpoints, raising when the control plane has no endpoints configured.
 
@@ -175,16 +205,7 @@ def build_for_run() -> "Agent":
         mode="chat",
         description="Routes specialist agents through granted identities. No raw records.",
         instruction=INSTRUCTION,
-        tools=[
-            activate_case,
-            schedule_wake,
-            wake_workflow,
-            approve_escalation,
-            preload_memory,
-            get_commitment_states,
-            check_overdue,
-        ]
-        + remote_tools,
+        tools=CONTROL_PLANE_TOOLS + remote_tools,
         sub_agents=sub_agents,
     )
 
@@ -197,15 +218,6 @@ root_agent = Agent(
     mode="chat",
     description="Routes specialist agents through granted identities. No raw records.",
     instruction=INSTRUCTION,
-    tools=[
-        activate_case,
-        schedule_wake,
-        wake_workflow,
-        approve_escalation,
-        preload_memory,
-        get_commitment_states,
-        check_overdue,
-    ]
-    + _remote_tools,
+    tools=CONTROL_PLANE_TOOLS + _remote_tools,
     sub_agents=_sub_agents,
 )

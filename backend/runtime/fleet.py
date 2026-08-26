@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from typing import Callable
 
 from backend.runtime.workspace import workspace
+from backend.workflows.escalation import pending_nudges, unanswered
 
 SPECIALISTS = [
     "education_liaison",
@@ -80,47 +81,63 @@ def _checkpoint_committed_and_waiting(case_id: str) -> bool:
     return False
 
 
+def _awake(case_id: str) -> bool:
+    """wake_workflow has set at least one of this case's checkpoints to current_step='awake'."""
+    return any(
+        cp.get("current_step") == "awake"
+        for cp in workspace.list_case_checkpoints(case_id)
+    )
+
+
+def _pending_escalation(case_id: str) -> bool:
+    """A safeguarding escalation is waiting on a supervisor.
+
+    Only escalations count. A supervisor notice about an unresponsive partner is also
+    pending human attention, but it is not a gate on the machine: nothing the fleet does
+    next depends on how the volunteer answers it.
+    """
+    return any(
+        a.get("decision") == "pending" and a.get("action_type") == "escalation"
+        for a in workspace.list_approvals(case_id)
+    )
+
+
 def _checkpoint_awake_and_has_inject(case_id: str) -> bool:
     """wake_workflow set current_step='awake' and the referral packet has an injected callback."""
-    awake = any(
-        cp.get("current_step") == "awake"
-        for cp in workspace.list_case_checkpoints(case_id)
-    )
-    if not awake:
+    if not _awake(case_id):
         return False
     packet = workspace.get_case(case_id).get("referral_packet", {})
     return any(r.get("inject_callback") for r in packet.get("referrals", []))
 
 
-def _has_pending_approval(case_id: str) -> bool:
-    """Quarantine (or another mechanism) created an approval awaiting supervisor review."""
+def _escalation_decided_and_still_open(case_id: str) -> bool:
+    """The escalation is ruled on and the commitment it concerns is still not delivered."""
+    if not any(
+        a.get("action_type") == "escalation" and a.get("decision") not in (None, "pending")
+        for a in workspace.list_approvals(case_id)
+    ):
+        return False
+    states = workspace.commitment_states(case_id)
+    packet = workspace.get_case(case_id).get("referral_packet", {})
     return any(
-        a.get("decision") == "pending"
-        for a in workspace.list_approvals(case_id)
+        r.get("inject_callback") and states.get(r.get("type", "")) != "completed"
+        for r in packet.get("referrals", [])
     )
 
 
-def _approval_decided_and_has_inject(case_id: str) -> bool:
-    """Escalation is resolved and a clean re-callback is expected (inject_callback in packet)."""
-    approvals = workspace.list_approvals(case_id)
-    if not any(a.get("decision") not in (None, "pending") for a in approvals):
-        return False
-    packet = workspace.get_case(case_id).get("referral_packet", {})
-    return any(r.get("inject_callback") for r in packet.get("referrals", []))
+def _overdue_and_unchased(case_id: str) -> bool:
+    """A deadline has passed undelivered and that provider has not been chased yet."""
+    return _awake(case_id) and bool(pending_nudges(case_id))
 
 
-def _checkpoint_awake_no_pending_approvals(case_id: str) -> bool:
-    """Wake has fired and no approvals are blocking — safe to write final memory."""
-    awake = any(
-        cp.get("current_step") == "awake"
-        for cp in workspace.list_case_checkpoints(case_id)
-    )
-    if not awake:
-        return False
-    return not any(
-        a.get("decision") == "pending"
-        for a in workspace.list_approvals(case_id)
-    )
+def _followup_went_unanswered(case_id: str) -> bool:
+    """A chased provider stayed silent and the supervisor has not been told about it."""
+    return bool(unanswered(case_id))
+
+
+def _checkpoint_awake_no_pending_escalation(case_id: str) -> bool:
+    """Wake has fired and no escalation is blocking — safe to write final memory."""
+    return _awake(case_id) and not _pending_escalation(case_id)
 
 
 # ---------------------------------------------------------------------------
@@ -183,25 +200,45 @@ PHASE_REGISTRY: list[PhaseSpec] = [
             "A supervisor reviewed the quarantined callback for case {case_id} and approved the "
             "escalation. Call approve_escalation, report the decision, then stop."
         ),
-        precondition=_has_pending_approval,
+        precondition=_pending_escalation,
         priority=60,
     ),
     PhaseSpec(
-        label="8-enrolled",
+        label="8-followup",
         prompt_template=(
-            "A clean enrollment callback arrived for case {case_id}. Ask education_liaison to "
-            "call query_school and submit status completed if the SIS confirms a seat. Then stop."
+            "The supervisor approved the escalation on case {case_id}, so the scoped follow-up "
+            "may now go out. Ask education_liaison to re-check its commitment for case {case_id} "
+            "using only the fields it has been granted. Then stop."
         ),
-        precondition=_approval_decided_and_has_inject,
+        precondition=_escalation_decided_and_still_open,
         priority=70,
     ),
     PhaseSpec(
-        label="9-memory",
+        label="9-nudge",
+        prompt_template=(
+            "Deadlines have passed on case {case_id} with commitments still open. Call "
+            "send_followup to chase every provider that has not reported, then call "
+            "get_commitment_states and report what changed. Then stop."
+        ),
+        precondition=_overdue_and_unchased,
+        priority=75,
+    ),
+    PhaseSpec(
+        label="10-unanswered",
+        prompt_template=(
+            "A provider on case {case_id} ignored its follow-up. Call notify_supervisor so the "
+            "supervisor is told which commitment is still unreported, report which one, then stop."
+        ),
+        precondition=_followup_went_unanswered,
+        priority=78,
+    ),
+    PhaseSpec(
+        label="11-memory",
         prompt_template=(
             "Close the loop for case {case_id}: call preload_memory, then summarize every "
             "commitment status and which fields were withheld from each specialist."
         ),
-        precondition=_checkpoint_awake_no_pending_approvals,
+        precondition=_checkpoint_awake_no_pending_escalation,
         priority=80,
     ),
 ]

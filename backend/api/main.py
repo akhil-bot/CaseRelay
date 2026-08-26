@@ -23,6 +23,7 @@ from backend.identity.registry import IdentityDenied
 from backend.runtime.workspace import CaseNotFound, workspace
 from backend.state import dataset, scenarios as _scenarios_mod
 from backend.workflows import durable
+from backend.workflows.escalation import SUPERVISOR_NOTICE
 
 if os.environ.get("CASERELAY_CONTROL_PLANE", "").strip() == "1":
     from backend.agents.orchestrator.agent import resolve_specialists
@@ -529,9 +530,9 @@ _SPECIALIST_TO_SERVICE: dict[str, str] = {
     "family_services": "family_services",
 }
 
-# The enrollment-callback phase belongs to one service, so its lines resolve the
+# The post-approval follow-up belongs to one service, so its lines resolve the
 # organisation and contact the same way a fanout phase's lines do.
-_PHASE_SERVICES: dict[str, str] = {"8-enrolled": "education"}
+_PHASE_SERVICES: dict[str, str] = {"8-followup": "education"}
 
 _run_event_lock = threading.Lock()
 
@@ -571,14 +572,38 @@ class _Narrator:
         return referral.get("target_org_short", full) if introduced else full
 
     def _who(self, service: str) -> str:
-        """The named contact if the partner has given one, otherwise the organisation."""
-        contact = (self._referrals.get(service) or {}).get("contact")
+        """The named contact if the partner has given one, otherwise the organisation.
+
+        Re-read from the case rather than from the packet captured at construction: a
+        provider that answers a follow-up names an owner part-way through the run, and the
+        lines after that point should credit the person who took the work on.
+        """
+        contact = next(
+            (
+                r.get("contact")
+                for r in workspace.packet(self.case_id).get("referrals", [])
+                if r.get("type") == service
+            ),
+            None,
+        )
         return contact["name"] if contact else self._org(service)
 
     # -- event lines -------------------------------------------------------
 
     def overdue(self, service: str) -> str:
         return f"{self._who(service)} is overdue on {self.child}'s {self._subject(service)}."
+
+    def chasing(self, service: str) -> str:
+        return f"Chasing {self._org(service)} on {self.child}'s {self._subject(service)}."
+
+    def owned(self, service: str) -> str:
+        return f"{self._who(service)} has taken on {self.child}'s {self._subject(service)}."
+
+    def silent(self, service: str) -> str:
+        return f"{self._org(service)} still has not answered on {self.child}'s {self._subject(service)}."
+
+    def raised(self, service: str) -> str:
+        return f"{self._supervisor} now knows {self.child}'s {self._subject(service)} is unanswered."
 
     def line(self, event: str, phase: str, *, commitment_states: dict | None = None) -> str:
         child = self.child
@@ -618,6 +643,10 @@ class _Narrator:
                 return "A reply came back — screening it before anyone acts."
             if "approve" in phase:
                 return f"{self._supervisor} is reviewing the flagged reply."
+            if "nudge" in phase:
+                return f"Following up on {child}'s missed deadlines."
+            if "unanswered" in phase:
+                return f"Nobody replied — bringing {self._supervisor} in."
             if service:
                 return f"Contacting {self._org(service)} about {child}'s {self._subject(service)}."
             if "memory" in phase:
@@ -637,6 +666,10 @@ class _Narrator:
                 return f"That reply reached outside its scope — held for {self._supervisor}."
             if "approve" in phase:
                 return f"{self._supervisor} approved — the follow-up can now be sent."
+            if "nudge" in phase:
+                return f"Follow-ups are out on {child}'s overdue commitments."
+            if "unanswered" in phase:
+                return f"{self._supervisor} now holds the unanswered commitments."
             if service:
                 subject = self._subject(service)
                 status = states.get(service, "")
@@ -683,7 +716,15 @@ class _Narrator:
         next_actions: list[dict[str, str]] = []
 
         for a in workspace.list_approvals(self.case_id):
-            if a.get("decision") == "pending":
+            if a.get("decision") != "pending":
+                continue
+            if a.get("action_type") == SUPERVISOR_NOTICE:
+                service = a.get("commitment_type", "")
+                next_actions.append({
+                    "action": f"{self._supervisor} was told nobody answered on the {self._subject(service)}.",
+                    "context": a.get("reason", "The deadline passed and the follow-up went unanswered."),
+                })
+            else:
                 next_actions.append({
                     "action": f"An escalation is waiting for {self._supervisor}.",
                     "context": a.get("reason", "A reply was flagged and needs a decision."),
@@ -773,6 +814,7 @@ def _run_background(run_id: str, case_id: str, *, resume: bool = False) -> None:
     from backend.runtime.context import bind as _bind
     from backend.runtime.fleet import PHASE_REGISTRY
     from backend.runtime.invoke import finalize_run_memory, run_agent
+    from backend.workflows import escalation
     from backend.workflows.durable import reconcile_commitments
 
     _adk_logger = logging.getLogger("google.adk")
@@ -958,6 +1000,11 @@ def _run_background(run_id: str, case_id: str, *, resume: bool = False) -> None:
                                 "message": narrator.overdue(ctype),
                             })
 
+                    # Which providers this phase is about has to be read before it runs:
+                    # the phase itself is what changes the answer.
+                    chased = escalation.pending_nudges(case_id) if label == "9-nudge" else []
+                    silent = escalation.unanswered(case_id) if label == "10-unanswered" else []
+
                     prompt = first.prompt_template.format(case_id=case_id)
                     workspace.update_run(
                         run_id, current_phase=label,
@@ -968,6 +1015,12 @@ def _run_background(run_id: str, case_id: str, *, resume: bool = False) -> None:
                         "event": "phase_started", "run_id": run_id, "phase": label,
                         "message": narrator.line("phase_started", label),
                     })
+                    for service in chased:
+                        _push_event({
+                            "event": "followup_sent", "run_id": run_id, "case_id": case_id,
+                            "commitment_type": service,
+                            "message": narrator.chasing(service),
+                        })
                     try:
                         phase_orch = _build_orchestrator()
                         orch_text = _quiet_run_agent(phase_orch, prompt, app_name="continuity_orchestrator")
@@ -982,6 +1035,30 @@ def _run_background(run_id: str, case_id: str, *, resume: bool = False) -> None:
                         })
                         completed_phases.add(label)
                         continue
+                    for service in chased:
+                        record = escalation.followup_record(case_id, service)
+                        if record.get("answered"):
+                            _push_event({
+                                "event": "followup_answered", "run_id": run_id, "case_id": case_id,
+                                "commitment_type": service,
+                                "disclosed_fields": record.get("disclosed_fields", []),
+                                "message": narrator.owned(service),
+                            })
+                        elif record:
+                            _push_event({
+                                "event": "followup_ignored", "run_id": run_id, "case_id": case_id,
+                                "commitment_type": service,
+                                "message": narrator.silent(service),
+                            })
+                    still_silent = escalation.unanswered(case_id) if silent else []
+                    for service in silent:
+                        if service not in still_silent:
+                            _push_event({
+                                "event": "supervisor_notified", "run_id": run_id, "case_id": case_id,
+                                "commitment_type": service,
+                                "message": narrator.raised(service),
+                            })
+
                     states = workspace.commitment_states(case_id)
                     _push_event({
                         "event": "phase_complete", "run_id": run_id,

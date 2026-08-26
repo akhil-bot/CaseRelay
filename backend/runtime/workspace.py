@@ -138,6 +138,27 @@ class Workspace:
             raise CaseNotFound(f"case {case_id} has no referral packet")
         return packet
 
+    def update_referral(self, case_id: str, service: str, **fields: Any) -> dict[str, Any]:
+        """Merge fields into one referral row of the case's packet and persist the case.
+
+        This is how a fact the platform learns from a partner becomes a fact about the
+        case. A referral that started with nobody named on the other side gets a contact
+        here once someone takes it on, and every later reader — narration included — sees
+        the person rather than the organisation.
+        """
+        with self._lock_for(case_id):
+            self.load(case_id)
+            case = self.cases.get(case_id)
+            if not case:
+                raise CaseNotFound(f"case {case_id} has not been ingested")
+            packet = case.get("referral_packet") or {}
+            for row in packet.get("referrals", []):
+                if row.get("type") == service:
+                    row.update(fields)
+                    store.save_case(case_id, case)
+                    return row
+            raise ValueError(f"no {service!r} referral in case {case_id}")
+
     def put_commitments(self, case_id: str, rows: list[dict[str, Any]]) -> None:
         self.commitments[case_id] = rows
         store.save_rows(case_id, "commitments", rows, "commitment_id")

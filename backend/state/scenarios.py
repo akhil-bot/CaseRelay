@@ -62,10 +62,14 @@ SCENARIOS: dict[str, ScenarioSpec] = {
         child_name="Priya",
         complexity="simple",
         title="Partner timeout — health never answers",
-        description="The health partner never responds. The fleet degrades gracefully and "
-                    "continues with the remaining four commitments.",
-        expected_outcome="Health commitment marked unresolved; others close normally.",
+        description="The health partner never responds, and does not answer the follow-up after "
+                    "its deadline passes either. The supervisor is told the clinic has still "
+                    "not reported; the remaining four commitments close.",
+        expected_outcome="Health commitment unresolved and raised to the supervisor as an "
+                         "unanswered follow-up; the other four close normally.",
         partner_behaviours={"health": "timeout"},
+        due_offsets={"health": 10},
+        default_due_in="60s",
     ),
     "diego": ScenarioSpec(
         id="diego",
