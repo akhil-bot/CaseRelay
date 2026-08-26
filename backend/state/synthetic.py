@@ -86,11 +86,11 @@ ORG_SHORT_NAMES = {
 # The person who owns the referral at each organisation. A referral whose contact is None
 # has nobody named on the other side yet, which is a fact about the case, not missing data.
 CONTACTS: dict[str, dict[str, str | None]] = {
-    "education": {"name": "M. Okafor", "role": "McKinney-Vento Liaison"},
-    "health": {"name": "P. Ndiaye", "role": "Records Coordinator"},
-    "legal": {"name": "A. Ferrand", "role": None},
-    "shelter": {"name": "T. Iverson", "role": "Intake Supervisor"},
-    "family_services": {"name": "C. Reyes", "role": None},
+    "education": {"name": "Sarah Miller", "role": "Enrollment Coordinator"},
+    "health": {"name": "David Chen", "role": "Records Coordinator"},
+    "legal": {"name": "Anna Reed", "role": "Staff Attorney"},
+    "shelter": {"name": "Tom Barnes", "role": "Intake Supervisor"},
+    "family_services": {"name": "Maria Lopez", "role": "Caseworker"},
 }
 
 VOLUNTEER_NAME = "Elena Vasquez"
