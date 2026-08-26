@@ -20,6 +20,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
 
 from backend.identity.registry import IdentityDenied
+from backend.runtime import event_log
 from backend.runtime.workspace import CaseNotFound, workspace
 from backend.state import dataset, scenarios as _scenarios_mod
 from backend.workflows import durable
@@ -1231,6 +1232,9 @@ def _run_background(run_id: str, case_id: str, *, resume: bool = False) -> None:
                     # Writing the checkpoints back would recreate documents for a case that
                     # was deleted while this run held it.
                     durable.retire_case_wakes(case_id)
+            # Nothing is narrating any more, so waiting for the queued events costs the run
+            # nothing and means a restart straight after a run still leaves its history readable.
+            event_log.flush()
 
 
 @app.post(
@@ -1276,13 +1280,14 @@ def list_case_events(case_id: str) -> list[dict]:
 
     The portal uses this to stitch a continuous timeline across the pre-checkpoint
     and post-wake runs, reading a single case's full history regardless of how
-    many runs it spans.
+    many runs it spans, and regardless of whether this instance is the one that
+    produced them.
     """
     workspace.get_case(case_id)
     all_events: list[dict] = []
     for run in workspace.list_runs_for_case(case_id):
         rid = run.get("run_id", "")
-        for ev in run.get("events", []):
+        for ev in workspace.run_events(rid):
             ev_copy = dict(ev)
             ev_copy.setdefault("run_id", rid)
             all_events.append(ev_copy)

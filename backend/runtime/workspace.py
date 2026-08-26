@@ -4,6 +4,7 @@ from typing import Any
 from uuid import uuid4
 
 from backend.audit.writer import AuditMutationRejected, append_event as _write_audit_event
+from backend.runtime import event_log
 from backend.state import store
 from backend.state.case_machine import COMMITMENT_STATES, assert_transition
 
@@ -419,9 +420,29 @@ class Workspace:
         return run
 
     def push_run_event(self, run_id: str, event: dict[str, Any]) -> None:
+        """Add an event to the run's live view, then queue it for durable storage.
+
+        The in-memory list is updated first because the SSE stream reads it: a phase must
+        never wait on a write to narrate itself. The event's position in that list is its
+        sequence number, so what is stored keeps the order the stream showed.
+        """
         run = self.runs.get(run_id)
-        if run is not None:
-            run.setdefault("events", []).append(event)
+        if run is None:
+            return
+        events = run.setdefault("events", [])
+        events.append(event)
+        event_log.append(run_id, len(events) - 1, event)
+
+    def run_events(self, run_id: str) -> list[dict[str, Any]]:
+        """A run's events, preferring the live view held by the process that produced them.
+
+        An instance that did not run the case has no local view — after a restart, that is
+        every run — so the durable log is read instead.
+        """
+        run = self.runs.get(run_id)
+        if run is not None and run.get("events"):
+            return list(run["events"])
+        return store.load_run_events(run_id)
 
     def list_runs_for_case(self, case_id: str) -> list[dict[str, Any]]:
         """All runs for a case. Merges in-memory (live) with Firestore (durable)."""

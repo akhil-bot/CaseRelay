@@ -110,8 +110,16 @@ def case_exists(case_id: str) -> bool:
 RUNS = "runs"
 
 
+RUN_EVENTS = "events"
+
+
 def save_run(run_id: str, run: dict[str, Any]) -> None:
-    """Persist the run record (metadata only, not the transient event list)."""
+    """Persist the run record. Events are excluded: they live in their own subcollection.
+
+    The run document is rewritten on every phase transition, so carrying a growing event
+    array on it would rewrite the whole history each time. Appending one document per
+    event instead keeps each write the size of the event it stores.
+    """
     if not enabled():
         return
     payload = {k: v for k, v in run.items() if k != "events"}
@@ -125,8 +133,39 @@ def load_run(run_id: str) -> dict[str, Any] | None:
     if not doc.exists:
         return None
     data = doc.to_dict() or {}
-    data.setdefault("events", [])
+    data["events"] = load_run_events(run_id)
     return data
+
+
+def _run_events_ref(run_id: str):
+    return _db().collection(RUNS).document(run_id).collection(RUN_EVENTS)
+
+
+def save_run_event(run_id: str, seq: int, event: dict[str, Any]) -> None:
+    """Store one run event under its run, keyed by its position in the run.
+
+    The zero-padded sequence is the document id, so a plain read of the subcollection
+    sorts back into the order the events were pushed without needing an index or a
+    tie-break on timestamps that can repeat within a phase.
+    """
+    if not enabled():
+        return
+    _run_events_ref(run_id).document(f"{seq:05d}").set(event)
+
+
+def load_run_events(run_id: str) -> list[dict[str, Any]]:
+    """Every stored event for a run, in the order it was pushed."""
+    if not enabled():
+        return []
+    docs = sorted(_run_events_ref(run_id).stream(), key=lambda d: d.id)
+    return [d.to_dict() or {} for d in docs]
+
+
+def delete_run_events(run_id: str) -> None:
+    if not enabled():
+        return
+    for doc in _run_events_ref(run_id).stream():
+        doc.reference.delete()
 
 
 def list_runs_for_case(case_id: str) -> list[dict[str, Any]]:
@@ -148,9 +187,15 @@ def query_active_runs() -> list[dict[str, Any]]:
 
 
 def delete_runs_for_case(case_id: str) -> None:
+    """Delete a case's runs and the events stored beneath them.
+
+    Deleting a document leaves its subcollections in place, so the events have to be
+    removed explicitly or they outlive both the run and the case that owned them.
+    """
     if not enabled():
         return
     for doc in _db().collection(RUNS).where("case_id", "==", case_id).stream():
+        delete_run_events(doc.id)
         doc.reference.delete()
 
 
