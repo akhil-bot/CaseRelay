@@ -83,7 +83,13 @@ def list_cases() -> list[dict[str, Any]]:
 
 
 def delete_case(case_id: str) -> None:
-    """Purge the case and its subcollections so a reseed starts from draft."""
+    """Purge the case and its subcollections so a reseed starts from draft.
+
+    Only the case aggregate. A case's wake state lives in top-level collections keyed
+    by workflow id, so deleting a case means deleting those too — see
+    delete_checkpoints_for_case and delete_case_lock, both of which the caller must
+    also invoke. A checkpoint left behind outlives its case and fires forever.
+    """
     if not enabled():
         return
     ref = _case_ref(case_id)
@@ -92,6 +98,13 @@ def delete_case(case_id: str) -> None:
         for doc in ref.collection(name).stream():
             doc.reference.delete()
     ref.delete()
+
+
+def case_exists(case_id: str) -> bool:
+    """Whether the case document is still present, without reading its subcollections."""
+    if not enabled():
+        return False
+    return _case_ref(case_id).get().exists
 
 
 RUNS = "runs"
@@ -175,6 +188,19 @@ def query_checkpoints_for_case(case_id: str) -> list[dict[str, Any]]:
     return [d.to_dict() for d in docs if d.to_dict()]
 
 
+def delete_checkpoint(workflow_id: str) -> None:
+    if not enabled():
+        return
+    _db().collection("workflow_checkpoints").document(workflow_id).delete()
+
+
+def delete_checkpoints_for_case(case_id: str) -> None:
+    if not enabled():
+        return
+    for doc in _db().collection("workflow_checkpoints").where("case_id", "==", case_id).stream():
+        doc.reference.delete()
+
+
 def query_running_checkpoints() -> list[dict[str, Any]]:
     """Return all checkpoints in running state (for reclamation of stranded ones)."""
     if not enabled():
@@ -245,6 +271,15 @@ def release_case_lock(case_id: str) -> None:
         _db().collection("case_locks").document(case_id).set(
             {"case_id": case_id, "state": "idle"}, merge=True,
         )
+    except Exception:
+        pass
+
+
+def delete_case_lock(case_id: str) -> None:
+    if not enabled():
+        return
+    try:
+        _db().collection("case_locks").document(case_id).delete()
     except Exception:
         pass
 

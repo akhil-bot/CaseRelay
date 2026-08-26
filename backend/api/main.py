@@ -436,6 +436,18 @@ async def pubsub_push(request: Request) -> JSONResponse:
                 _push_logger.info("wake for %s/%s acked — checkpoint already completed", case_id, workflow_id)
                 return JSONResponse({"status": "deduplicated", "reason": "checkpoint_completed"})
 
+        # A wake whose case has been deleted can never be actioned, so retrying it is
+        # pointless: ack it and clear the state that produced it. Without this the sweep
+        # republishes the same unprocessable wake every minute and the retries crowd out
+        # wakes for live cases.
+        if not durable.case_is_live(case_id):
+            retired = durable.retire_case_wakes(case_id)
+            _push_logger.info(
+                "wake for %s discarded — case no longer exists; retired %d checkpoint(s)",
+                case_id, len(retired),
+            )
+            return JSONResponse({"status": "discarded", "reason": "case_deleted", "retired": retired})
+
         # If a run is already active for this case, return 409 so Pub/Sub retries with
         # backoff. The active run's resume_wake() may not have coalesced this checkpoint
         # yet (race between sweep and coalescing), so we must NOT ack the message —
@@ -864,9 +876,13 @@ def _run_background(run_id: str, case_id: str, *, resume: bool = False) -> None:
         return ctx.run(_inner)
 
     with _bind(case_id=case_id, run_id=run_id):
-        child_name = workspace.get_case(case_id).get("child_name", "")
-        narrator = _Narrator(case_id, child_name)
+        # Loading the case is inside the try: it fails for a case deleted between the wake
+        # being published and this run starting, and a failure above the try would leave the
+        # run queued and the case lock held for as long as the reclaim threshold.
+        narrator: _Narrator | None = None
         try:
+            child_name = workspace.get_case(case_id).get("child_name", "")
+            narrator = _Narrator(case_id, child_name)
             workspace.update_run(run_id, state="running", current_phase="intake" if not resume else "wake",
                                  heartbeat_at=datetime.now(timezone.utc).isoformat())
             _push_event({
@@ -1196,17 +1212,25 @@ def _run_background(run_id: str, case_id: str, *, resume: bool = False) -> None:
             workspace.update_run(run_id, state="failed", error=str(exc))
             _push_event({
                 "event": "run_failed", "run_id": run_id, "error": str(exc),
-                "message": narrator.line("run_failed", ""),
+                "message": (
+                    narrator.line("run_failed", "") if narrator
+                    else f"Case {case_id} could not be opened, so this run did no work."
+                ),
             })
         finally:
             if resume:
-                for _cp in workspace.list_case_checkpoints(case_id):
-                    if _cp.get("current_step") == "awake":
-                        _cp["state"] = "completed"
-                        _cp["completed"] = True
-                        workspace.put_checkpoint(_cp["workflow_id"], _cp)
-                from backend.state import store as _fin_store
-                _fin_store.release_case_lock(case_id)
+                if durable.case_is_live(case_id):
+                    for _cp in workspace.list_case_checkpoints(case_id):
+                        if _cp.get("current_step") == "awake":
+                            _cp["state"] = "completed"
+                            _cp["completed"] = True
+                            workspace.put_checkpoint(_cp["workflow_id"], _cp)
+                    from backend.state import store as _fin_store
+                    _fin_store.release_case_lock(case_id)
+                else:
+                    # Writing the checkpoints back would recreate documents for a case that
+                    # was deleted while this run held it.
+                    durable.retire_case_wakes(case_id)
 
 
 @app.post(

@@ -54,9 +54,18 @@ class Workspace:
             return self._case_locks.setdefault(case_id, threading.RLock())
 
     def reset(self, case_id: str) -> None:
+        """Remove every trace of a case, including the state that outlives the case document.
+
+        Checkpoints and the case lock live in top-level collections, so deleting the case
+        aggregate alone leaves them behind. An abandoned checkpoint is still due, so the
+        sweep keeps firing wakes for a case that can no longer be loaded; an abandoned lock
+        makes every future wake for that id conflict. Both must go with the case.
+        """
         with self._lock_for(case_id):
             store.delete_case(case_id)
             store.delete_runs_for_case(case_id)
+            store.delete_case_lock(case_id)
+            self.drop_case_checkpoints(case_id)
             self.cases.pop(case_id, None)
             self.commitments.pop(case_id, None)
             self.grants.pop(case_id, None)
@@ -67,9 +76,6 @@ class Workspace:
             run_ids_to_remove = [rid for rid, r in self.runs.items() if r.get("case_id") == case_id]
             for rid in run_ids_to_remove:
                 self.runs.pop(rid, None)
-            wf_ids = self._case_workflows.pop(case_id, [])
-            for wf_id in wf_ids:
-                self.checkpoints.pop(wf_id, None)
 
     def load(self, case_id: str) -> None:
         """Refresh this process's view from shared state. No-op when running in-memory.
@@ -305,6 +311,27 @@ class Workspace:
                 if wf_id not in wf_ids:
                     wf_ids.append(wf_id)
         return list(known.values())
+
+    def drop_case_checkpoints(self, case_id: str) -> list[str]:
+        """Delete every checkpoint belonging to a case and return the ids that were removed.
+
+        The store is queried by case_id rather than trusting this process's workflow index,
+        because an instance that never served the case has an empty index and would otherwise
+        leave the documents in place.
+        """
+        wf_ids = {
+            cp["workflow_id"]
+            for cp in self.list_case_checkpoints(case_id)
+            if cp.get("workflow_id")
+        }
+        wf_ids.update(
+            wf_id for wf_id, cp in self.checkpoints.items() if cp.get("case_id") == case_id
+        )
+        for wf_id in wf_ids:
+            self.checkpoints.pop(wf_id, None)
+        self._case_workflows.pop(case_id, None)
+        store.delete_checkpoints_for_case(case_id)
+        return sorted(wf_ids)
 
     def set_memory(self, case_id: str, purpose: str, cleaned: dict[str, Any]) -> None:
         with self._lock_for(case_id):

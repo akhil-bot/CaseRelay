@@ -1,4 +1,5 @@
 import json
+import logging
 import os
 from datetime import datetime, timedelta, timezone
 from uuid import uuid4
@@ -7,6 +8,8 @@ from backend.memory import bank as memory
 from backend.runtime.workspace import workspace
 
 _DEFAULT_DUE_DAYS = 17
+
+_logger = logging.getLogger("caserelay.durable")
 
 
 def _parse_duration(s: str) -> timedelta:
@@ -228,12 +231,40 @@ def _reclaim_stale(now: datetime) -> None:
         _store.save_checkpoint(wf_id, cp)
 
 
+def case_is_live(case_id: str) -> bool:
+    """Whether the case a checkpoint refers to can still be loaded."""
+    if not case_id:
+        return False
+    from backend.state import store as _store
+
+    if _store.enabled():
+        return _store.case_exists(case_id)
+    return case_id in workspace.cases
+
+
+def retire_case_wakes(case_id: str) -> list[str]:
+    """Drop the wake state of a case that no longer exists and return the ids dropped.
+
+    A wake is only actionable while its case can be loaded. Once the case is gone the
+    checkpoint can never be satisfied, so publishing it again would put an unprocessable
+    message on the topic every minute for ever. Deleting the checkpoints and the lock
+    removes the source instead of asking the consumer to keep rejecting the symptom.
+    """
+    from backend.state import store as _store
+
+    retired = workspace.drop_case_checkpoints(case_id)
+    _store.delete_case_lock(case_id)
+    return retired
+
+
 def sweep(now: datetime | None = None) -> list[str]:
     """Fire every workflow that is due, mark each running so double-fire is impossible.
 
     This is the Cloud Scheduler target. It must be idempotent: calling it twice in the
     same second produces exactly one wake per workflow. Also reclaims stale runs and
-    stranded checkpoints — see _reclaim_stale for the staleness contract.
+    stranded checkpoints — see _reclaim_stale for the staleness contract — and retires
+    checkpoints whose case has been deleted, so debris left by earlier cases clears
+    itself rather than needing a hand-run purge.
     """
     if now is None:
         now = datetime.now(timezone.utc)
@@ -241,9 +272,17 @@ def sweep(now: datetime | None = None) -> list[str]:
     _reclaim_stale(now)
 
     fired = []
+    retired: set[str] = set()
     for cp in find_due(now=now):
         wf_id = cp["workflow_id"]
         case_id = cp.get("case_id", "")
+        if case_id in retired:
+            continue
+        if not case_is_live(case_id):
+            retire_case_wakes(case_id)
+            retired.add(case_id)
+            _logger.info("retired wake state for deleted case %s (checkpoint %s)", case_id, wf_id)
+            continue
         workspace.update_checkpoint_state(wf_id, "running")
         _publish_wake(case_id, wf_id)
         fired.append(wf_id)
@@ -256,6 +295,11 @@ def resume_wake(case_id: str, workflow_id: str | None = None) -> dict:
     Marks every checkpoint in running state (set by sweep) as awake. Also catches any
     waiting checkpoint whose deadline has already passed so that a single run reconciles
     everything that is due, rather than requiring one push per commitment.
+
+    When nothing was due, the wake is reported as consumed and no checkpoint is written.
+    Scheduling one here would give a case that has just settled a fresh deadline it never
+    asked for, which the sweep would then fire, and every resumed run would leave another
+    behind.
     """
     now = datetime.now(timezone.utc)
     all_cps = workspace.list_case_checkpoints(case_id)
@@ -289,7 +333,9 @@ def resume_wake(case_id: str, workflow_id: str | None = None) -> dict:
             "agent_identity": "caserelay-scheduler",
         },
     )
-    return woken[0] if woken else write_checkpoint(case_id)
+    if woken:
+        return woken[0]
+    return {"case_id": case_id, "workflow_ids": [], "current_step": "nothing_due"}
 
 
 def reconcile_commitments(case_id: str) -> list[dict]:
