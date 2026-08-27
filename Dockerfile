@@ -17,6 +17,21 @@ RUN uv pip install --system --no-cache \
     "opentelemetry-exporter-gcp-trace" \
     "sse-starlette"
 
+# Agent Gateway performs TLS inspection on egress, presenting a certificate signed by a
+# private CA. The platform supplies that CA as a build arg when an engine is deployed with
+# --agent-gateway-egress; it must be declared here or Docker discards it silently.
+ARG AGENT_GATEWAY_ROOT_CERTIFICATES
+RUN if [ -n "$AGENT_GATEWAY_ROOT_CERTIFICATES" ]; then \
+      apt-get update && apt-get install -y --no-install-recommends ca-certificates && rm -rf /var/lib/apt/lists/*; \
+      mkdir -p /usr/local/share/ca-certificates; \
+      printf "%b" "$AGENT_GATEWAY_ROOT_CERTIFICATES" \
+        | awk 'BEGIN {c=0} /BEGIN CERTIFICATE/ {c++} c > 0 { print > "/usr/local/share/ca-certificates/agw-" c ".crt" }'; \
+      update-ca-certificates; \
+    fi
+ENV SSL_CERT_FILE=${AGENT_GATEWAY_ROOT_CERTIFICATES:+/etc/ssl/certs/ca-certificates.crt}
+ENV REQUESTS_CA_BUNDLE=${AGENT_GATEWAY_ROOT_CERTIFICATES:+/etc/ssl/certs/ca-certificates.crt}
+ENV GRPC_DEFAULT_SSL_ROOTS_FILE_PATH=${AGENT_GATEWAY_ROOT_CERTIFICATES:+/etc/ssl/certs/ca-certificates.crt}
+
 COPY app/ ./app/
 COPY backend/ ./backend/
 COPY contracts/ ./contracts/
