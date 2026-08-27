@@ -55,14 +55,14 @@ except Exception as _agui_exc:
 try:
     from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
     FastAPIInstrumentor.instrument_app(app)
-except Exception:
-    pass
+except Exception as _e:
+    _logging.getLogger("caserelay.otel").warning("FastAPI OTel instrumentation failed: %s", _e)
 
 try:
     from opentelemetry.instrumentation.httpx import HTTPXClientInstrumentor
     HTTPXClientInstrumentor().instrument()
-except Exception:
-    pass
+except Exception as _e:
+    _logging.getLogger("caserelay.otel").warning("HTTPX OTel instrumentation failed: %s", _e)
 
 app.add_middleware(
     CORSMiddleware,

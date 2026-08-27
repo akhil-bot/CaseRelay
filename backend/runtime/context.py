@@ -22,16 +22,29 @@ try:
     from opentelemetry.sdk.trace.export import BatchSpanProcessor
 
     if not isinstance(_otel_init.get_tracer_provider(), _SDKProvider):
+        import logging as _logging
         import os as _os
 
         _provider = _SDKProvider()
-        if _os.environ.get("GOOGLE_CLOUD_PROJECT"):
+        if _os.environ.get("GOOGLE_CLOUD_PROJECT") or _os.environ.get("CASERELAY_PROJECT_ID"):
             from opentelemetry.exporter.cloud_trace import CloudTraceSpanExporter
 
-            _provider.add_span_processor(BatchSpanProcessor(CloudTraceSpanExporter()))
+            # Agent Runtime overrides GOOGLE_CLOUD_PROJECT with the numeric project
+            # number, which Cloud Trace rejects in resource names. CASERELAY_PROJECT_ID
+            # always holds the string project ID and takes precedence.
+            _project_id = (
+                _os.environ.get("CASERELAY_PROJECT_ID")
+                or _os.environ.get("GOOGLE_CLOUD_PROJECT")
+            )
+            _provider.add_span_processor(
+                BatchSpanProcessor(CloudTraceSpanExporter(project_id=_project_id))
+            )
         _otel_init.set_tracer_provider(_provider)
-except Exception:  # noqa: BLE001 — OTel SDK not available
-    pass
+except Exception as _otel_exc:  # noqa: BLE001 — OTel SDK not available
+    import logging as _logging
+    _logging.getLogger("caserelay.otel").warning(
+        "OTel TracerProvider setup failed — traces will not be exported: %s", _otel_exc
+    )
 
 
 def _new_id() -> str:
