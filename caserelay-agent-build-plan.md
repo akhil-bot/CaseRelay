@@ -841,7 +841,7 @@ Running CaseRelay agents  --McpToolset-->  Firestore MCP (later), other Google M
 | Item | Value |
 |------|--------|
 | gcloud | `/Users/akhil.maddala/google-cloud-sdk/bin/gcloud` — SDK 580.0.0 |
-| Account | `akillsubsacc@gmail.com` (logged in); ADC present |
+| Account | `<redacted>` (logged in); ADC present |
 | Project | `caserelay` (189353698936), billing **enabled** (`01D1E6-387355-5796AA`) |
 | Also exists | `careops-505719` — do not deploy CaseRelay there |
 | Enabled on `caserelay` | `aiplatform`, `agentregistry`, `modelarmor`, `firestore`, `pubsub`, `cloudtasks`, `run`, `secretmanager`, `iap`, `logging`, `cloudtrace` |
