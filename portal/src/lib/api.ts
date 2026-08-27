@@ -6,6 +6,8 @@
  * shipped to the browser.
  */
 
+import { decodeRunEvent } from "@/lib/agui";
+
 const BASE = "/api/control-plane";
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
@@ -123,8 +125,12 @@ export async function listCaseRuns(caseId: string): Promise<CaseRunSummary[]> {
   return request(`/v1/cases/${caseId}/runs`);
 }
 
+/** A case's recorded history, decoded from the AG-UI events the wire carries. */
 export async function listCaseEvents(caseId: string): Promise<RunEvent[]> {
-  return request(`/v1/cases/${caseId}/events`);
+  const frames = await request<unknown[]>(`/v1/cases/${caseId}/events`);
+  return frames
+    .map(decodeRunEvent)
+    .filter((ev): ev is RunEvent => ev !== null);
 }
 
 /**
@@ -133,4 +139,16 @@ export async function listCaseEvents(caseId: string): Promise<RunEvent[]> {
  */
 export function streamRunEvents(runId: string): EventSource {
   return new EventSource(`${BASE}/v1/runs/${runId}/events`);
+}
+
+/**
+ * One SSE frame, decoded. Returns null for anything unreadable — a partial
+ * frame, or a heartbeat that arrived as data — which the caller ignores.
+ */
+export function parseRunEventFrame(data: string): RunEvent | null {
+  try {
+    return decodeRunEvent(JSON.parse(data));
+  } catch {
+    return null;
+  }
 }

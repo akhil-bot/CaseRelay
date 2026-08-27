@@ -9,6 +9,7 @@ import {
   deleteCase,
   getRunStatus,
   listScenarios,
+  parseRunEventFrame,
   streamRunEvents,
   submitRun,
   type CreatedCase,
@@ -85,19 +86,16 @@ export default function AdminPage() {
     esRef.current = es;
 
     es.onmessage = (msg) => {
-      try {
-        const ev: RunEvent = JSON.parse(msg.data);
-        setEvents((prev) => [...prev, ev]);
-        if (ev.event === "stream_end" || ev.event === "stream_timeout") {
-          es.close();
-          esRef.current = null;
-          getRunStatus(runId).then((status) => {
-            setRunStatus(status);
-            setPhase("done");
-          });
-        }
-      } catch {
-        // ignore unparseable
+      const ev = parseRunEventFrame(msg.data);
+      if (!ev) return;
+      setEvents((prev) => [...prev, ev]);
+      if (ev.event === "stream_end" || ev.event === "stream_timeout") {
+        es.close();
+        esRef.current = null;
+        getRunStatus(runId).then((status) => {
+          setRunStatus(status);
+          setPhase("done");
+        });
       }
     };
 

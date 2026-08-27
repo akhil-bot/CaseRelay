@@ -12,6 +12,7 @@
   },
   "dependencies": {
     "@ag-ui/client": "0.0.57",
+    "@ag-ui/core": "0.0.58",
     "@copilotkit/react-core": "^1.69.0",
     "@copilotkit/react-ui": "^1.69.0",
     "@copilotkit/runtime": "^1.69.0",

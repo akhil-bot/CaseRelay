@@ -19,6 +19,7 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
 
+from backend.api.wire import to_agui
 from backend.identity.registry import IdentityDenied
 from backend.runtime import event_log
 from backend.runtime.workspace import CaseNotFound, workspace
@@ -1284,6 +1285,9 @@ def list_case_runs(case_id: str) -> list[dict]:
 def list_case_events(case_id: str) -> list[dict]:
     """All run events across every run for a case, in the order they were narrated.
 
+    Served as AG-UI events, the same vocabulary the live stream uses, so the portal
+    reads a replayed history and a live one through one decoder.
+
     The portal uses this to stitch a continuous timeline across the pre-checkpoint
     and post-wake runs, reading a single case's full history regardless of how
     many runs it spans, and regardless of whether this instance is the one that
@@ -1307,7 +1311,7 @@ def list_case_events(case_id: str) -> list[dict]:
         for ev in workspace.run_events(rid):
             ev_copy = dict(ev)
             ev_copy.setdefault("run_id", rid)
-            all_events.append(ev_copy)
+            all_events.append(to_agui(ev_copy))
     return all_events
 
 
@@ -1344,12 +1348,15 @@ _SSE_MAX_DURATION = 1800
     responses={404: {"description": "Run not found"}},
 )
 def stream_run_events(run_id: str, request: Request) -> StreamingResponse:
-    """SSE stream of run events. Lasts as long as the run does.
+    """SSE stream of run events, as AG-UI events. Lasts as long as the run does.
 
     The stream terminates when the run reaches a terminal state (completed,
     failed, partial_failure). Heartbeat comments are sent every 15 s to keep
     the connection alive through proxies. A 30-minute safety valve prevents
     leaked connections; if it fires, an explicit stream_timeout event is sent.
+
+    The stream's own control frames go out in the same envelope as the narrated
+    events, so every frame a client parses is an AG-UI event.
 
     Client disconnect is handled at the ASGI layer: uvicorn cancels the response
     task (raising CancelledError in asyncio.sleep), cleanly stopping the generator.
@@ -1360,9 +1367,12 @@ def stream_run_events(run_id: str, request: Request) -> StreamingResponse:
     if not run:
         raise HTTPException(status_code=404, detail=f"run {run_id!r} not found")
 
+    def _frame(event: dict) -> str:
+        return f"data: {json.dumps(to_agui(event))}\n\n"
+
     async def _generate():
         yield "retry: 1000\n\n"
-        yield f"data: {json.dumps({'event': 'connected', 'run_id': run_id, 'state': run.get('state', 'queued')})}\n\n"
+        yield _frame({'event': 'connected', 'run_id': run_id, 'state': run.get('state', 'queued')})
         sent = 0
         elapsed = 0.0
         since_heartbeat = 0.0
@@ -1373,12 +1383,12 @@ def stream_run_events(run_id: str, request: Request) -> StreamingResponse:
                 return
             events = current.get("events", [])
             for ev in events[sent:]:
-                yield f"data: {json.dumps(ev)}\n\n"
+                yield _frame(ev)
                 sent += 1
                 since_heartbeat = 0.0
             state = current.get("state", "queued")
             if state in _TERMINAL_STATES:
-                yield f"data: {json.dumps({'event': 'stream_end', 'run_id': run_id, 'state': state})}\n\n"
+                yield _frame({'event': 'stream_end', 'run_id': run_id, 'state': state})
                 return
             if since_heartbeat >= _SSE_HEARTBEAT_INTERVAL:
                 yield f": heartbeat {int(elapsed)}s\n\n"
@@ -1386,7 +1396,7 @@ def stream_run_events(run_id: str, request: Request) -> StreamingResponse:
             await asyncio.sleep(poll_interval)
             elapsed += poll_interval
             since_heartbeat += poll_interval
-        yield f"data: {json.dumps({'event': 'stream_timeout', 'run_id': run_id, 'reason': 'safety valve after 30 minutes'})}\n\n"
+        yield _frame({'event': 'stream_timeout', 'run_id': run_id, 'reason': 'safety valve after 30 minutes'})
 
     return StreamingResponse(
         _generate(),

@@ -5,6 +5,7 @@ import {
   getCase,
   listCaseRuns,
   listCaseEvents,
+  parseRunEventFrame,
   streamRunEvents,
   getRunStatus,
   type LiveCaseDetail,
@@ -332,33 +333,30 @@ export function useLiveRunEvents(runId: string | null): LiveRunState {
     esRef.current = es;
 
     es.onmessage = (msg) => {
-      try {
-        const ev: RunEvent = JSON.parse(msg.data);
-        dispatch({ type: "event", ev });
+      const ev = parseRunEventFrame(msg.data);
+      if (!ev) return;
+      dispatch({ type: "event", ev });
 
-        if (ev.event === "stream_end" || ev.event === "stream_timeout") {
-          cleanup();
-          dispatch({ type: "stream_end" });
-          getRunStatus(runId).then((status) => {
-            const terminal = ["completed", "failed", "partial_failure"].includes(status.state)
-              ? (status.state as TerminalState)
-              : undefined;
-            dispatch({ type: "status", status, terminal });
-          });
-        } else if (
-          ev.event === "run_completed" ||
-          ev.event === "run_failed" ||
-          ev.event === "run_partial_failure"
-        ) {
-          const terminal = ev.event === "run_completed"
-            ? "completed"
-            : ev.event === "run_failed"
-              ? "failed"
-              : "partial_failure";
-          dispatch({ type: "terminal", state: terminal });
-        }
-      } catch {
-        // ignore unparseable frames
+      if (ev.event === "stream_end" || ev.event === "stream_timeout") {
+        cleanup();
+        dispatch({ type: "stream_end" });
+        getRunStatus(runId).then((status) => {
+          const terminal = ["completed", "failed", "partial_failure"].includes(status.state)
+            ? (status.state as TerminalState)
+            : undefined;
+          dispatch({ type: "status", status, terminal });
+        });
+      } else if (
+        ev.event === "run_completed" ||
+        ev.event === "run_failed" ||
+        ev.event === "run_partial_failure"
+      ) {
+        const terminal = ev.event === "run_completed"
+          ? "completed"
+          : ev.event === "run_failed"
+            ? "failed"
+            : "partial_failure";
+        dispatch({ type: "terminal", state: terminal });
       }
     };
 
