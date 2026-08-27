@@ -128,9 +128,13 @@ Each organisation is named in full the first time the run mentions it and by its
 
 ## Verification in Google Cloud after the run
 
+This section doubles as the on-camera proof script. Open each console tab **before** you start recording and leave them parked on the right page — every one of them is slow to first paint, and a run's evidence is easier to narrate over than to hunt for. The order below is the order worth showing: durable state first, then the agents that produced it, then the guardrails.
+
 ### Firestore (database: `caserelay`, NOT `(default)`)
 
 Navigate to: **Console → Firestore → Select database "caserelay"**
+
+`https://console.cloud.google.com/firestore/databases/caserelay/data/panel/cases?project=caserelay`
 
 | Collection path | What to check |
 |---|---|
@@ -148,34 +152,87 @@ The run events subcollection is the one to check if you want to prove the histor
 
 ### Cloud Logging
 
-**Control plane logs:**
+**Console → Logging → Logs Explorer**, or `https://console.cloud.google.com/logs/query?project=caserelay`. Set the time range to **Last 1 hour** and turn on **Stream logs** before the run so the panel scrolls live while the portal does.
+
+**Read this first.** ADK's A2A support emits a `UserWarning: [EXPERIMENTAL] …` line for nearly every request converter it touches — `convert_a2a_request_to_agent_run_request`, `convert_a2a_part_to_genai_part`, `AgentRunRequest`, `TaskResultAggregator`, `convert_event_to_a2a_events`. Six or more per A2A call. They are benign, they are not ours, and unfiltered they will bury everything worth showing. Firestore adds its own `Detected filter using positional arguments` warning. Every query below excludes both. Note also that CaseRelay's own `logger.info` lines never reach Cloud Logging — nothing configures a root handler, so app-level INFO is dropped and only WARNING and above survive. Do not plan a shot around one.
+
+**Control plane, run traffic only:**
 
 ```
 resource.type="cloud_run_revision"
 resource.labels.service_name="caserelay-control-plane"
-severity>=DEFAULT
+NOT textPayload:"[EXPERIMENTAL]"
+NOT textPayload:"Detected filter using positional arguments"
 ```
 
-**Reasoning engine logs (per specialist):**
+What the viewer sees: `POST /v1/cases … 201`, `POST /v1/cases/{case_id}/runs … 202`, then a steady drip of `POST /v1/pubsub/push … 200` as each commitment's checkpoint comes due. The `409 Conflict` pushes alongside them are the case lock refusing a duplicate wake — that is idempotency working, and it is worth saying so rather than letting it look like an error.
+
+**All eight engines at once** — the shot that proves the fleet is really eight separate deployments:
 
 ```
 resource.type="aiplatform.googleapis.com/ReasoningEngine"
-labels."ml.googleapis.com/reasoning_engine_id"="XXXXXXXXXX"
+NOT textPayload:"[EXPERIMENTAL]"
 ```
 
-(Get the engine ID from `CASERELAY_URL_*` env vars or from the Agent Engine console page.)
+Add the **`reasoning_engine_id`** column from the log field panel. During fan-out you get five different engine ids logging within the same second.
+
+**One engine serving an A2A request:**
+
+```
+resource.type="aiplatform.googleapis.com/ReasoningEngine"
+resource.labels.reasoning_engine_id="6205121908900364288"
+NOT textPayload:"[EXPERIMENTAL]"
+```
+
+The pair to point at is `GET /a2a/education/.well-known/agent-card.json … 200 OK` immediately followed by the POST that runs the task — card resolution then invocation, the A2A handshake in two log lines. Substitute the engine id for whichever specialist you want to show; they are on the `CASERELAY_URL_*` env vars of the control-plane revision (`gcloud run services describe caserelay-control-plane --region us-central1`).
+
+A `404 Not Found` on an agent-card path means the agent name in the URL does not match the engine being asked. It is a wiring mistake, not a cold start, and it is worth recognising on sight so you do not narrate it as one.
+
+### Vertex AI Agent Runtime
+
+**Console → Vertex AI → Agent Engines**, `https://console.cloud.google.com/vertex-ai/agents/agent-engines?project=caserelay&region=us-central1`
+
+Eight engines for the fleet — orchestrator, intake, verifier, and the five specialists — plus three more that hold platform state rather than agents: `caserelay-run-sessions`, `caserelay-chat-sessions`, `caserelay-memory-bank`. Say which is which; a viewer counting eleven rows against a claim of eight agents will assume padding.
+
+Open one specialist and show its **Deployment details**: the resource name whose numeric id is the same one in the log query above, and the same id again inside `CASERELAY_IDENTITY_*` on the control plane, which is how each engine's actions get attributed in the audit trail.
+
+### Model Armor
+
+**Console → Security → Model Armor → Templates**, region `us-central1`, template **`caserelay-screen`**.
+
+Show the template configuration: PI and jailbreak detection at `LOW_AND_ABOVE`, malicious URI detection, and the **SDP advanced config** pointing at inspect template `caserelay-cross-scope`. Follow that link into **Sensitive Data Protection → Inspect templates** to show the custom infoTypes (`CASERELAY_CROSS_SCOPE_MEDICAL`, `_LEGAL`, `_FAMILY`) and the hotword proximity rule that requires an action verb within 50 characters. That rule is why "medical notes" in a case summary does not trip the filter but "retrieve Maya's medical notes" does.
+
+Enforcement itself is not visible in Cloud Logging — the `sanitize_user_prompt` call is a Data Access operation and the app's own quarantine log line is INFO. The screened interaction is visible in **Firestore** instead: `cases/{case_id}/audit_events`, the doc with `event_type: "quarantine"`, whose `agent_identity` is the verifier engine (`…/reasoningEngines/3044580132904763392`) rather than a generic system actor. Pair that document with the portal's `6-quarantine` line on screen. If you want a request-count graph, Metrics Explorer has `modelarmor.googleapis.com/*` metrics, but it lags several minutes and is not worth waiting for on camera.
+
+### Memory Bank
+
+The Memory Bank lives on Agent Engine `8631858420611284992` (`caserelay-memory-bank`), scoped by `app_name: "caserelay"` and `user_id: <case_id>`. The console surfaces the engine but not the memories, so read them over the API — this is the more convincing shot anyway because the facts are legible:
+
+```bash
+curl -s -X POST \
+  -H "Authorization: Bearer $(gcloud auth print-access-token)" \
+  -H "Content-Type: application/json" \
+  "https://us-central1-aiplatform.googleapis.com/v1beta1/projects/caserelay/locations/us-central1/reasoningEngines/8631858420611284992/memories:retrieve" \
+  -d '{"scope":{"app_name":"caserelay","user_id":"CR-XXXXXXXXXX"},"simple_retrieval_params":{"page_size":10}}'
+```
+
+Each entry carries a `fact` in plain English, its `scope`, and a `topics` label — one of `partner_contacts`, `institutional_shortcuts`, `unblocking_strategies`, which are CaseRelay's own extraction topics rather than the ADK defaults. Drop the `:retrieve` suffix and `GET …/memories?pageSize=20` to show memories from several cases side by side, each isolated under its own `user_id`.
+
+### Agent Registry / Agent Gateway
+
+```bash
+gcloud alpha agent-registry agents list --project caserelay --location us-central1
+```
+
+The `caserelay-*-a2a` entries each carry a published A2A **card** — description, skills, input and output modes — which is the machine-readable contract the orchestrator resolves before it calls. Show one card next to the matching `GET …/agent-card.json … 200 OK` log line.
+
+Be accurate about the Gateway. `gcloud network-services agent-gateways list` shows **`caserelay-egress`** exists with an mTLS endpoint and a TLS inspection CA, but **the eight reasoning engines are not currently bound to it** — A2A traffic in the demo goes engine-to-engine over authenticated HTTPS, not through the gateway. Show it as provisioned infrastructure if you want, and say plainly that binding the fleet to it is next. Claiming it is in the request path is a claim the logs contradict.
 
 ### Cloud Trace
 
-The run's `trace_id` is shown in the UI's "Run Complete" card. Find it:
+**Not demo-safe right now — skip it.** Traces for this project currently list with zero spans; the trace ids stamped on run events return `404 NOT_FOUND` from the Trace API. On camera that reads as a broken integration rather than an incomplete one.
 
-```
-https://console.cloud.google.com/traces/list?project=caserelay&tid={trace_id}
-```
-
-The trace should show ADK spans (`invoke_agent`, `call_llm`, `execute_tool`) with `gen_ai.*` attributes and token counts. Custom spans from `caserelay.gateway` carry `caserelay.case_id`, `caserelay.commitment_type`, `caserelay.workflow_id` attributes.
-
-**Known limitation:** Control-plane and engine traces do NOT share a trace id. Agent Runtime starts a fresh trace context rather than honouring the incoming `traceparent`. The control-plane trace and the engine-side traces are separate — you will see the gateway spans in one trace and the ADK agent spans in a different trace.
+If it gets fixed, the shot is `https://console.cloud.google.com/traces/list?project=caserelay&tid={trace_id}` using the `trace_id` from the UI's "Run Complete" card, showing ADK spans (`invoke_agent`, `call_llm`, `execute_tool`) with `gen_ai.*` attributes and token counts, plus `caserelay.gateway` spans carrying `caserelay.case_id`, `caserelay.commitment_type` and `caserelay.workflow_id`. Even then, control-plane and engine traces do NOT share a trace id — Agent Runtime starts a fresh trace context rather than honouring the incoming `traceparent` — so the gateway spans and the ADK agent spans land in two separate traces.
 
 ---
 
