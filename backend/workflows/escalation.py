@@ -18,7 +18,7 @@ from typing import Any
 from uuid import uuid4
 
 from backend.identity.registry import AGENT_IDENTITIES
-from backend.partners import sim
+from backend.partners import mcp_client as partners
 from backend.runtime.workspace import workspace
 from backend.workflows.durable import reconcile_commitments
 
@@ -89,7 +89,7 @@ def nudge_overdue(case_id: str) -> list[dict[str, Any]]:
     for service in pending_nudges(case_id):
         referral = referrals.get(service) or {}
         disclosed = _allowed_fields(case_id, service)
-        reply = sim.followup(service, referral.get("referral_id", ""), case_id=case_id)
+        reply = partners.followup(service, referral.get("referral_id", ""), case_id=case_id)
         answered = bool(reply.get("responded"))
         owner = reply.get("owner") or {}
 

@@ -1,0 +1,33 @@
+FROM python:3.12-slim
+
+WORKDIR /app
+
+RUN pip install --no-cache-dir uv
+
+COPY pyproject.toml ./
+RUN uv pip install --system --no-cache \
+    "google-cloud-firestore" \
+    "mcp>=2.0" \
+    "uvicorn[standard]" \
+    "starlette"
+
+# Agent Gateway CA (same pattern as the main Dockerfile)
+ARG AGENT_GATEWAY_ROOT_CERTIFICATES
+RUN if [ -n "$AGENT_GATEWAY_ROOT_CERTIFICATES" ]; then \
+      apt-get update && apt-get install -y --no-install-recommends ca-certificates && rm -rf /var/lib/apt/lists/*; \
+      mkdir -p /usr/local/share/ca-certificates; \
+      printf "%b" "$AGENT_GATEWAY_ROOT_CERTIFICATES" \
+        | awk 'BEGIN {c=0} /BEGIN CERTIFICATE/ {c++} c > 0 { print > "/usr/local/share/ca-certificates/agw-" c ".crt" }'; \
+      update-ca-certificates; \
+    fi
+ENV SSL_CERT_FILE=${AGENT_GATEWAY_ROOT_CERTIFICATES:+/etc/ssl/certs/ca-certificates.crt}
+ENV REQUESTS_CA_BUNDLE=${AGENT_GATEWAY_ROOT_CERTIFICATES:+/etc/ssl/certs/ca-certificates.crt}
+ENV GRPC_DEFAULT_SSL_ROOTS_FILE_PATH=${AGENT_GATEWAY_ROOT_CERTIFICATES:+/etc/ssl/certs/ca-certificates.crt}
+
+COPY backend/ ./backend/
+COPY fixtures/ ./fixtures/
+
+ENV PYTHONPATH=/app PYTHONUNBUFFERED=1 PORT=8090
+EXPOSE 8090
+
+CMD ["python", "-m", "backend.partners.mcp_server", "--http"]

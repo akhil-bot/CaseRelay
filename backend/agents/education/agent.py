@@ -2,7 +2,7 @@ from google.adk.agents import Agent
 
 from backend.gateway.gateway import authorized_context
 from backend.identity.registry import AGENT_IDENTITIES
-from backend.partners import sim
+from backend.partners import mcp_client as partners
 from backend.runtime.context import bind as _bind
 from backend.runtime.workspace import workspace
 
@@ -29,7 +29,7 @@ def get_authorized_context(case_id: str) -> dict:
 def query_school(referral_id: str, case_id: str | None = None) -> dict:
     """Call the school SIS. Behaviour is determined by the case's scenario configuration."""
     try:
-        return sim.school_callback(referral_id, case_id=case_id)
+        return partners.school_callback(referral_id, case_id=case_id)
     except TimeoutError:
         return {"error": "timeout", "referral_id": referral_id, "note": "School SIS did not respond within the allowed time."}
 
