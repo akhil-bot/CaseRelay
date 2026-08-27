@@ -1,6 +1,22 @@
+import logging
 import os
 
-os.environ.setdefault("GOOGLE_CLOUD_PROJECT", "caserelay")
+_log = logging.getLogger(__name__)
+
+# Prefer CASERELAY_PROJECT_ID (always the string project id) over GOOGLE_CLOUD_PROJECT
+# (which Agent Runtime sets to the numeric project number, breaking Firestore/Cloud Trace).
+# Warn loudly when neither is set so a misconfigured deploy surfaces here rather than
+# failing silently inside a Google SDK call later.
+_project_id = os.environ.get("CASERELAY_PROJECT_ID") or os.environ.get("GOOGLE_CLOUD_PROJECT")
+if not _project_id:
+    _log.warning(
+        "Neither CASERELAY_PROJECT_ID nor GOOGLE_CLOUD_PROJECT is set; "
+        "defaulting to 'caserelay'. Set CASERELAY_PROJECT_ID to the string "
+        "project id to suppress this warning."
+    )
+    _project_id = "caserelay"
+
+os.environ.setdefault("GOOGLE_CLOUD_PROJECT", _project_id)
 os.environ.setdefault("GOOGLE_CLOUD_LOCATION", "global")
 os.environ.setdefault("GOOGLE_GENAI_USE_VERTEXAI", "1")
 

@@ -5,8 +5,11 @@ this is the opt-out, not the opt-in, so a misconfigured production deployment pe
 correctly rather than silently discarding writes.
 """
 
+import logging
 import os
 from typing import Any
+
+_log = logging.getLogger(__name__)
 
 CASES = "cases"
 
@@ -310,6 +313,12 @@ def try_acquire_case_lock(case_id: str, run_id: str) -> bool:
 
 
 def release_case_lock(case_id: str) -> None:
+    """Set the lock back to idle. Logs on failure rather than raising.
+
+    Called from finally blocks (api/main.py) and reclamation loops; raising here
+    would mask the original error or abort teardown. A failure leaves the case
+    permanently locked, so we log at ERROR with the case id to make it visible.
+    """
     if not enabled():
         return
     try:
@@ -317,16 +326,20 @@ def release_case_lock(case_id: str) -> None:
             {"case_id": case_id, "state": "idle"}, merge=True,
         )
     except Exception:
-        pass
+        _log.exception("Failed to release case lock for %s — case may remain locked", case_id)
 
 
 def delete_case_lock(case_id: str) -> None:
+    """Delete the lock document. Logs on failure rather than raising.
+
+    Called in cleanup/teardown paths; raising would leave other teardown incomplete.
+    """
     if not enabled():
         return
     try:
         _db().collection("case_locks").document(case_id).delete()
     except Exception:
-        pass
+        _log.exception("Failed to delete case lock for %s — stale lock document may persist", case_id)
 
 
 # -- screening verdicts --------------------------------------------------------

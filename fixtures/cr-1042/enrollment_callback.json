@@ -1,5 +1,5 @@
 {
-  "source_agent": "education-liaison-v1",
+  "source_agent": "caserelay-education@agent.caserelay.dev",
   "commitment_id": "cmt-edu-1042",
   "update_type": "callback",
   "idempotency_key": "idem-edu-enroll-1042",

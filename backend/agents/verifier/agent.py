@@ -149,10 +149,20 @@ def open_escalation(case_id: str, reason: str) -> dict:
             ),
         }
 
+    packet = workspace.packet(case_id)
+    referrals = packet.get("referrals", [])
+    # The triggering referral is the one with inject_callback set; fall back to the
+    # education referral (the only service whose callback the verifier screens today).
+    trigger_ref = next(
+        (r for r in referrals if r.get("inject_callback")),
+        next((r for r in referrals if r.get("type") == "education"), None),
+    )
+    recipient = (trigger_ref or {}).get("target_org", "")
+
     approval = {
         "approval_id": f"apr-{uuid4().hex[:8]}",
         "action_type": "escalation",
-        "recipient": "Lincoln Unified School District",
+        "recipient": recipient,
         "policy_basis": ["block_cross_scope_request", "CR-POLICY-003"],
         "decision": "pending",
         "reason": reason,
