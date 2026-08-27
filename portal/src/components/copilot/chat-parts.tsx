@@ -6,6 +6,7 @@ import {
   type CopilotChatToolCallsViewProps,
   type CopilotModalHeaderProps,
 } from "@copilotkit/react-core/v2";
+import { useCallback, useSyncExternalStore } from "react";
 import type { ButtonHTMLAttributes, SVGProps } from "react";
 import {
   ConversationHistoryButton,
@@ -61,22 +62,36 @@ const STEP_COPY: Record<string, { doing: string; done: string }> = {
 const STEP_FALLBACK = { doing: "Working on it", done: "Finished that step" };
 
 /**
- * When each message first appeared, kept outside React because the transport
- * carries no timestamp of its own and a re-render must not restamp a message.
+ * When each reply first appeared. The transport carries no timestamp, so the
+ * panel notes the arrival itself.
  *
- * Written on first render rather than from an effect: a message keeps one id
- * across every streaming update, so the value settles on the moment the reply
- * began arriving and never moves again.
+ * Read after the commit rather than during the render, and held outside React.
+ * Both halves matter. Nothing subscribes while the server renders, so a clock
+ * reading and a locale-formatted time — the two things a server and a browser
+ * reliably disagree about — stay out of the HTML that has to hydrate. And the
+ * map means a re-render, or reopening a conversation, reuses the first reading
+ * rather than taking a fresh one, so a reply keeps the moment it arrived.
  */
 const firstSeen = new Map<string, string>();
 
-function firstSeenAt(id: string): string {
-  let at = firstSeen.get(id);
-  if (at === undefined) {
-    at = new Date().toISOString();
-    firstSeen.set(id, at);
-  }
-  return at;
+function useFirstSeen(id: string): string | null {
+  // Subscribing is what notes the arrival. React runs this after the commit, so
+  // the clock is read in the browser and never while the server renders, and
+  // the server snapshot below is what both sides agree on until then.
+  const noteArrival = useCallback(
+    (onStamped: () => void) => {
+      if (!firstSeen.has(id)) {
+        firstSeen.set(id, new Date().toISOString());
+        onStamped();
+      }
+      return () => {};
+    },
+    [id],
+  );
+
+  const read = useCallback(() => firstSeen.get(id) ?? null, [id]);
+
+  return useSyncExternalStore(noteArrival, read, () => null);
 }
 
 function isAssistant(message: ChatMessage | undefined): message is AssistantTurn {
@@ -154,10 +169,13 @@ function StepLine({ steps, messages }: { steps: ToolStep[]; messages: ChatMessag
  * the two panels can never drift apart, and set on the right like the feed's
  * own column — which keeps the left edge for what the volunteer is reading.
  *
- * `tabular-nums` holds the digits still while a reply streams beneath it.
+ * Nothing renders until the arrival has been noted, which is the first commit
+ * after this mounts. `tabular-nums` holds the digits still while a reply
+ * streams beneath it.
  */
 function ReplyTime({ id }: { id: string }) {
-  const label = formatEventTime(firstSeenAt(id));
+  const at = useFirstSeen(id);
+  const label = at === null ? "" : formatEventTime(at);
   if (!label) return null;
 
   return <p className={cx(type_.monoSmall, "mb-1.5 text-right tabular-nums")}>{label}</p>;
