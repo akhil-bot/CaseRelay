@@ -745,6 +745,86 @@ def _(c: Ctx) -> None:
     )
 
 
+@gate("t9.6")
+def _(c: Ctx) -> None:
+    c.py(
+        """
+        import importlib
+        from pathlib import Path
+
+        from backend.state.fixtures import agent_cards
+        from backend.identity.registry import _AGENT_ID_TO_KEY
+
+        AGENTS_DIR = Path("backend/agents")
+
+        def _load_module(key):
+            # Try the key as a directory name first; fall back to the first directory
+            # whose basename equals the leading component of the key (handles the
+            # family_services → family/agent.py mismatch).
+            try:
+                return importlib.import_module(f"backend.agents.{key}.agent")
+            except ModuleNotFoundError:
+                pass
+            prefix = key.split("_")[0]
+            for d in sorted(AGENTS_DIR.iterdir()):
+                if d.is_dir() and not d.name.startswith("_") and d.name != "smoke":
+                    if d.name == prefix:
+                        return importlib.import_module(f"backend.agents.{d.name}.agent")
+            raise ImportError(f"no agent directory found for key {key!r}")
+
+        def _code_tools(mod):
+            # Plain callables in root_agent.tools are the agent's declared tools.
+            # AgentTool/sub-agent wrappers (no __name__) are specialist dispatch,
+            # not named tools — exclude them.
+            return {t.__name__ for t in mod.root_agent.tools if hasattr(t, "__name__")}
+
+        cards = agent_cards()
+        errors = []
+        card_ids = {card["agent_id"] for card in cards}
+
+        for card in cards:
+            agent_id = card["agent_id"]
+            card_tools = set(card["tools"])
+            key = _AGENT_ID_TO_KEY.get(agent_id)
+            if key is None:
+                errors.append(
+                    f"card {agent_id!r} has no entry in _AGENT_ID_TO_KEY — this is drift"
+                )
+                continue
+            try:
+                mod = _load_module(key)
+            except ImportError as exc:
+                errors.append(f"agent {key!r}: {exc}")
+                continue
+            code_tools = _code_tools(mod)
+            only_card = card_tools - code_tools
+            only_code = code_tools - card_tools
+            if only_card or only_code:
+                parts = [f"agent {key!r} ({agent_id})"]
+                if only_card:
+                    parts.append(f"only in card: {sorted(only_card)}")
+                if only_code:
+                    parts.append(f"only in code: {sorted(only_code)}")
+                errors.append("; ".join(parts))
+
+        for agent_id, key in _AGENT_ID_TO_KEY.items():
+            if agent_id not in card_ids:
+                errors.append(
+                    f"agent {key!r} ({agent_id}) is in _AGENT_ID_TO_KEY but missing from the card fixture — drift"
+                )
+
+        if errors:
+            for e in errors:
+                print(e)
+            raise SystemExit(f"{len(errors)} tool-drift issue(s) detected")
+
+        print("OK")
+        """,
+        "agent card tool lists match the tools each agent is constructed with",
+        env={"CASERELAY_STATE": "memory"},
+    )
+
+
 @gate("t10.1")
 def _(c: Ctx) -> None:
     c.py(
