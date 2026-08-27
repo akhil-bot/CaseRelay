@@ -11,3 +11,8 @@ node_modules/
 .omc/
 harness/
 *.md
+.pytest_cache/
+.ruff_cache/
+infra/deploy_logs/
+.env
+*.env

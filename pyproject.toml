@@ -9,7 +9,6 @@ dependencies = [
     "google-cloud-aiplatform[agent_engines,adk]",
     "google-cloud-firestore",
     "google-cloud-pubsub",
-    "google-cloud-tasks",
     "fastapi>=0.115",
     "uvicorn[standard]",
     "pydantic>=2.0",
@@ -20,6 +19,7 @@ dependencies = [
     "httpx2>=2.12.0",
     "google-cloud-modelarmor",
     "ag-ui-adk>=0.7.0",
+    "mcp>=2.0",
 ]
 
 [tool.hatch.build.targets.wheel]

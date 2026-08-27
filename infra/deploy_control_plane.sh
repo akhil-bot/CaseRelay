@@ -176,24 +176,52 @@ _grant_with_retry "serviceAccount:${CP_SA}" "roles/aiplatform.user"
 echo "=== probing A2A readiness on canary revision ==="
 echo "    this exercises the outbound authenticated HTTP path that broke"
 echo "    when a sync hook was registered; /health cannot catch this"
-TOKEN=$(gcloud auth print-identity-token --audiences="$SERVICE_URL" 2>/dev/null || true)
+
+# Mint with retry — a transient gcloud auth failure returns an empty string;
+# an empty bearer token produces HTTP 401 indistinguishable from a bad audience.
+MINT_ERR=$(mktemp)
+TOKEN=""
+for _mint_i in 1 2 3; do
+  TOKEN=$(gcloud auth print-identity-token --audiences="$SERVICE_URL" 2>"$MINT_ERR" || true)
+  [ -n "$TOKEN" ] && break
+  echo "  token mint attempt ${_mint_i}/3 failed" >&2
+  cat "$MINT_ERR" >&2
+  [ "$_mint_i" -lt 3 ] && sleep 5
+done
+
 if [ -z "$TOKEN" ]; then
-  echo "FAIL: cannot mint identity token — cannot verify canary revision" >&2
-  echo "  production traffic is UNCHANGED" >&2
+  echo "FAIL: identity token minting failed after 3 attempts — production traffic is UNCHANGED" >&2
+  echo "  this is a probe infrastructure failure, not a broken revision" >&2
+  echo "  gcloud error: $(cat "$MINT_ERR")" >&2
+  rm -f "$MINT_ERR"
   echo "  canary revision for investigation: $CANARY_URL" >&2
   exit 1
 fi
+rm -f "$MINT_ERR"
 
+# Probe with retry — guards against transient cold-start or network blips.
+# Each attempt is still a genuine functional check; all must fail to block the deploy.
 PROBE_BODY=$(mktemp)
-PROBE_HTTP=$(curl -s \
-  -o "$PROBE_BODY" \
-  -w "%{http_code}" \
-  -H "Authorization: Bearer $TOKEN" \
-  --max-time 60 \
-  "$CANARY_URL/v1/probe" 2>/dev/null) || PROBE_HTTP="000"
+PROBE_HTTP="000"
+for _probe_i in 1 2 3; do
+  PROBE_HTTP=$(curl -s \
+    -o "$PROBE_BODY" \
+    -w "%{http_code}" \
+    -H "Authorization: Bearer $TOKEN" \
+    --max-time 60 \
+    "$CANARY_URL/v1/probe" 2>/dev/null) || PROBE_HTTP="000"
+  [ "$PROBE_HTTP" = "200" ] && break
+  echo "  probe attempt ${_probe_i}/3: HTTP $PROBE_HTTP" >&2
+  [ "$_probe_i" -lt 3 ] && sleep 10
+done
 
 if [ "$PROBE_HTTP" != "200" ]; then
   echo "FAIL: A2A probe returned HTTP $PROBE_HTTP — production traffic is UNCHANGED" >&2
+  if [ "$PROBE_HTTP" = "401" ] || [ "$PROBE_HTTP" = "403" ]; then
+    # Token was confirmed non-empty above, so this likely means audience mismatch.
+    echo "  NOTE: token minted successfully but Cloud Run returned $PROBE_HTTP —" >&2
+    echo "  likely audience mismatch; audience must be \$SERVICE_URL, not \$CANARY_URL." >&2
+  fi
   echo "  canary revision for investigation: $CANARY_URL" >&2
   echo "  probe response body:" >&2
   cat "$PROBE_BODY" >&2

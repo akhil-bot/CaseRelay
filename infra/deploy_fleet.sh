@@ -23,32 +23,72 @@ PROJECT="${CASERELAY_PROJECT:-caserelay}"
 REGION="${CASERELAY_REGION:-us-central1}"
 PROJECT_NUMBER="${CASERELAY_PROJECT_NUMBER:-189353698936}"
 DEPLOY_TIMEOUT="${CASERELAY_DEPLOY_TIMEOUT:-1800}"
-MAX_PARALLEL="${CASERELAY_MAX_PARALLEL:-2}"
+MAX_PARALLEL="${CASERELAY_MAX_PARALLEL:-4}"
 MAX_IAM_RETRIES="${CASERELAY_MAX_IAM_RETRIES:-5}"
 LOG_DIR="$(dirname "$0")/deploy_logs"
 mkdir -p "$LOG_DIR"
 
-# Agent Gateway binding: auto-detect if unset, "none" to opt out, or explicit resource name.
-# When bound, engines route egress through the gateway and get its root CA at build time.
-if [ "${CASERELAY_AGENT_GATEWAY:-}" = "none" ]; then
+# Gateway binding is EXPLICIT OPT-IN only. Set CASERELAY_AGENT_GATEWAY to the full gateway
+# resource name to bind engines during this deploy. Leave unset or set to "none" to deploy
+# without touching each engine's existing binding.
+# IMPORTANT: when not binding the flag is OMITTED entirely (not passed as empty), because
+# --agent-gateway-egress="" would silently unbind engines — the cause of the shelter {} state.
+# To intentionally remove an existing binding, set CASERELAY_AGENT_GATEWAY=unbind (distinct,
+# unmistakable value — cannot be triggered by "none" or an unset var).
+if [ "${CASERELAY_AGENT_GATEWAY:-}" = "none" ] || [ -z "${CASERELAY_AGENT_GATEWAY:-}" ]; then
   AGENT_GATEWAY=""
-elif [ -n "${CASERELAY_AGENT_GATEWAY:-}" ]; then
-  AGENT_GATEWAY="$CASERELAY_AGENT_GATEWAY"
+  echo "  Agent Gateway binding: OFF — --agent-gateway-egress omitted; per-engine bindings unchanged."
+elif [ "${CASERELAY_AGENT_GATEWAY:-}" = "unbind" ]; then
+  AGENT_GATEWAY="unbind"
+  echo "  Agent Gateway binding: UNBIND — removing existing bindings (passes --agent-gateway-egress \"\")."
 else
-  # Auto-detect: probe for the gateway; if it doesn't exist, deploy unbound.
-  _gw_probe=$(gcloud network-services agent-gateways describe caserelay-egress \
-    --project="$PROJECT" --location="$REGION" --format="value(name)" 2>/dev/null || true)
-  if [ -n "$_gw_probe" ]; then
-    AGENT_GATEWAY="projects/${PROJECT}/locations/${REGION}/agentGateways/caserelay-egress"
-  else
-    AGENT_GATEWAY=""
-  fi
+  AGENT_GATEWAY="$CASERELAY_AGENT_GATEWAY"
+  echo "  Agent Gateway binding: ON  — ${AGENT_GATEWAY}"
+  echo "  NOTE: ensure the gateway root CA is baked into the image or engines will fail with CERTIFICATE_VERIFY_FAILED."
 fi
 
-if [ -n "$AGENT_GATEWAY" ]; then
-  echo "  Agent Gateway: ${AGENT_GATEWAY} (engines will be bound at create time)"
+# Partner MCP routing is EXPLICIT OPT-IN only. Set CASERELAY_PARTNER_MCP=1 and
+# CASERELAY_PARTNER_MCP_URL to route partner calls through the deployed MCP server.
+# Unset or "0" keeps the in-process sim.py path (default, always safe).
+# Fail fast when MCP is enabled but the URL is missing — a fleet deploy with a missing URL
+# would break every partner call at runtime with a connection refused error.
+if [ "${CASERELAY_PARTNER_MCP:-0}" = "1" ]; then
+  if [ -z "${CASERELAY_PARTNER_MCP_URL:-}" ]; then
+    echo "FATAL: CASERELAY_PARTNER_MCP=1 but CASERELAY_PARTNER_MCP_URL is empty." >&2
+    echo "  Deploy the partner MCP server first (bash infra/deploy_partners.sh) and set the URL." >&2
+    exit 1
+  fi
+  PARTNER_MCP_EXTRA=",CASERELAY_PARTNER_MCP=1,CASERELAY_PARTNER_MCP_URL=${CASERELAY_PARTNER_MCP_URL}"
+  echo "  Partner MCP path:    ON  — ${CASERELAY_PARTNER_MCP_URL}"
 else
-  echo "  Agent Gateway: none (deploying unbound engines)"
+  PARTNER_MCP_EXTRA=",CASERELAY_PARTNER_MCP=0"
+  echo "  Partner MCP path:    OFF — in-process sim.py (default)"
+fi
+
+# Identity pinning: ALWAYS source pinned identities first, then fleet endpoints for URLs.
+# The pinned file is the single source of truth for identity values during the gateway rollout.
+# If a deploy would ship identity values that differ from the pinned set, it will produce
+# engines whose grants silently fail (IdentityDenied even though card returns 200).
+PINNED_ENV="$(dirname "$0")/pinned_identities.env"
+if [ -f "$PINNED_ENV" ]; then
+  # shellcheck disable=SC1090
+  source "$PINNED_ENV"
+  # Guard: refuse to deploy if any pinned identity is empty
+  _identity_guard_ok=1
+  for _id_var in CASERELAY_IDENTITY_EDUCATION CASERELAY_IDENTITY_HEALTH \
+                 CASERELAY_IDENTITY_LEGAL CASERELAY_IDENTITY_SHELTER \
+                 CASERELAY_IDENTITY_FAMILY CASERELAY_IDENTITY_INTAKE \
+                 CASERELAY_IDENTITY_ORCHESTRATOR CASERELAY_IDENTITY_VERIFIER; do
+    if [ -z "${!_id_var:-}" ]; then
+      echo "FATAL: $_id_var is empty after sourcing $PINNED_ENV" >&2
+      _identity_guard_ok=0
+    fi
+  done
+  if [ "$_identity_guard_ok" -eq 0 ]; then
+    echo "  Identity pinning guard failed. Cannot deploy — grants would silently break." >&2
+    echo "  Fix $PINNED_ENV or regenerate from live fleet." >&2
+    exit 1
+  fi
 fi
 
 # Source fleet endpoints if available (needed for orchestrator's specialist URLs).
@@ -58,6 +98,13 @@ FLEET_ENV="$(dirname "$0")/fleet_endpoints.env"
 if [ -f "$FLEET_ENV" ]; then
   # shellcheck disable=SC1090
   source "$FLEET_ENV"
+fi
+
+# Re-apply pinned identities AFTER fleet_endpoints.env to ensure they override
+# any potentially stale identity values that collect_endpoints.sh may have written.
+if [ -f "$PINNED_ENV" ]; then
+  # shellcheck disable=SC1090
+  source "$PINNED_ENV"
 fi
 
 # key | agent name | a2a folder
@@ -202,18 +249,25 @@ _deploy_one() {
       extra+=",${id_var}=${id_val}"
     fi
   done
+  # Partner MCP routing: OFF by default (CASERELAY_PARTNER_MCP=0 → in-process sim.py)
+  extra+="$PARTNER_MCP_EXTRA"
 
   local attempt=0 backoff=5 max_backoff=60
   local deploy_rc=1
   local final_status="FAIL"
+  local retried_transient=0
 
   while [ $attempt -lt "$MAX_IAM_RETRIES" ]; do
     attempt=$((attempt + 1))
     echo "[$(date +%H:%M:%S)] attempt ${attempt}/${MAX_IAM_RETRIES}" >> "$log"
 
-    local gw_flags=""
+    local -a gw_flags=()
     if [ -n "$AGENT_GATEWAY" ]; then
-      gw_flags="--agent-gateway-egress ${AGENT_GATEWAY}"
+      if [ "$AGENT_GATEWAY" = "unbind" ]; then
+        gw_flags=("--agent-gateway-egress" "")
+      else
+        gw_flags=("--agent-gateway-egress" "${AGENT_GATEWAY}")
+      fi
     fi
 
     timeout "$DEPLOY_TIMEOUT" agents-cli deploy \
@@ -223,7 +277,7 @@ _deploy_one() {
       --no-confirm-project \
       --agent-identity \
       --service-name "$svc" \
-      $gw_flags \
+      "${gw_flags[@]+"${gw_flags[@]}"}" \
       --update-env-vars "CASERELAY_AGENT=${agent},CASERELAY_STATE=firestore,CASERELAY_PROJECT_ID=${PROJECT},GOOGLE_CLOUD_PROJECT=${PROJECT},GOOGLE_CLOUD_LOCATION=global,GOOGLE_GENAI_USE_VERTEXAI=true,GOOGLE_API_USE_CLIENT_CERTIFICATE=true,GOOGLE_CLOUD_AGENT_ENGINE_ENABLE_TELEMETRY=true,OTEL_SEMCONV_STABILITY_OPT_IN=gen_ai_latest_experimental,PYTHONPATH=/app${extra},MODEL_ARMOR_TEMPLATE=projects/${PROJECT}/locations/${REGION}/templates/caserelay-screen,MODEL_ARMOR_LOCATION=${REGION}" \
       --cpu 1 --memory 2Gi --min-instances 1 --max-instances 2 \
       >> "$log" 2>&1
@@ -236,15 +290,51 @@ _deploy_one() {
       eid=$(_api_engine_id "$svc" 2>/dev/null || true)
       if [ -n "$eid" ] && _poll_a2a_ready "$eid" "$a2a_folder" 20 15 2>>"$log"; then
         echo "[$(date +%H:%M:%S)] A2A agent card returns 200 — engine is serving" >> "$log"
-        final_status="CREATED_AND_CONFIGURED"
+        # Check for empty stub (engine exists but has no working spec)
+        local stub_check
+        stub_check=$(curl -sf -H "Authorization: Bearer $(_get_token)" \
+          "https://${REGION}-aiplatform.googleapis.com/v1beta1/projects/${PROJECT_NUMBER}/locations/${REGION}/reasoningEngines/${eid}" 2>/dev/null | \
+          python3 -c "
+import json, sys
+e = json.load(sys.stdin)
+spec = e.get('spec', {}) or {}
+deploy = spec.get('deploymentSpec', {}) or {}
+source_code = spec.get('sourceCodeSpec', {}) or {}
+if not deploy and not source_code:
+    print('STUB')
+else:
+    print('OK')
+" 2>/dev/null || echo "OK")
+        if [ "$stub_check" = "STUB" ]; then
+          echo "[$(date +%H:%M:%S)] WARNING: engine is an empty stub despite card 200" >> "$log"
+          final_status="EMPTY_STUB"
+        else
+          final_status="CREATED_AND_CONFIGURED"
+        fi
       else
         echo "[$(date +%H:%M:%S)] CLI succeeded but engine not serving after polling" >> "$log"
         final_status="CLI_OK_NOT_SERVING"
+      fi
+      # Retry once for CLI_OK_NOT_SERVING (transient: build may still be propagating)
+      if [ "$final_status" = "CLI_OK_NOT_SERVING" ] && [ "$retried_transient" -eq 0 ]; then
+        retried_transient=1
+        echo "[$(date +%H:%M:%S)] retrying once (transient: engine not serving yet)" >> "$log"
+        echo "--- transient retry boundary ---" >> "$log"
+        sleep 30
+        continue
       fi
       break
     elif [ "$deploy_rc" -eq 124 ]; then
       echo "[$(date +%H:%M:%S)] CLI killed by timeout (${DEPLOY_TIMEOUT}s) — build was likely still running" >> "$log"
       final_status="TIMEOUT_BUILD_KILLED"
+      # Retry once on timeout (the build may complete on its own)
+      if [ "$retried_transient" -eq 0 ]; then
+        retried_transient=1
+        echo "[$(date +%H:%M:%S)] retrying once after timeout" >> "$log"
+        echo "--- timeout retry boundary ---" >> "$log"
+        sleep 15
+        continue
+      fi
       break
     elif grep -q "concurrent policy changes\|ABORTED" "$log"; then
       echo "[$(date +%H:%M:%S)] 409 IAM race detected, will retry" >> "$log"
@@ -264,6 +354,14 @@ _deploy_one() {
     else
       echo "[$(date +%H:%M:%S)] non-retryable failure (rc=${deploy_rc})" >> "$log"
       final_status="NOT_CREATED"
+      # Retry once for NOT_CREATED (transient network/auth failure)
+      if [ "$retried_transient" -eq 0 ]; then
+        retried_transient=1
+        echo "[$(date +%H:%M:%S)] retrying once (may be transient)" >> "$log"
+        echo "--- transient retry boundary ---" >> "$log"
+        sleep 10
+        continue
+      fi
       break
     fi
   done
@@ -345,15 +443,19 @@ for entry in "${AGENTS[@]}"; do
       ;;
     CLI_OK_NOT_SERVING)
       failed+=("$key")
-      echo "  FAIL: ${key} — CLI returned 0 but engine not serving (see ${LOG_DIR}/${key}.log)"
+      echo "  FAIL: ${key} — CLI returned 0 but engine not serving after retry (see ${LOG_DIR}/${key}.log)"
       ;;
     TIMEOUT_BUILD_KILLED)
       failed+=("$key")
-      echo "  FAIL: ${key} — timeout killed the build at ${DEPLOY_TIMEOUT}s (see ${LOG_DIR}/${key}.log)"
+      echo "  FAIL: ${key} — timeout killed the build at ${DEPLOY_TIMEOUT}s after retry (see ${LOG_DIR}/${key}.log)"
+      ;;
+    EMPTY_STUB)
+      failed+=("$key")
+      echo "  FAIL: ${key} — engine is an empty stub (no sourceCodeSpec/deploymentSpec; a killed build left this)"
       ;;
     NOT_CREATED)
       failed+=("$key")
-      echo "  FAIL: ${key} — engine not created (see ${LOG_DIR}/${key}.log)"
+      echo "  FAIL: ${key} — engine not created after retry (see ${LOG_DIR}/${key}.log)"
       ;;
     ORCHESTRATOR_MISSING_URLS)
       failed+=("$key")

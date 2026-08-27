@@ -10,12 +10,12 @@ RUN uv pip install --system --no-cache \
     "google-cloud-aiplatform[agent_engines,adk]" \
     "google-cloud-firestore" \
     "google-cloud-pubsub" \
-    "google-cloud-tasks" \
     "fastapi>=0.115" \
     "uvicorn[standard]" \
     "pydantic>=2.0" \
     "opentelemetry-exporter-gcp-trace" \
-    "sse-starlette"
+    "sse-starlette" \
+    "mcp>=2.0"
 
 # Agent Gateway performs TLS inspection on egress, presenting a certificate signed by a
 # private CA. The platform supplies that CA as a build arg when an engine is deployed with
