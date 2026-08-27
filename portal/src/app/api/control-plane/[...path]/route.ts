@@ -39,11 +39,18 @@ async function proxy(
     const hasBody = req.method !== "GET" && req.method !== "HEAD";
     const bodyText = hasBody ? await req.text() : undefined;
 
+    const isSSE = req.headers.get("accept")?.includes("text/event-stream");
+
     const upstreamRes = await fetch(target.toString(), {
       method: req.method,
       headers,
       body: bodyText,
       cache: "no-store",
+      // SSE streams last as long as the orchestrator run (~5-10 min).
+      // Without an explicit signal the runtime's default body timeout
+      // (~200-300 s depending on the Node/undici version) silently
+      // closes the connection mid-run.
+      ...(isSSE && { signal: AbortSignal.timeout(30 * 60_000) }),
     });
 
     if (

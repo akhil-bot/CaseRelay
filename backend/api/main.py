@@ -1425,8 +1425,23 @@ def stream_run_events(run_id: str, request: Request) -> StreamingResponse:
         elapsed = 0.0
         since_heartbeat = 0.0
         poll_interval = 0.5
+        transient_miss = 0
         while elapsed < _SSE_MAX_DURATION:
-            current = workspace.get_run(run_id)
+            try:
+                current = await asyncio.to_thread(workspace.get_run, run_id)
+            except Exception:
+                # Transient backend read failure — keep the stream open so the
+                # intermediary sees continued activity.
+                transient_miss += 1
+                if transient_miss > 10:
+                    return
+                yield f": heartbeat {int(elapsed)}s (retry)\n\n"
+                since_heartbeat = 0.0
+                await asyncio.sleep(poll_interval)
+                elapsed += poll_interval
+                since_heartbeat += poll_interval
+                continue
+            transient_miss = 0
             if current is None:
                 return
             events = current.get("events", [])
