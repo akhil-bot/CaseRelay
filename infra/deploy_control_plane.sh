@@ -30,6 +30,19 @@ if [ -f "$MEMORY_ENV" ]; then
   source "$MEMORY_ENV"
 fi
 
+# Agent Engine hosting the chat agent's Sessions. The control plane refuses to start
+# without it, so stop here rather than shipping an image that cannot boot.
+SESSIONS_ENV="$(dirname "$0")/chat_sessions.env"
+if [ ! -f "$SESSIONS_ENV" ]; then
+  echo "ERROR: $SESSIONS_ENV not found — run infra/bootstrap.sh first" >&2
+  exit 1
+fi
+source "$SESSIONS_ENV"
+if [ -z "${CASERELAY_CHAT_SESSION_ENGINE_ID:-}" ]; then
+  echo "ERROR: CASERELAY_CHAT_SESSION_ENGINE_ID is empty in $SESSIONS_ENV" >&2
+  exit 1
+fi
+
 echo "=== building linux/amd64 image ==="
 docker buildx build --platform linux/amd64 \
   -f backend/Dockerfile \
@@ -70,7 +83,9 @@ CASERELAY_IDENTITY_INTAKE=${CASERELAY_IDENTITY_INTAKE},\
 CASERELAY_IDENTITY_ORCHESTRATOR=${CASERELAY_IDENTITY_ORCHESTRATOR},\
 CASERELAY_IDENTITY_VERIFIER=${CASERELAY_IDENTITY_VERIFIER},\
 CASERELAY_MEMORY_BANK_ID=${CASERELAY_MEMORY_BANK_ID:-},\
-CASERELAY_MEMORY_BANK_LOCATION=${REGION}" \
+CASERELAY_MEMORY_BANK_LOCATION=${REGION},\
+CASERELAY_CHAT_SESSION_ENGINE_ID=${CASERELAY_CHAT_SESSION_ENGINE_ID},\
+CASERELAY_CHAT_SESSION_LOCATION=${REGION}" \
   --port=8080 \
   --memory=1Gi \
   --cpu=1 \
@@ -88,6 +103,8 @@ gcloud run services add-iam-policy-binding "$SERVICE" \
   --role="roles/run.invoker" \
   --quiet
 
+# aiplatform.user is also what lets the chat agent write Agent Platform Sessions: it
+# carries aiplatform.sessions.create and aiplatform.sessionEvents.append.
 echo "=== granting aiplatform.user to control plane SA ==="
 CP_SA="${PROJECT_NUMBER:-189353698936}-compute@developer.gserviceaccount.com"
 _grant_with_retry() {
