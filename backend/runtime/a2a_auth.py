@@ -38,7 +38,7 @@ class GoogleAuth(httpx.Auth):
         yield request
 
 
-def _inject_ae_traceparent(request: httpx.Request) -> None:
+async def _inject_ae_traceparent(request: httpx.Request) -> None:
     """Mirror the active OTel span into Google-Agent-Engine-Traceparent.
 
     ADK's get_propagated_context reads Google-Agent-Engine-Traceparent to create
