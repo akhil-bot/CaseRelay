@@ -843,8 +843,15 @@ def _run_background(run_id: str, case_id: str, *, resume: bool = False) -> None:
                 _adk_logger.setLevel(prev)
 
     def _push_event(event: dict) -> None:
-        event.setdefault("timestamp", datetime.now(timezone.utc).isoformat())
+        """Record one event, stamping its time and its position together.
+
+        The stamp is taken inside the lock because the fan-out phases narrate themselves
+        from concurrent threads: a stamp taken before the lock can be assigned a later
+        sequence number than an event stamped after it, leaving the recorded time and the
+        recorded order disagreeing about which line came first.
+        """
         with _run_event_lock:
+            event["timestamp"] = datetime.now(timezone.utc).isoformat()
             workspace.push_run_event(run_id, event)
 
     def _run_single_phase(label: str, template: str, tools: tuple[str, ...],
@@ -1162,7 +1169,6 @@ def _run_background(run_id: str, case_id: str, *, resume: bool = False) -> None:
                 run_id, commitments, outcome,
                 recall_count=recall_count, wrote_memory=wrote_events > 0,
             )
-            summary_event["timestamp"] = datetime.now(timezone.utc).isoformat()
             _push_event(summary_event)
 
             if outcome == "failed":
@@ -1276,22 +1282,32 @@ def list_case_runs(case_id: str) -> list[dict]:
     responses={404: {"description": "Case not found"}},
 )
 def list_case_events(case_id: str) -> list[dict]:
-    """All run events across every run for a case, in chronological order.
+    """All run events across every run for a case, in the order they were narrated.
 
     The portal uses this to stitch a continuous timeline across the pre-checkpoint
     and post-wake runs, reading a single case's full history regardless of how
     many runs it spans, and regardless of whether this instance is the one that
     produced them.
+
+    Runs are emitted oldest first and each run's events are kept in the order they were
+    recorded, which is the order their sequence numbers were assigned. Merging every run's
+    events into one list and sorting that on the timestamp string would be a weaker
+    guarantee twice over: it would depend on wall-clock stamps never colliding or drifting,
+    and it could interleave two runs, which breaks the run-gap divider the portal draws
+    wherever run_id changes.
     """
     workspace.get_case(case_id)
+    runs = sorted(
+        workspace.list_runs_for_case(case_id),
+        key=lambda r: (r.get("created_at", ""), r.get("run_id", "")),
+    )
     all_events: list[dict] = []
-    for run in workspace.list_runs_for_case(case_id):
+    for run in runs:
         rid = run.get("run_id", "")
         for ev in workspace.run_events(rid):
             ev_copy = dict(ev)
             ev_copy.setdefault("run_id", rid)
             all_events.append(ev_copy)
-    all_events.sort(key=lambda e: e.get("timestamp", ""))
     return all_events
 
 
