@@ -7,6 +7,7 @@ import { controlPlaneAuthHeaders } from "@/lib/control-plane-token";
 import { CASERELAY_AGENT_ID, COPILOT_RUNTIME_URL } from "@/lib/copilot/config";
 
 export const dynamic = "force-dynamic";
+export const maxDuration = 300;
 
 function buildHandler() {
   const base = process.env.CONTROL_PLANE_URL;

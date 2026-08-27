@@ -17,6 +17,7 @@ import {
 } from "@/lib/control-plane-token";
 
 export const dynamic = "force-dynamic";
+export const maxDuration = 300;
 
 async function proxy(
   req: NextRequest,
