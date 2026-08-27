@@ -2,6 +2,7 @@
 name = "caserelay"
 version = "0.1.0"
 description = "CaseRelay — multi-agent continuity platform"
+license = { text = "Apache-2.0" }
 requires-python = ">=3.12"
 dependencies = [
     "google-adk[a2a]>=2.7.1",

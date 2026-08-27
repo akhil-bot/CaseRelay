@@ -2,6 +2,7 @@
   "name": "caserelay-portal",
   "version": "0.1.0",
   "private": true,
+  "license": "Apache-2.0",
   "description": "CaseRelay portal — UI-only prototype with synthetic data.",
   "scripts": {
     "dev": "next dev",
