@@ -32,18 +32,32 @@ Navigate to `/cases/{case_id}`, hit **Run**:
 
 1. `POST /v1/cases/{case_id}/runs` → `{ run_id, state: "queued" }` (202 in < 1 s)
 2. Open `GET /v1/runs/{run_id}/events` (SSE stream)
-3. Stream events live as the fleet works:
-   - `run_started` — run begins executing
-   - `phase_started` / `phase_complete` / `phase_error` — orchestrator phase lifecycle
-   - `run_completed` — all phases succeeded (terminal)
-   - `run_partial_failure` — some phases succeeded, some failed (terminal)
-   - `run_failed` — all phases failed or a fatal error occurred (terminal)
-   - `stream_end` — final event confirming the terminal state; close the connection
-   - `stream_timeout` — safety-valve disconnection after 30 minutes; reconnect to resume
+3. Stream events live as the fleet works. Events arrive as **AG-UI envelopes**, built by `backend/api/wire.py`. Five of CaseRelay's event names have a true AG-UI counterpart and travel as that type; the rest travel as `CUSTOM` naming themselves, because AG-UI has no notion of a missed deadline or a quarantined reply and collapsing them into an approximation would lose the distinction the feed relies on.
 
-   Every event carries a `message` field: a single human-readable sentence in plain English, present tense, no markdown, no truncation mid-word. Use it as the primary progress narration in the UI. Existing fields (`event`, `run_id`, `phase`, `commitment_states`, `failed_phases`, `error`, `summary`) remain unchanged.
+   | CaseRelay event | AG-UI type | Meaning |
+   |---|---|---|
+   | `run_started` | `RUN_STARTED` | Run begins executing; `threadId` is the case, `runId` the run |
+   | `phase_started` | `STEP_STARTED` | Orchestrator phase begins; `stepName` is the phase label |
+   | `phase_complete` | `STEP_FINISHED` | Phase finished; `stepName` is the phase label |
+   | `run_completed` | `RUN_FINISHED` | Terminal — all phases succeeded |
+   | `run_failed` | `RUN_ERROR` | Terminal — all phases failed or a fatal error occurred; `message` is the failure, not the narration |
+   | `phase_error` | `CUSTOM` | One phase errored; the run continues |
+   | `run_partial_failure` | `CUSTOM` | Terminal — some phases succeeded, some failed |
+   | `run_suspended` | `CUSTOM` | Run parked awaiting a durable wake |
+   | `commitment_overdue`, `followup_sent`, `followup_answered`, `followup_ignored`, `supervisor_notified` | `CUSTOM` | The escalation ladder, from a missed deadline to the supervisor being told |
+   | `reconciliation`, `memory_recall`, `memory_write`, `run_summary` | `CUSTOM` | Deadline check, Memory Bank recall and write, closing tally |
+   | `stream_end` | `CUSTOM` | Final frame confirming the terminal state; close the connection |
+   | `stream_timeout` | `CUSTOM` | Safety-valve disconnection after 30 minutes; reconnect to resume |
+
+   The whole internal event rides along intact either way — on `rawEvent` for a typed envelope, on `value` for a custom one — so the portal reverses the table and renders CaseRelay's own event names. Nothing about storage changes: the durable event log stores the internal event, and `wire.py` is the only translation point.
+
+   Every event carries a `message` field: a single human-readable sentence in plain English, naming the real organisations and people from the case's referral packet rather than initials or internal vocabulary. Use it as the primary progress narration in the UI. The internal fields (`event`, `run_id`, `phase`, `commitment_states`, `failed_phases`, `error`, `summary`) are unchanged.
+
+   `GET /v1/cases/{case_id}/events` replays a case's recorded history in the same AG-UI envelopes, so a case opened long after its run — or after a control-plane restart — renders through exactly the same code path as the live stream.
 
    The five specialist fan-out phases (`3-fanout-*`) execute concurrently, so their events will interleave. Each event carries a `phase` field identifying its specialist (e.g. `3-fanout-education_liaison`) for correct UI attribution.
+
+   Phases are not a fixed sequence: `PHASE_REGISTRY` in `backend/runtime/fleet.py` holds fourteen specs, each with a precondition and a priority, and the engine picks the highest-priority phase whose precondition currently holds. The UI should therefore treat the phase label as a name, not a step number — `9-nudge` and `10-unanswered` appear only when a provider actually missed a deadline.
 
 4. Poll `GET /v1/runs/{run_id}` for the authoritative terminal state:
 
@@ -78,11 +92,14 @@ When `approval_required` arrives, surface the approval in the Approval Center:
 | POST | `/v1/cases` | Create case |
 | GET | `/v1/cases/{case_id}` | Case detail |
 | POST | `/v1/cases/{case_id}/runs` | Start async run |
+| GET | `/v1/cases/{case_id}/runs` | Runs recorded against the case |
+| GET | `/v1/cases/{case_id}/events` | Recorded run history, replayed as AG-UI |
 | GET | `/v1/runs/{run_id}` | Run status |
-| GET | `/v1/runs/{run_id}/events` | SSE event stream |
+| GET | `/v1/runs/{run_id}/events` | Live SSE event stream, as AG-UI |
 | GET | `/v1/approvals` | Pending approvals |
 | POST | `/v1/approvals/{id}/decide` | Approve/reject |
 | DELETE | `/v1/cases/{case_id}` | Cleanup |
+| — | `/agui` | Operator copilot chat, mounted as its own AG-UI app over `ag_ui_adk`; the transcript is held on Agent Platform Sessions, keyed on the AG-UI thread id |
 
 Base URL: `https://caserelay-control-plane-189353698936.us-central1.run.app` (auth-required; portal reaches it through the BFF proxy)  
 OpenAPI contract: `contracts/openapi.json`

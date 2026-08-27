@@ -51,7 +51,7 @@ Items 1–7 are machine/GCP setup. Several are already complete on this machine 
 | 4 | Confirm official Google MCP | Restart Cursor so it loads `gcloud` from `.cursor/mcp.json`. Optional: `gemini mcp list` | Cursor shows `gcloud` MCP; Gemini shows `gcloud` + `geap-agent-registry` + `geap-agent-platform` Connected | 3 (config written; Cursor restart still required) |
 | 5 | GEAP access gate — record what is callable vs preview-only | Cloud Console → Gemini Enterprise Agent Platform: Agent Runtime, Memory Bank, Agent Identity, Agent Gateway, Model Armor, Observability, Agent Registry | A short note in this file or chat: each capability is `callable` / `proof-only` / `unavailable`. Never put an unavailable preview on the demo critical path | 1–2 |
 | 6 | Create Firestore native DB (`caserelay`) | `gcloud firestore databases create --database=caserelay --location=nam5 --type=firestore-native --project=caserelay` (skip if exists). Uses a named database, not `(default)`, because Agent Runtime's proxy URL-encodes parentheses → `%28default%29` → Firestore 400 | Console shows a Native-mode database named `caserelay` | 2 |
-| 7 | Create event + schedule backbone | **Done.** Pub/Sub topics (`caserelay-events`, `caserelay-dead-letter`), push subscription `caserelay-events-push` → control plane `/v1/workflows/sweep`, Cloud Scheduler job `caserelay-sweep` (every 5 min). All codified in `infra/bootstrap.sh`. Cloud Tasks queue `caserelay-wakes` no longer used | Topics + push sub + scheduler exist | 2 |
+| 7 | Create event + schedule backbone | **Done.** Pub/Sub topics (`caserelay-events`, `caserelay-dead-letter`), push subscription `caserelay-events-push` → control plane `/v1/workflows/sweep`, Cloud Scheduler job `caserelay-sweep` (`* * * * *`, every minute). All codified in `infra/bootstrap.sh`. Cloud Tasks queue `caserelay-wakes` no longer used | Topics + push sub + scheduler exist | 2 |
 | 8 | Scaffold the monorepo (do **not** run `agents-cli create` as the repo root — it would nest a second project). Create dirs + manifests by hand, then use Agents CLI later per-agent if useful | Create `backend/`, `frontend/`, `infra/`, `contracts/`, `fixtures/`. Files: `pyproject.toml`, `frontend/package.json`, `.env.example`, `.gitignore`, `backend/Dockerfile` | Empty trees exist; Python 3.12 + Next.js can be installed later without colliding | 3 |
 | 9 | Install Python deps in a project venv | `cd` repo; `uv venv && uv pip install "google-cloud-aiplatform[agent_engines,adk]" google-adk fastapi uvicorn google-cloud-firestore google-cloud-pubsub google-cloud-tasks pydantic` | `uv run python -c "from google.adk.agents import Agent"` succeeds | 8 |
 | 10 | Smoke-test one ADK agent locally | `backend/agents/_smoke/agent.py` — single `Agent` with a health tool; `adk web backend/agents/_smoke` or `agents-cli run "ping"` from a later scaffold | Agent returns a structured reply in the playground | 9 |
@@ -73,13 +73,13 @@ Items 1–7 are machine/GCP setup. Several are already complete on this machine 
 
 | # | Do this | Command / file | Done when | Depends on |
 |---|---------|----------------|-----------|------------|
-| 19 | Intake & Authority Agent | `backend/agents/intake/agent.py` — tools `validate_packet`, `extract_commitments`, `propose_grants`. Cannot activate a case | CR-1042 packet → 5 commitments + proposed grants; status stays `draft` | 12, 18 |
-| 20 | Continuity Orchestrator | `backend/agents/orchestrator/agent.py` — coordinator with `sub_agents`; tools `dispatch_task`, `read_checkpoint`, `write_checkpoint`, `schedule_wake`, `request_approval`. Never receives raw partner records | Dispatches by commitment type; writes checkpoint | 19 |
-| 21 | Durable wake path | `backend/workflows/durable.py` — checkpoint → Pub/Sub push + Cloud Scheduler (5-min cron) → `POST /v1/workflows/sweep` → resume. Dead-letter after 5 attempts. All codified in `infra/bootstrap.sh` | Compressed deadline resumes without a chat session | 7, 14, 16, 20 |
-| 22 | Education Liaison | `backend/agents/education/agent.py` — `check_enrollment`, `request_status`, `report_callback`. Scope: name, DOB, referral ID only | Returns `unresolved` for Maya until callback; refuses other scopes | 15, 18 |
-| 23 | Legal Aid | `backend/agents/legal/agent.py` — `check_referral_status`, `report_callback` | Maya legal → `completed` with evidence ref; no strategy text | 15, 18 |
-| 24 | Health, Shelter, Family (thin) | `backend/agents/{health,shelter,family}/agent.py` — status + callback only | Health `scheduled`; Shelter/Family `pending`; no clinical/findings | 15, 18 |
-| 25 | Safeguarding Verifier | `backend/agents/verifier/agent.py` — deterministic rules first, LLM explanation second. Tools `evaluate_policy`, `quarantine_response`, `generate_safe_retry`, `write_audit` | Poisoned payload → `quarantine`; never mutates case facts | 15, 17, 22 |
+| 19 | Intake & Authority Agent | `backend/agents/intake/agent.py` — tools `read_referral_packet`, `validate_packet`, `add_commitment`, `propose_grant`, `finalize_intake`. Cannot activate a case | CR-1042 packet → 5 commitments + proposed grants; status stays `draft` | 12, 18 |
+| 20 | Continuity Orchestrator | `backend/agents/orchestrator/agent.py` — coordinator with `sub_agents` and one remote `AgentTool` per specialist; control-plane tools `activate_case`, `schedule_wake`, `wake_workflow`, `check_overdue`, `send_followup`, `notify_supervisor`, `approve_escalation`, `preload_memory`, `get_commitment_states`. Rebuilt per phase by `build_for_run(tools=...)`, which grants only that phase's tools. Never receives raw partner records | Dispatches by commitment type; writes checkpoint | 19 |
+| 21 | Durable wake path | `backend/workflows/durable.py` — checkpoint → Pub/Sub push + Cloud Scheduler (one-minute cron) → `POST /v1/workflows/sweep` → resume. Dead-letter after 5 attempts. A wake for an already-completed checkpoint is acked; one arriving while the case lock is held is nacked for redelivery. All codified in `infra/bootstrap.sh` | Compressed deadline resumes without a chat session | 7, 14, 16, 20 |
+| 22 | Education Liaison | `backend/agents/education/agent.py` — `get_authorized_context`, `query_school`, `submit_enrollment_status`. Scope: name, DOB, referral ID only | Returns `unresolved` for Maya until the post-approval follow-up; refuses other scopes | 15, 18 |
+| 23 | Legal Aid | `backend/agents/legal/agent.py` — `get_authorized_context`, `query_legal_aid`, `submit_legal_status` | Maya legal → `completed` with evidence ref; no strategy text | 15, 18 |
+| 24 | Health, Shelter, Family (thin) | `backend/agents/{health,shelter,family}/agent.py` — each with `get_authorized_context`, its own `query_*` and its own `submit_*_status`, nothing more | Each reports its own status; no clinical detail or assessment findings | 15, 18 |
+| 25 | Safeguarding Verifier | `backend/agents/verifier/agent.py` — deterministic rules first, LLM explanation second. Tools `inspect_school_callback` and `open_escalation`; the Model Armor screen it relies on lives in `backend/gateway/armor.py` | Poisoned payload → `quarantine`; never mutates case facts | 15, 17, 22 |
 | 26 | Wire the fleet | Orchestrator → (Gateway later) → domain agents → Verifier → checkpoint | One local run of CR-1042 produces the S2 partner matrix in §3 | 20–25 |
 
 ### Governance
@@ -97,13 +97,14 @@ Items 1–7 are machine/GCP setup. Several are already complete on this machine 
 
 | # | Do this | Command / file | Done when | Depends on |
 |---|---------|----------------|-----------|------------|
-| 33 | Next.js shell | `frontend/` App Router + Tailwind + shadcn/ui | `npm run dev` renders a blank shell | 8 |
-| 34 | Case Inbox | `frontend/app/dashboard/page.tsx` | Overdue / blocked / approval-needed / recently completed rows | 14, 33 |
-| 35 | Continuity Timeline | `frontend/app/case/[id]/page.tsx` | CR-1042 shows 5 commitments, owners, deadlines, evidence | 14, 33 |
-| 36 | Approval Center | `frontend/app/approvals/page.tsx` | Shows recipient, purpose, disclosed/withheld fields, policy basis | 32, 33 |
-| 37 | Agent Registry view | `frontend/app/registry/page.tsx` | 8 cards: owner, version, tools, scopes, endpoint, health | 33 |
-| 38 | Audit Trace | `frontend/app/audit/[trace_id]/page.tsx` | One `trace_id` timeline of hops + policy decisions | 17, 33 |
-| 39 | Live data | Firestore listeners + FastAPI/Agent Runtime | Portal updates when agents write; no mock-only demo path | 11, 26, 34–38 |
+| 33 | Next.js shell | `portal/` App Router + Tailwind, routes grouped under `src/app/(app)/` behind a `login/` group | `npm run dev` renders the signed-in shell | 8 |
+| 34 | Case Inbox | `portal/src/app/(app)/cases/page.tsx` | Overdue / blocked / approval-needed / recently completed rows | 14, 33 |
+| 35 | Continuity Timeline | `portal/src/app/(app)/cases/[caseId]/page.tsx` | CR-1042 shows 5 commitments, owners, deadlines, evidence | 14, 33 |
+| 36 | Approval Center | `portal/src/app/(app)/approvals/page.tsx` plus `approvals/[approvalId]/page.tsx` | Shows recipient, purpose, disclosed/withheld fields, policy basis | 32, 33 |
+| 37 | Agent Registry view | `portal/src/app/(app)/registry/page.tsx` | 8 cards: owner, version, tools, scopes, endpoint, health | 33 |
+| 38 | Audit Trace | `portal/src/app/(app)/audit/page.tsx` | One `trace_id` timeline of hops + policy decisions | 17, 33 |
+| 39 | Live data | Control-plane REST + SSE run event stream, read through `portal/src/lib/api.ts` and `live-case.ts` | Portal updates when agents write; no mock-only demo path | 11, 26, 34–38 |
+| 39a | Synthetic Data Lab | `portal/src/app/(app)/admin/page.tsx` — build a throwaway case, run the fleet, watch the AG-UI event stream, inspect Firestore state | A judge can drive a full journey on a case that did not exist a minute ago | 39 |
 
 ### Deploy and demo path
 
@@ -116,7 +117,11 @@ Items 1–7 are machine/GCP setup. Several are already complete on this machine 
 | 44 | Capture proof | Screenshots, trace export, `.run.app` URL, registry cards, Gateway disclose/withhold log, Model Armor event | Evidence list in hackathon plan §12 is complete | 43 |
 | 45 | Record 3:50 demo | Follow hackathon plan §11 timecoded script | Public YouTube/Vimeo link | 44 |
 | 46 | Submission README + architecture PNG | Repo-root README (only at submit time) + mermaid export from §5 | Devpost packet: video, repo, diagram, write-up | 44–45 |
-| 47 | **[POST-S8, OPTIONAL P0] Volunteer finding entry** | `frontend/app/case/[id]/page.tsx` — "Add finding" button writes a `partner_updates` doc with `update_type: volunteer_finding` (fields: `volunteer_id`, `event_date`, `narrative`, `concern_flag`, `commitment_id`, `confidentiality_level`). Append-only; shows on case timeline. Never included in Gateway payloads or agent responses. | Finding appears on `/case/[id]` timeline; Firestore doc has no path to any agent | 39, 44 |
+| 47 | Agent Platform Sessions | **Done.** `VertexAiSessionService` against two dedicated Agent Engines: `caserelay-chat-sessions` for the operator chat transcript (`backend/api/agui.py`, keyed on the AG-UI thread id) and `caserelay-run-sessions` for every orchestrator turn (`backend/runtime/invoke.py`, one session per phase invocation). Provisioned by `infra/bootstrap.sh` into `chat_sessions.env` and `run_sessions.env`. A deployed control plane refuses to start without both rather than degrading to in-memory sessions | No conversation the platform should be holding is held in process memory | 40 |
+| 48 | AG-UI on both event surfaces | **Done.** `backend/api/wire.py` maps `run_started`, `run_completed`, `run_failed`, `phase_started` and `phase_complete` onto `RUN_STARTED`, `RUN_FINISHED`, `RUN_ERROR`, `STEP_STARTED` and `STEP_FINISHED`; everything with no true counterpart travels as `CUSTOM` naming itself, whole internal event alongside. Applied to the live SSE stream and to replay alike; the operator chat endpoint `/agui` speaks it via `ag_ui_adk` | Both surfaces speak a recognised protocol rather than a private vocabulary; storage untouched | 39 |
+| 49 | Durable run history | **Done.** `backend/runtime/event_log.py` — a background writer drains a queue onto `runs/{run_id}/events/{seq}`, one document per event, off the request path. `workspace.run_events()` serves the in-memory view when the run is live and falls back to Firestore when it is not | A case opened after a restart shows the work that was done before it | 11, 39 |
+| 50 | Escalation ladder | **Done.** `backend/workflows/escalation.py` — `nudge_overdue` chases every provider whose deadline passed with the commitment still open, and each reply either resolves it naming the officer who took it on or records that nothing came back; `notify_supervisor` then reports whoever ignored the follow-up. Driven by orchestrator phases `9-nudge` and `10-unanswered` | A missed deadline leads somewhere a volunteer can see | 21, 43 |
+| 51 | **[POST-S8, OPTIONAL P0] Volunteer finding entry** | `portal/src/app/(app)/cases/[caseId]/page.tsx` — "Add finding" button writes a `partner_updates` doc with `update_type: volunteer_finding` (fields: `volunteer_id`, `event_date`, `narrative`, `concern_flag`, `commitment_id`, `confidentiality_level`). Append-only; shows on case timeline. Never included in Gateway payloads or agent responses. | Finding appears on the case timeline; Firestore doc has no path to any agent | 39, 44 |
 
 ---
 
@@ -191,9 +196,12 @@ caserelay-db/
 └── dead_letter/
 ```
 
-> **Simplified tree (implement this — 9 collections):** The tree above still shows `referrals` and `policy_decisions` as first-class. When implementing, absorb `referrals` into `commitments` (same lifecycle object — a referral is just a commitment in `sent` status). Absorb `policy_decisions` into `audit_events` (`verdict` stored there). The canonical 9-collection layout is:
-> `cases`, `authority_grants`, `commitments`, `partner_updates`, `human_approvals`, `audit_events`, `agent_cards`, `workflow_checkpoints`, `dead_letter`.
-> Volunteer findings use `partner_updates` with `update_type: volunteer_finding` — no 10th collection.
+> **What was actually built.** The tree above is the original design and still shows `referrals` and `policy_decisions` as first-class. Both were absorbed: a referral is a commitment in `sent` status, and a policy decision is the `verdict` on an audit event. `agent_cards` never became a collection either — the roster is fleet configuration loaded from `fixtures/cr-1042/agent_cards.json` and served by `GET /v1/registry`. `partner_updates` and `dead_letter` are unbuilt: nothing writes them, and `infra/firestore.indexes.json` indexes only the three collections that are queried — `commitments`, `workflow_checkpoints` and `audit_events`.
+>
+> The layout `backend/state/store.py` writes is:
+> `cases/{case_id}` with subcollections `commitments`, `authority_grants`, `human_approvals`, `audit_events` and `screening_verdicts`; `runs/{run_id}` with an `events` subcollection holding one document per run event, keyed on the position it was pushed at; `workflow_checkpoints/{workflow_id}`, one per case; and `case_locks/{case_id}`, guarding a case against two concurrent runs.
+>
+> Volunteer findings, if built, would use `partner_updates` with `update_type: volunteer_finding` — no separate collection.
 
 ### Collection schemas
 
@@ -405,14 +413,16 @@ Three citable standards directly affect the schemas above. All other design choi
 
 | Agent | Owner org | ADK type | Pattern role | Tools | Data scope |
 |-------|-----------|----------|--------------|-------|-----------|
-| **Continuity Orchestrator** | CASA Program | `Agent` (coordinator) | Coordinator/dispatcher | `dispatch_task`, `read_checkpoint`, `write_checkpoint`, `schedule_wake`, `request_approval` | Commitment statuses only — no raw records |
-| **Intake & Authority** | CASA Program | `Agent` | Sequential step 1 | `extract_commitments`, `propose_grants`, `validate_packet` | Referral packet (read), grants (write) |
-| **Education Liaison** | School District | `Agent` | Domain specialist | `check_enrollment`, `request_status`, `report_callback` | Child name, DOB, referral ID only |
-| **Health Coordination** | Healthcare Provider | `Agent` | Domain specialist | `check_appointment`, `report_callback` | Appointment status only — no clinical data |
-| **Legal Aid** | Legal-Aid Org | `Agent` | Domain specialist | `check_referral_status`, `report_callback` | Case reference, deadline only |
-| **Shelter Status** | Shelter | `Agent` | Domain specialist | `check_availability`, `report_callback` | Referral ID, scheduling only |
-| **Family Services** | Child-Welfare Agency | `Agent` | Domain specialist | `check_assessment`, `report_callback` | Assessment scheduling only — no findings |
-| **Safeguarding Verifier** | CASA Compliance | `Agent` | Critic/gatekeeper | `evaluate_policy`, `quarantine_response`, `generate_safe_retry`, `write_audit` | Policy rules; no direct case-data access |
+| **Continuity Orchestrator** | CASA Program | `Agent` (coordinator) | Coordinator/dispatcher | `activate_case`, `schedule_wake`, `wake_workflow`, `check_overdue`, `send_followup`, `notify_supervisor`, `approve_escalation`, `preload_memory`, `get_commitment_states`, plus one remote `AgentTool` per specialist | Commitment statuses only — no raw records |
+| **Intake & Authority** | CASA Program | `Agent` | Sequential step 1 | `read_referral_packet`, `validate_packet`, `add_commitment`, `propose_grant`, `finalize_intake` | Referral packet (read), grants and commitments (write) |
+| **Education Liaison** | School District | `Agent` | Domain specialist | `get_authorized_context`, `query_school`, `submit_enrollment_status` | Child name, DOB, referral ID only |
+| **Health Coordination** | Healthcare Provider | `Agent` | Domain specialist | `get_authorized_context`, `query_clinic`, `submit_appointment_status` | Appointment status only — no clinical data |
+| **Legal Aid** | Legal-Aid Org | `Agent` | Domain specialist | `get_authorized_context`, `query_legal_aid`, `submit_legal_status` | Case reference, deadline only |
+| **Shelter Status** | Shelter | `Agent` | Domain specialist | `get_authorized_context`, `query_shelter`, `submit_shelter_status` | Referral ID, scheduling only |
+| **Family Services** | Child-Welfare Agency | `Agent` | Domain specialist | `get_authorized_context`, `query_family_services`, `submit_family_status` | Assessment scheduling only — no findings |
+| **Safeguarding Verifier** | CASA Compliance | `Agent` | Critic/gatekeeper | `inspect_school_callback`, `open_escalation` | Policy rules and the callback under inspection; no direct case-data access |
+
+Every specialist is built with `disallow_transfer_to_peers=True`, so a specialist cannot hand work sideways to another specialist — routing stays with the orchestrator. The orchestrator itself is rebuilt per phase by `build_for_run(tools=...)`, which grants only the control-plane tools that phase is allowed to use; withholding the rest is what keeps a phase inside its own step.
 
 ### Orchestration pattern: hybrid coordinator + durable workflow
 

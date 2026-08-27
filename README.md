@@ -18,7 +18,7 @@ CaseRelay closes that gap with an accountable, audited agent fleet — one where
 
 ## Hackathon Track
 
-**Fortified Enterprise Fleet** — demonstrating Agent Registry, Agent Runtime, Memory Bank, Agent Identity, Agent Gateway, Model Armor, and Agent Observability running together on Google Cloud.
+**Fortified Enterprise Fleet** — demonstrating Agent Registry, Agent Runtime, Agent Platform Sessions, Memory Bank, Agent Identity, Agent Gateway, Model Armor, and Agent Observability running together on Google Cloud.
 
 ---
 
@@ -31,16 +31,25 @@ CASA Volunteer / Supervisor
   CaseRelay Portal (Next.js, local)
         │  BFF proxy — mints ID tokens server-side;
         │  no credential reaches the browser
+        │  AG-UI on the chat panel and the run event stream
         ▼
   Control Plane (FastAPI on Cloud Run, auth-required)
         │
+        ├─► Chat Agent (AG-UI)  ────────► Agent Platform Sessions
+        │                                 "caserelay-chat-sessions"
+        │
         ├─► Intake & Authority Agent  ──► Firestore (named DB "caserelay")
-        │                                       │
+        │                                       │  cases, commitments, grants,
+        │                                       │  approvals, audit, run events
         │                              Pub/Sub Events
         │                                       │
         ▼                                       ▼
   Continuity Orchestrator ◄────────── Agent Registry
-        │
+        │      │
+        │      ├──────────────────────► Agent Platform Sessions
+        │      │                        "caserelay-run-sessions"
+        │      │                        (one session per phase invocation)
+        │      └──────────────────────► Memory Bank (per-case recall)
         ▼
   Agent Gateway  ──► Education Agent ──┐
                  ──► Health Agent     ──┤    All 8 agents on Vertex AI
@@ -62,7 +71,9 @@ CASA Volunteer / Supervisor
 | Agent runtime | Google ADK on Vertex AI Agent Engine (reasoning engines), Gemini 3.5 Flash (`gemini-3.5-flash`) |
 | Control plane | Python, FastAPI, Cloud Run (`caserelay-control-plane`; `allUsers` removed, auth-required) |
 | Portal | Next.js, TypeScript (local `npm run dev`; not deployed) |
+| Agent conversations | GEAP Agent Platform Sessions on two dedicated Agent Engines (`caserelay-chat-sessions`, `caserelay-run-sessions`) |
 | State | Firestore (named database `caserelay` — see decision note below) |
+| Wire protocol | AG-UI for both the operator chat endpoint and the run event stream |
 | Observability | Cloud Logging, Cloud Trace (ADK spans with `gen_ai.*` attributes via `otel_to_cloud`; control-plane spans via `CloudTraceSpanExporter`) |
 | Security | GEAP Agent Identity (platform-managed, mTLS + DPoP), Model Armor (Cloud DLP-backed SDP with custom dictionary detectors), Safeguarding Verifier |
 
@@ -92,24 +103,26 @@ Eight agents deployed as Vertex AI reasoning engines, each with a platform-manag
 1. Supervisor activates monitoring after verifying court authority.
 2. Orchestrator discovers partner agents through the Registry and delegates scoped tasks.
 3. Legal completes. Healthcare schedules. Education goes 17 days without a verified owner.
-4. A Pub/Sub push event (driven by Cloud Scheduler every 5 minutes) wakes the dormant workflow — no user prompt, no open browser.
+4. A Pub/Sub push event (driven by Cloud Scheduler every minute) wakes the dormant workflow — no user prompt, no open browser.
 5. The Education Agent requests only enrollment-status fields through the Gateway.
-6. A malicious school response tries to retrieve medical notes; Model Armor quarantines it.
-7. The Safeguarding Verifier creates a safe retry and records every withheld field.
-8. CaseRelay drafts an escalation showing evidence, recipient, policy basis, and withheld fields. A supervisor approves.
-9. The school confirms enrollment. The same workflow resumes idempotently, closes the commitment, and updates Maya's timeline.
+6. A malicious school response tries to retrieve medical notes; Model Armor quarantines it. The instruction is never carried out.
+7. The Safeguarding Verifier opens an escalation showing evidence, recipient, policy basis, and withheld fields, and records the quarantine against its own platform identity. A supervisor approves.
+8. Only then may the scoped follow-up go out. The district is chased once within the same authority grant that covered the original request.
+9. The district answers, naming the enrollment coordinator who has taken the referral on. That name is written back onto the referral, the commitment closes, and Maya's timeline updates. Had nobody answered, the supervisor would have been told instead.
 
 ---
 
 ## GEAP Capabilities Demonstrated
 
 - **Agent Registry** — versioned A2A cards and live discovery for all eight agents, auto-registered by `agents-cli deploy`
-- **Agent Runtime** — eight reasoning engines in `us-central1` with checkpoint, sleep, and deadline-triggered resume via Pub/Sub push + Cloud Scheduler (5-minute sweep, dead-letter after 5 attempts, codified in `infra/bootstrap.sh`)
+- **Agent Runtime** — eight reasoning engines in `us-central1` with checkpoint, sleep, and deadline-triggered resume via Pub/Sub push + Cloud Scheduler (one-minute sweep, dead-letter after 5 attempts, codified in `infra/bootstrap.sh`)
 - **Memory Bank** — GEAP Memory Bank (instance `8631858420611284992`) via ADK's `VertexAiMemoryBankService`; sessions extracted once per wake via synchronous `memories.generate`; scoped per case (`case_id` → ADK `user_id`); three custom memory topics: `partner_contacts`, `institutional_shortcuts`, `unblocking_strategies`
+- **Agent Platform Sessions** — two dedicated Agent Engines via ADK's `VertexAiSessionService`. `caserelay-chat-sessions` holds the operator chat transcript, keyed on the AG-UI thread id so a returning conversation resolves in one read. `caserelay-run-sessions` holds every orchestrator agent turn, one session per phase invocation rather than one per run, because the fan-out dispatches five phases at once and Google documents row-level locking only for `DatabaseSessionService`. A deployed control plane refuses to start without both rather than falling back to in-memory sessions that look identical until the instance recycles. A throttled append is retried with jittered backoff and, if it still will not land, kept in memory and logged rather than failing the case
 - **Agent Identity** — platform-managed identity per agent (`--agent-identity`); SPIFFE-style principals (`principal://agents.global.org-…`); caller principal verified at the gateway; cross-scope denial demonstrated
 - **Agent Gateway** — caller-authenticated, deny-by-default, purpose-bound field projection
 - **Model Armor** — cross-scope-request quarantine via `modelarmor.googleapis.com` template `caserelay-screen` with SDP Advanced Config referencing a Cloud DLP inspect template (`caserelay-cross-scope`) using custom dictionary detectors + hotword proximity rule; fails closed
 - **Agent Observability** — Cloud Trace enabled on fleet (`otel_to_cloud=True`, `GOOGLE_CLOUD_AGENT_ENGINE_ENABLE_TELEMETRY=true`) with ADK spans (`invoke_agent`, `call_llm`, `execute_tool`) carrying `gen_ai.*` attributes and token counts. Limitation: control-plane and engine traces do not share a trace id (Agent Runtime starts a fresh trace context)
+- **AG-UI on the wire** — both event surfaces speak the protocol: the operator chat endpoint (`/agui`, via `ag_ui_adk`) and the run event stream. `run_started`, `run_completed`, `run_failed`, `phase_started` and `phase_complete` travel as `RUN_STARTED`, `RUN_FINISHED`, `RUN_ERROR`, `STEP_STARTED` and `STEP_FINISHED` — a run is a run and a phase is a step. Everything with no true counterpart, such as a missed deadline or a quarantined reply, travels as `CUSTOM` naming itself with the whole internal event alongside, so the feed keeps every distinction it draws in red and amber. The live SSE stream and the recorded replay use the same envelopes, so the portal decodes a replayed history and a live one through one decoder
 
 ### Notable engineering decisions
 
@@ -119,6 +132,9 @@ Eight agents deployed as Vertex AI reasoning engines, each with a platform-manag
 | **Named Firestore database** | Uses the database named `caserelay`, not `(default)`. Agent Runtime's network proxy URL-encodes parentheses in outgoing requests, turning `(default)` into `%28default%29`, which Firestore rejects with HTTP 400. A named database sidesteps this entirely. |
 | **BFF proxy for the control plane** | The portal reaches the authenticated Cloud Run service through a Next.js server-side proxy (`portal/src/app/api/control-plane/[...path]/route.ts`) that mints Google-signed ID tokens. No credential is exposed to the browser. SSE is proxied with incremental delivery preserved. |
 | **Control plane locked down** | `allUsers` removed from `roles/run.invoker`; unauthenticated calls return 403. |
+| **Three separate Agent Engines for Sessions and Memory** | Chat transcripts, agent run transcripts, and Memory Bank each get their own engine. They hold different things and are written at different rates, so a retention or deletion decision about one must not be able to reach another. |
+| **The run event log stays on Firestore, not Sessions** | The activity feed, timeline rail and audit trail need an ordered, live, permanent record. Sessions orders events by timestamp alone, with no sequence field and no documented tiebreak; offers no streaming or watch API; caps appends at 300 per minute per project, which a five-way fan-out can reach on its own; and requires every session to carry an expiry. Cloud Trace retains 30 days non-configurably and Cloud Logging's `entries.list` is capped at 60 requests per minute and explicitly not intended for bulk retrieval, so neither is a home for it either. The log is therefore one Firestore document per event under its run, keyed by the position it was pushed at (`backend/runtime/event_log.py`). Only the wire format is AG-UI; storage is untouched. |
+| **Durable run history written off the hot path** | A phase narrates itself by pushing an event, and the SSE stream serves those events from memory, so a slow write can never surface as a stalled agent. A background writer drains one FIFO queue, preserving push order, and a run flushes it once it has finished. History survives a Cloud Run restart; deleting a case deletes its events with it. |
 
 ---
 
@@ -133,6 +149,7 @@ Portal screens:
 3. **Approval Center** — proposed action, evidence, disclosed/withheld fields, policy basis
 4. **Agent Registry** — owner, version, purpose, tools, scopes, endpoint, health
 5. **Audit Trace** — correlated delegation, access, model/tool calls, retry, approval, completion events
+6. **Synthetic Data Lab** (`/admin`) — create a case from a named scenario, run the fleet, and watch the AG-UI event stream. An operator copilot sits beside it, driven by the ADK chat agent over AG-UI, with `list_scenarios`, `create_case` and `run_fleet` as CopilotKit frontend tools
 
 The case detail and cases list render live control-plane data (run records persisted to Firestore) for real cases; other screens remain a scripted walkthrough with mock data.
 
@@ -161,13 +178,33 @@ uv sync                       # installs from pyproject.toml into .venv
 source .venv/bin/activate
 ```
 
-Set the required environment variables (see `.env.example`), then run the full local journey:
+Set the required environment variables (see `.env.example`), then run the full local journey. The run engine lives in the control plane, so drive it there. With every `CASERELAY_URL_*` unset the orchestrator assembles the specialists in-process, so no deployed endpoint is involved:
 
-```python
-# In a Python shell with PYTHONPATH=.
-from backend.runtime.fleet import run_maya
-out = run_maya()
+```bash
+PYTHONPATH=. GOOGLE_CLOUD_PROJECT=caserelay GOOGLE_CLOUD_LOCATION=global \
+GOOGLE_GENAI_USE_VERTEXAI=true CASERELAY_STATE=memory \
+uvicorn backend.api.main:app --port 8000
 ```
+
+```bash
+# In a second shell — creates the flagship case and runs the fleet against it
+CASE=$(curl -s -X POST localhost:8000/v1/cases -H 'content-type: application/json' \
+  -d '{"scenario":"maya","due_in":"45s"}' \
+  | python3 -c 'import sys,json; print(json.load(sys.stdin)["case_id"])')
+RUN=$(curl -s -X POST "localhost:8000/v1/cases/$CASE/runs" \
+  | python3 -c 'import sys,json; print(json.load(sys.stdin)["run_id"])')
+curl -N "localhost:8000/v1/runs/$RUN/events"
+```
+
+The first run ends at `run_suspended`, which is the point of the design: the case is checkpointed and the work that remains is waiting on a deadline, not on a session. In the cloud, Cloud Scheduler's one-minute sweep publishes the wake and the push handler starts the continuation run. Locally there is no Pub/Sub, so stand in for it once the deadline has passed:
+
+```bash
+curl -s -X POST localhost:8000/v1/workflows/sweep     # marks due checkpoints running
+curl -s -X POST localhost:8000/v1/pubsub/push -H 'content-type: application/json' \
+  -d "{\"message\":{\"data\":\"$(printf '{"event_type":"workflow_wake","case_id":"%s"}' "$CASE" | base64)\"}}"
+```
+
+That returns the `run_id` of the resumed run, which streams from the same endpoint. OIDC verification on `/v1/pubsub/push` is skipped when `CASERELAY_CONTROL_PLANE` is unset, which is exactly what makes this local stand-in possible and why the deployed service sets it.
 
 **Cloud testing requires a prior deploy.** `infra/fleet_endpoints.env` is not committed — it is generated by `infra/collect_endpoints.sh` after the fleet agents are deployed to Vertex AI Agent Engine. Once you have deployed and collected endpoints, use the CLI:
 

@@ -2,7 +2,9 @@
 
 ## What this run demonstrates
 
-The **maya** scenario exercises the flagship demo flow: multi-agent fan-out over A2A to all specialist engines, Model Armor catching a cross-scope data-exfiltration attempt in a partner callback, quarantine → human escalation → supervisor approval → case closes, durable state across a timed wake, and the audit trail attributing actions to per-agent platform identities. It is the only scenario that touches phases 4–9 of the PHASES list (checkpoint, wake, quarantine, approve, enrolled, memory).
+The **maya** scenario exercises the flagship demo flow: multi-agent fan-out over A2A to all specialist engines, Model Armor catching a cross-scope data-exfiltration attempt in a partner callback, quarantine and human escalation, supervisor approval, a scoped re-request, and a follow-up that finally closes the commitment by naming who owns it — plus durable state across a timed wake and an audit trail attributing every action to a per-agent platform identity. It is the only scenario that reaches the safeguarding phases (`6-quarantine`, `7-approve`, `8-followup`), because it is the only one carrying `inject_callback` on its education referral.
+
+Phases are not a fixed sequence. `PHASE_REGISTRY` in `backend/runtime/fleet.py` holds fourteen phase specs, each with a precondition and a priority; the engine re-evaluates every precondition after each completed phase and dispatches whichever are now ready. Which phases a run visits therefore depends on what the case actually looks like — which is why maya's safeguarding phases never fire on a scenario that has nothing to quarantine, and why maya reaches `9-nudge` but not `10-unanswered`.
 
 **What maya does NOT cover:** cross-scope denial at the Gateway layer (that is `rosa`). In maya, the poisoned callback is caught by Model Armor in phase 6; the Gateway's field-level scope denial (`IdentityDenied` on a denied field) is exercised only by `rosa`. If you need to show that, run rosa as a short second demo after maya completes — it takes ~2 minutes and produces a `denial` audit event with `denied_field` populated.
 
@@ -16,6 +18,7 @@ The **maya** scenario exercises the flagship demo flow: multi-agent fan-out over
 | Backend control plane running (uvicorn on port 8000) | `curl http://localhost:8000/health` → `{"ok":true}` |
 | Application Default Credentials active | `gcloud auth application-default print-access-token` returns a token |
 | `CASERELAY_STATE=memory` or Firestore accessible | The backend logs `Firestore: caserelay` or `state backend: memory` at startup |
+| Session engines set, if you want to demo Agent Platform Sessions | `CASERELAY_CHAT_SESSION_ENGINE_ID` and `CASERELAY_RUN_SESSION_ENGINE_ID` from `infra/chat_sessions.env` and `infra/run_sessions.env`. Left unset locally, the backend logs a warning and holds sessions in process; a deployed control plane (`CASERELAY_CONTROL_PLANE=1`) refuses to start without them |
 
 The portal's BFF proxy (`/api/control-plane/[...path]`) forwards all traffic server-side with a Google-signed ID token. No credential reaches the browser.
 
@@ -28,7 +31,9 @@ The portal's BFF proxy (`/api/control-plane/[...path]`) forwards all traffic ser
 3. Under **Complex**, click the **Maya** card ("Flagship — stalled enrollment, cross-scope callback, quarantine, approval, close").
 4. The "Case CR-XXXX" card appears with scenario details and a due timestamp.
 5. Click **"Run the fleet"**.
-6. The event stream opens. Watch the event log scroll — each row shows a human-readable message, a raw event type badge, and a phase badge.
+6. The event stream opens. Watch the event log scroll — each row shows a human-readable message, an event type badge, and a phase badge.
+
+What arrives on that stream is AG-UI, not a private format. `backend/api/wire.py` wraps every run event in an AG-UI envelope: `run_started`, `run_completed`, `run_failed`, `phase_started` and `phase_complete` travel as `RUN_STARTED`, `RUN_FINISHED`, `RUN_ERROR`, `STEP_STARTED` and `STEP_FINISHED`, carrying the whole internal event on `rawEvent`. Everything AG-UI has no type for — a missed deadline, a quarantined reply, a suspended run — travels as `CUSTOM` with our name in `name` and the event on `value`. The portal reverses that table, so the badges you see are CaseRelay's own event names. Replay from `GET /v1/cases/{case_id}/events` speaks the same protocol as the live stream, and storage is untouched by any of it.
 
 ---
 
@@ -50,36 +55,51 @@ Note: prompts 4–5 are optional and only needed if you want to demo cross-scope
 
 ## Phase-by-phase expected events (maya, deadline=45s)
 
-The event log renders the `message` field from each SSE event. These are the exact strings produced by `_narrate()` in `backend/api/main.py`.
+The event log renders the `message` field from each event. These strings come from `_Narrator.line` in `backend/api/main.py`, which resolves organisations and people from this case's referral packet rather than from a template — so the wording below is what CR-1042's packet produces, with Maya as the child, Dana Whitfield as the supervisor and the Nguyen household as the placement.
 
 | Phase | Event | Expected message | ~Time | What it proves |
 |---|---|---|---|---|
-| — | `run_started` | "Starting the agent fleet for case {case_id}." | 0s | Run dispatch works |
-| 1-intake | `phase_complete` | "Intake complete; commitments extracted and grants proposed." | 15–45s | Intake agent extracts 5 commitments + 5 grants |
-| 2-activate | `phase_started` | "Supervisor is reviewing the proposed grants for activation." | — | Supervisor HITL gate |
-| 2-activate | `phase_complete` | "Grants activated; the case is now in monitoring." | 10–30s | Case moves to monitoring status |
-| 3-fanout-education_liaison | `phase_started` | "Asking the education liaison to check and submit its commitment." | — | A2A dispatch to education engine |
-| 3-fanout-health_coordination | `phase_started` | "Asking the health coordinator to check and submit its commitment." | — | Concurrent fan-out |
-| 3-fanout-legal_aid | `phase_started` | "Asking the legal aid specialist to check and submit its commitment." | — | Concurrent fan-out |
-| 3-fanout-shelter_status | `phase_started` | "Asking the shelter placement officer to check and submit its commitment." | — | Concurrent fan-out |
-| 3-fanout-family_services | `phase_started` | "Asking the family services worker to check and submit its commitment." | — | Concurrent fan-out |
-| 3-fanout-* | `phase_complete` | varies — e.g. "Health coordinator confirmed its commitment is fulfilled." | 20–60s each | Each specialist reads from Gateway, contacts sim partner, submits status |
-| 3-fanout-education_liaison | `phase_complete` | "Education liaison could not resolve its commitment; status is unresolved." | — | SIS returns `enrollment_found: false` for "inject" behaviour |
-| 4-checkpoint | `phase_started` | "Checkpointing the workflow and setting the next wake." | — | Durable state |
-| 4-checkpoint | `phase_complete` | "Checkpointing the workflow and setting the day-17 wake." | 5–15s | Workflow persisted to Firestore |
-| 5-wake | `phase_started` | "Day-17 wake fired; re-checking open commitments." | — | Timed/async wake |
-| 5-wake | `phase_complete` | "Wake phase complete; open commitments re-checked." | 10–30s | Durable wake resumes without user session |
-| 6-quarantine | `phase_started` | "Inspecting an inbound callback for safety concerns." | — | Model Armor trigger point |
-| 6-quarantine | `phase_complete` | "Callback inspected and quarantine decision made." | 10–30s | **Cross-scope callback quarantined** |
-| 7-approve | `phase_started` | "Supervisor is reviewing the quarantined escalation." | — | Human escalation gate |
-| 7-approve | `phase_complete` | "Supervisor approved the escalation." | 5–15s | Approval recorded |
-| 8-enrolled | `phase_started` | "Verifying school enrollment via the SIS callback." | — | Clean re-callback |
-| 8-enrolled | `phase_complete` | "School enrollment confirmed via the SIS." | 10–30s | Education finally closes |
-| 9-memory | `phase_started` | "Closing the loop and persisting memory for future sessions." | — | Memory persistence |
-| 9-memory | `phase_complete` | "Memory persisted; commitment statuses summarized." | 5–15s | All scopes written |
-| — | `run_completed` | "All 5 commitments closed." (or "4 of 5 commitments closed; education remains unresolved." if 8-enrolled races) | — | Terminal state |
+| intake | `run_started` | "Opening Maya's case and reviewing every open commitment." | 0s | Run dispatch works |
+| intake | `phase_started` | "Reading the Nguyen family's referral for Maya." | — | Packet read from shared state |
+| intake | `phase_complete` | "Found 5 commitments — Dana Whitfield reviews them next." | 15–45s | Intake agent extracts 5 commitments + 5 grants |
+| 2-activate | `phase_started` | "Sending the proposed commitments to Dana Whitfield for review." | — | Supervisor HITL gate |
+| 2-activate | `phase_complete` | "Dana Whitfield approved — contacting every service on Maya's case." | 10–30s | Case moves to monitoring status |
+| 3-fanout-education_liaison | `phase_started` | "Contacting Lincoln Unified School District about Maya's school enrollment." | — | A2A dispatch to education engine |
+| 3-fanout-health_coordination | `phase_started` | "Contacting Riverbend Community Health about Maya's clinic visit." | — | Concurrent fan-out |
+| 3-fanout-legal_aid | `phase_started` | "Contacting Statewide Legal Aid Collective about Maya's legal aid referral." | — | Concurrent fan-out |
+| 3-fanout-shelter_status | `phase_started` | "Contacting Harborlight Youth Shelter about Maya's shelter placement." | — | Concurrent fan-out |
+| 3-fanout-family_services | `phase_started` | "Contacting Mesa County Family Services about Maya's family services assessment." | — | Concurrent fan-out |
+| 3-fanout-* | `phase_complete` | Names the contact the partner gave, e.g. "David Chen has confirmed Maya's clinic visit.", "Anna Reed has confirmed Maya's legal aid referral." | 20–60s each | Each specialist reads from Gateway, contacts sim partner, submits status |
+| 3-fanout-education_liaison | `phase_complete` | "Lincoln Unified could not resolve Maya's school enrollment." | — | The school returns `enrollment_found: false` for `inject` behaviour, and its referral names no contact, so the line falls back to the organisation |
+| 4-checkpoint | `phase_started` | "Setting a reminder to follow up on anything still open." | — | Durable state |
+| 4-checkpoint | `phase_complete` | "Reminder set — Maya's open commitments will be chased automatically." | 5–15s | Workflow persisted to Firestore |
+| 5-wake | `phase_started` | "Reminder fired — checking back on Maya's open commitments." | — | Timed/async wake |
+| 5-wake | `phase_complete` | "Followed up on Maya's open commitments." | 10–30s | Durable wake resumes with no user session |
+| 6-quarantine | `phase_started` | "A reply came back — screening it before anyone acts." | — | Model Armor trigger point |
+| 6-quarantine | `phase_complete` | "That reply reached outside its scope — held for Dana Whitfield." | 10–30s | **Cross-scope callback quarantined** |
+| 7-approve | `phase_started` | "Dana Whitfield is reviewing the flagged reply." | — | Human escalation gate |
+| 7-approve | `phase_complete` | "Dana Whitfield approved — the follow-up can now be sent." | 5–15s | Approval recorded |
+| 8-followup | `phase_started` | "Contacting Lincoln Unified about Maya's school enrollment." | — | Scoped re-request after approval |
+| 8-followup | `phase_complete` | "Lincoln Unified could not resolve Maya's school enrollment." | 10–30s | The district answers inside its scope now, which for a stalled referral means it still has nothing |
+| 9-nudge | `phase_started` | "Following up on Maya's missed deadlines." | — | Escalation ladder |
+| 9-nudge | `phase_complete` | "Follow-ups are out on Maya's overdue commitments." | 10–30s | **Education finally closes**, and the reply names Sarah Miller as the coordinator who took it on |
+| 11-memory | `phase_started` | "Recording everything that happened for Maya's file." | — | Memory persistence |
+| 11-memory | `phase_complete` | "Case notes updated — every status on Maya's file is recorded." | 5–15s | All scopes written |
+| — | `run_completed` | "All 5 commitments for Maya are fulfilled." (or "4 of 5 commitments fulfilled for Maya." if the follow-up did not land) | — | Terminal state |
+
+Note that `8-followup` does **not** close education. The district gets one attempt at an out-of-scope request; once that has been quarantined and ruled on it answers inside its own scope, which for a stalled referral means admitting it still has nothing. What closes education is `9-nudge`, whose follow-up names the officer who took the referral on — and that name is written back onto the referral, so every later line says "Sarah Miller" rather than "Lincoln Unified".
+
+One phase in the registry stays silent on maya:
+
+| Phase | When it fires | Expected message |
+|---|---|---|
+| 10-unanswered | A chased provider stayed silent and the supervisor has not been told | started: "Nobody replied — bringing Dana Whitfield in." · complete: "Dana Whitfield now holds the unanswered commitments." |
+
+On maya the district answers its follow-up, so nothing is left unanswered and the engine skips it. To see the end of the ladder, run `priya`, whose health partner never answers and never answers the chase either.
 
 Fan-out events (phases 3-fanout-*) arrive in **arbitrary order** — they run concurrently via a ThreadPoolExecutor. This is expected, not a bug.
+
+Each organisation is named in full the first time the run mentions it and by its short name after that, per service — which is why `3-fanout-education_liaison` says "Lincoln Unified School District" on the way out and `8-followup` says "Lincoln Unified".
 
 ---
 
@@ -96,8 +116,9 @@ Fan-out events (phases 3-fanout-*) arrive in **arbitrary order** — they run co
 7. `open_escalation` writes an approval record with `decision: "pending"` and an audit event with `event_type: "quarantine"` and `agent_identity` pointing to the verifier's platform-managed identity principal.
 
 **What to look for in the UI:**
-- Phase 6-quarantine completes with "Callback inspected and quarantine decision made."
-- Phase 7-approve then fires and completes with "Supervisor approved the escalation."
+- Phase `6-quarantine` completes with "That reply reached outside its scope — held for Dana Whitfield."
+- Phase `7-approve` then fires and completes with "Dana Whitfield approved — the follow-up can now be sent."
+- Phase `8-followup` re-requests the enrollment status within scope; the district answers honestly that it still has nothing, so education stays `unresolved`. `9-nudge` is what closes it.
 
 **How to confirm the AGENT decided it:**
 - The audit trail (`/v1/cases/{case_id}/audit`) contains an event with `event_type: "quarantine"` and an `agent_identity` field pointing to the verifier's platform-managed identity principal — not a hard-coded "system" actor.
@@ -114,11 +135,16 @@ Navigate to: **Console → Firestore → Select database "caserelay"**
 | Collection path | What to check |
 |---|---|
 | `cases/{case_id}` | Top-level doc: `status` should be `"closed"` or `"monitoring"`, `child_name` is "Maya" |
-| `cases/{case_id}/commitments` | 5 docs keyed by type. Education should show `status: "completed"` after full run |
+| `cases/{case_id}/commitments` | 5 docs keyed by type. Education should show `status: "completed"` after a full run — closed by the follow-up in `9-nudge`, not by `8-followup` |
+| `cases/{case_id}` referral packet | The education referral's `contact` starts null and ends as Sarah Miller, Enrollment Coordinator. That write is the escalation ladder's visible result |
 | `cases/{case_id}/authority_grants` | 5 docs. Each has `granted_to` matching an agent identity, `status: "active"` |
-| `cases/{case_id}/human_approvals` | 1 doc with `action_type: "escalation"`, `decision: "approved"`, `recipient: "Lincoln Unified School District"` |
+| `cases/{case_id}/human_approvals` | 1 doc with `action_type: "escalation"`, `decision: "approved"`, `recipient: "Lincoln Unified School District"`. A `supervisor_notice` doc appears only on scenarios where a chased provider stayed silent |
 | `cases/{case_id}/audit_events` | Multiple docs. Filter for `event_type: "quarantine"` — should have `agent_identity` set. Filter for `event_type: "disclosure"` — each specialist got exactly its `allowed_fields` |
+| `runs/{run_id}` | 1 doc per run, `state: "completed"`, with the `case_id` and `trace_id` |
+| `runs/{run_id}/events` | One doc per run event, document id zero-padded to the position it was pushed at, so the collection sorts back into the order the run happened in. Written by the background writer in `backend/runtime/event_log.py`, off the request path |
 | `workflow_checkpoints` | 1 doc keyed by workflow_id. `state: "fired"`, `case_id` matches |
+
+The run events subcollection is the one to check if you want to prove the history is durable rather than a UI artefact: restart the control plane, open the case again, and the timeline still renders — `workspace.run_events()` serves the in-memory view while a run is live and falls back to these documents once it is not.
 
 ### Cloud Logging
 
@@ -159,12 +185,14 @@ The trace should show ADK spans (`invoke_agent`, `call_llm`, `execute_tool`) wit
 |---|---|
 | Run sits on "Waiting for events…" for 30–60s | **Normal.** Cold-started engines take 30–60s to respond. Wait. |
 | First BFF request after a dev-server restart takes ~12s | **Normal.** Next.js is compiling the route on first hit. |
-| A full maya run takes 8–12 minutes | **Normal.** Nine orchestrator turns, each invoking an LLM + partner sim. |
+| A full maya run takes 8–12 minutes | **Normal.** A dozen or so orchestrator turns, each invoking an LLM + partner sim. |
 | A single fan-out phase takes >90s | **Possibly stuck.** Check backend logs for timeout/retry loops. Engines may have scaled to zero. |
 | `run_failed` event with "all N phases failed" | **Broken.** Check the `error` field. Common cause: ADC expired, or engine URLs misconfigured. |
 | `phase_error` on a single specialist | **May be transient.** The run continues with partial_failure. Re-run if only one failed. |
-| SSE stream disconnects mid-run | **Likely a proxy timeout.** The run is still going in the background — poll `GET /v1/runs/{run_id}` manually. |
-| Phases 6–9 never fire | **Broken.** The `inject_callback` flag is probably not set on the case. Verify the scenario was "maya" not a generic create. |
+| SSE stream disconnects mid-run | **Likely a proxy timeout.** The run is still going in the background — poll `GET /v1/runs/{run_id}` manually, or reopen the case and read the recorded history from `GET /v1/cases/{case_id}/events`. |
+| Phases `6-quarantine` through `8-followup` never fire | **Broken.** The `inject_callback` flag is probably not set on the case. Verify the scenario was "maya" not a generic create. |
+| `10-unanswered` never fires on maya | **Normal.** Its precondition needs a chased provider that stayed silent, and the district answers its follow-up. Run `priya` to see it. |
+| Education is still `unresolved` after `8-followup` | **Normal.** `9-nudge` is what closes it. If the run ends before `9-nudge`, check that a deadline has actually passed. |
 
 ---
 
@@ -178,4 +206,4 @@ The trace should show ADK spans (`invoke_agent`, `call_llm`, `execute_tool`) wit
 
 4. **Duplicate `phase_complete` events are possible** if the SSE reconnects and replays. The UI deduplicates by index position, so visually you won't see doubles, but raw network inspection may show them.
 
-5. **The `run_completed` message may say "4 of 5 commitments closed"** if phase 8-enrolled's status write races with the final tally. Refreshing the case detail (`GET /v1/cases/{case_id}`) shows the correct final state.
+5. **The `run_completed` message may say "4 of 5 commitments fulfilled for Maya"** if phase `8-followup`'s status write races with the final tally. Refreshing the case detail (`GET /v1/cases/{case_id}`) shows the correct final state.

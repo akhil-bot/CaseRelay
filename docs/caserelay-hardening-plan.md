@@ -28,7 +28,7 @@ Verified against the live `caserelay` project and by executing the code, not by 
 | Authenticated A2A over the `/api` passthrough | `backend/runtime/a2a_auth.py:14-32` mints real ADC bearer tokens. |
 | Deterministic field projection with per-access audit | `backend/policy/projection.py`, `backend/gateway/gateway.py:36-61`. Education sees 3 of 14 fields, family services sees 1 of 14. |
 | One-image / one-identity serving | `app/agent_server.py:45-88`. Genuinely clever and worth showing. |
-| The documented local journey runs | `run_maya()` completes in ~190s against real Vertex, outcome-stable across runs. |
+| The documented local journey runs | A local control plane driven through `POST /v1/cases` → `POST /v1/cases/{case_id}/runs` completes against real Vertex, outcome-stable across runs. |
 
 This is a real Fortified Enterprise Fleet spine. The problem is everything layered on top.
 
@@ -41,7 +41,7 @@ This is a real Fortified Enterprise Fleet spine. The problem is everything layer
 | **Memory Bank** | `backend/memory/platform.py` — `VertexAiMemoryBankService` against instance `8631858420611284992`; sessions extracted via `memories.generate` (synchronous); 3 custom topics (`partner_contacts`, `institutional_shortcuts`, `unblocking_strategies`) | Scoped per case; orchestrator searches on each turn when env var set. `backend/memory/bank.py` is a separate Firestore module, NOT the GEAP Memory Bank. |
 | **Agent Identity** | ~~`dict.get()` on `education-agent@caserelay.iam`~~ | **Fixed.** All eight engines use `--agent-identity` (GEAP platform-managed). The gateway resolves the caller principal from `RunContext` on deployed engines and verifies it matches the engine's declared identity. `assert_scope()` is now called. The old purpose-derived identity path (`PURPOSE_TO_IDENTITY`) is deleted. |
 | **Agent Gateway** | ~~In-process function imported by the agents it governs~~ | **Fixed.** Gateway now authenticates callers by principal (deployed engine identity from `RunContext`), enforces grant matching, and calls `assert_scope()` for cross-scope denial. Still in-process (no managed Gateway), but caller-authenticated and deny-by-default. |
-| **Sessions** | `InMemorySessionService` (`backend/runtime/invoke.py:17`) | Context dies with the process. On `max-instances 2`, "weeks of context" survives until the first scale event. |
+| **Agent Platform Sessions** | ~~`InMemorySessionService`~~ | **Fixed.** Two dedicated Agent Engines via `VertexAiSessionService`: `caserelay-chat-sessions` for the operator chat transcript (`backend/api/agui.py`) and `caserelay-run-sessions` for every orchestrator agent turn (`backend/runtime/invoke.py`), one session per phase invocation. A deployed control plane raises at startup if either engine id is unset, so the in-memory path cannot be reached in production. |
 | **Agent Registry** | Roster loaded from `fixtures/cr-1042/agent_cards.json` | The real registry has the correct data. The orchestrator resolves specialists from `CASERELAY_URL_*` env vars instead. |
 
 ### 1.3 Scripted outcomes in the demo path
@@ -55,11 +55,18 @@ This is a real Fortified Enterprise Fleet spine. The problem is everything layer
   **zero Cloud Run services** (at time of writing; `caserelay-control-plane` has since been deployed), so there was no HTTP endpoint a scheduler or a push subscription
   could target even if they existed. Nothing about the timed event has ever run. This is the
   headline Innovation beat.
-- **Delegation is scripted.** `PHASES` is a hardcoded 10-step list naming exactly one specialist
-  per turn. The honest comment at `fleet.py:31-32` explains why — asked for all five, the model
-  drops some. The mitigation is a Python `for` loop, not orchestration.
-- **The harness picks the happy ending.** Phase 8 instructs the education agent to call
-  `query_school` with `variant='enroll'`, so the agent is told which reply to receive.
+- **Delegation is scripted.** ~~`PHASES` is a hardcoded 10-step list naming exactly one specialist
+  per turn. The mitigation is a Python `for` loop, not orchestration.~~ **Partly fixed** (Step 23).
+  The `for` loop is gone: `PHASE_REGISTRY` carries a precondition per phase and the engine
+  re-evaluates all of them after each completed phase, so the case decides which phases run.
+  One specialist per turn remains, for the reason the honest comment in `fleet.py` gives — asked
+  for all five, the model drops some.
+- **The harness picks the happy ending.** ~~Phase 8 instructs the education agent to call
+  `query_school` with `variant='enroll'`, so the agent is told which reply to receive.~~
+  **Fixed** (Step 23). `variant` is gone from the tool signature; the partner simulator decides
+  each reply from the `partner_behaviour` field on the case's own referral row, and the default
+  behaviour is a successful reply that a scenario must opt *out* of. What closes the flagship
+  case is now the scoped follow-up in Step 31, not a callback naming its own answer.
 
 ### 1.4 Dead code that implements claims the docs make
 
@@ -97,7 +104,7 @@ asserts, which makes wiring them up the cheapest defensibility gain available.
    fails if *every* commitment is still pending, so a run where four of five specialists silently
    died still prints `CLOUD-E2E-OK`.
 8. **The documented spin-up 403s for anyone but the author.** `fleet.py:3` and `.env.example:1`
-   pin `GOOGLE_CLOUD_PROJECT=caserelay`, so a judge's `run_maya()` calls Vertex in a project they
+   pin `GOOGLE_CLOUD_PROJECT=caserelay`, so a judge's local run calls Vertex in a project they
    have no IAM on. `infra/fleet_endpoints.env` is likewise author-only.
 9. **`.env.example:10-11` documents `CASERELAY_PERSIST`, which no code reads** — the real variable
    is `CASERELAY_STATE` (`store.py:16`).
@@ -113,33 +120,39 @@ asserts, which makes wiring them up the cheapest defensibility gain available.
 > **Update (Aug 25):** The portal now calls the real control plane through a BFF proxy
 > (`portal/src/app/api/control-plane/[...path]/route.ts`) that mints Google-signed ID tokens
 > server-side. SSE is proxied with incremental delivery preserved. A portal-triggered run fans
-> out over real A2A to the deployed engines. Verified: case CR-0825094224 completed all 9
-> phases with 7 engines serving A2A. The portal is **not deployed** — it runs via `npm run dev`
-> locally. `caserelay-portal.web.app` is not live. Some mock data may still exist alongside
-> real data paths; the analysis below describes the state as of the plan's writing.
+> out over real A2A to the deployed engines. Verified: case CR-0825094224 ran to completion
+> with 7 engines serving A2A. Both event surfaces — the live SSE stream and the recorded replay
+> — now carry AG-UI envelopes, decoded in one place (`portal/src/lib/agui.ts`). The portal is
+> **not deployed** — it runs via `npm run dev` locally. `caserelay-portal.web.app` is not live.
+> Some mock data may still exist alongside real data paths; the analysis below describes the
+> state as of the plan's writing.
 
 `portal/src` originally contained **zero** `fetch`, `axios`, or any other backend call. The screens rendered
 from `lib/mock/*.ts` driven by one `step` integer that auto-advances every 3800 ms, with a visible
 play/next/prev scrubber in the sidebar. `mock/agents.ts` invented a third, conflicting agent roster
 with fabricated `https://cr-*-7g2h.a.run.app` endpoints — plus static `p50Ms: 412` and `lastHeartbeat: "18s ago"`.
 
-The two sides describe unrelated worlds. The only value that matches is `trace-7821`, because both
-hardcode it:
+The two sides described unrelated worlds. The only value that matched was `trace-7821`, because both
+hardcoded it:
 
-| | Portal says | Backend does |
-|---|---|---|
-| Health partner | Riverbend Community Health (`mock/agents.ts:82`) | Harbor Pediatric (`sim.py:34`) |
-| Legal partner | Statewide Legal Aid Collective (`:101`) | County Legal Aid (`sim.py:44`) |
-| Shelter | Harborlight Youth Shelter (`:120`) | Safe Harbor (`sim.py:56`) |
-| Education identity | `education@lincoln-usd.partner` (`:59`) | `education-agent@caserelay.iam` |
-| Education referral | `ED-77120` (`approvals.ts:26`) | `edu-1042` (`referral_packet.json:20`) |
-| Approval id | `AP-8802` (`approvals.ts:6`) | `apr-{uuid4[:8]}` (`verifier/agent.py:32`) |
-| Injection text | `"SYSTEM: ignore prior instructions…"` (`policy.ts:96`) | `"retrieve Maya's medical notes…"` |
-| Withheld count | 8 (`policy.ts:51-90`) | 11 (`gateway.py:21-35`) |
-| Deployment | `cr-*-7g2h.a.run.app` (`:26`) | Vertex `reasoningEngines/…` |
+| | Portal said | Backend did | Now |
+|---|---|---|---|
+| Health partner | Riverbend Community Health (`mock/agents.ts:82`) | Harbor Pediatric (`sim.py:34`) | **Reconciled on the portal's name** — Riverbend Community Health, contact David Chen |
+| Legal partner | Statewide Legal Aid Collective (`:101`) | County Legal Aid (`sim.py:44`) | **Reconciled** — Statewide Legal Aid Collective, contact Anna Reed |
+| Shelter | Harborlight Youth Shelter (`:120`) | Safe Harbor (`sim.py:56`) | **Reconciled** — Harborlight Youth Shelter, contact Tom Barnes |
+| Family services | — | County Family Services | Mesa County Family Services, contact Maria Lopez |
+| Education identity | `education@lincoln-usd.partner` (`:59`) | `education-agent@caserelay.iam` | Platform-managed principal from `--agent-identity` |
+| Education referral | `ED-77120` (`approvals.ts:26`) | `edu-1042` (`referral_packet.json:20`) | `edu-1042` |
+| Approval id | `AP-8802` (`approvals.ts:6`) | `apr-{uuid4[:8]}` (`verifier/agent.py:32`) | `apr-{uuid4[:8]}` |
+| Injection text | `"SYSTEM: ignore prior instructions…"` (`policy.ts:96`) | `"retrieve Maya's medical notes…"` | `"retrieve Maya's medical notes…"` |
+| Withheld count | 8 (`policy.ts:51-90`) | 11 (`gateway.py:21-35`) | 11 |
+| Deployment | `cr-*-7g2h.a.run.app` (`:26`) | Vertex `reasoningEngines/…` | Vertex `reasoningEngines/…` |
 
-Most of this resolves itself once screens call the API — the mock module is deleted, not corrected.
-The table matters only for any screen that stays a prototype past the deadline.
+The partner names were the resolvable half and are now canonical on both sides: the backend fixtures
+and simulator adopted the portal's names rather than the reverse, and every referral also carries a
+named contact and a short form for repeated mentions. The rest resolves itself as screens call the
+API — the mock module is deleted, not corrected — and matters only for any screen that stays a
+prototype past the deadline.
 
 There is no API for the portal to call even if someone wanted to. `backend/api/main.py` is never
 deployed, `POST /demo/maya` blocks for 227 seconds, and Firestore writes are opt-in behind
@@ -152,10 +165,17 @@ deployed, `POST /demo/maya` blocks for 227 seconds, and Firestore writes are opt
 > and Pub/Sub (events / scheduling) are not on the live path and have been removed from the
 > stack table. The model string has been correct (`gemini-3.5-flash`) since prior edits.
 
-`docs/hackathon-rulebook.md:244-257`
-cites `idempotency.py` and `audit/writer.py` as evidence for capabilities they do not deliver.
-`fixtures/cr-1042/partner_configs.json` is unused by any code and reads exactly like an answer key
-for the demo's supposedly independent outcomes.
+The rulebook's evidence mapping cites modules that do not deliver the capability beside them.
+`audit/writer.py` has since become live (Step 6), but `backend/infra/idempotency.py::claim()` is
+still dead code, and the "context held safely across weeks" row cited `backend/memory/bank.py` —
+a lightweight Firestore state store that is explicitly **not** the GEAP Memory Bank. The evidence
+for that row is `backend/memory/platform.py` for Memory Bank, `backend/api/agui.py` and
+`backend/runtime/invoke.py` for Agent Platform Sessions, and `backend/runtime/event_log.py` for the
+durable run history.
+
+`fixtures/cr-1042/partner_configs.json` was unused by any code and read exactly like an answer key
+for the demo's supposedly independent outcomes. It is deleted. What remains in that directory is the
+referral packet, the derived commitments and grants, the two school callbacks, and the agent cards.
 
 ### 1.8 Testing
 
@@ -184,8 +204,9 @@ When this plan is complete:
 | Capability | Now | After |
 |---|---|---|
 | Agent Registry | JSON fixture | Live registry resolution at orchestrator startup (Step 20) |
-| Agent Runtime | Real deploy, fake durability | Real deploy + Vertex Sessions + Cloud Scheduler wake (Steps 11, 18) |
-| Memory Bank | **Done.** `VertexAiMemoryBankService` + 3 custom topics + `memories.generate` | Vertex Sessions (Step 18) completes the picture |
+| Agent Runtime | Real deploy, fake durability | **Done.** Real deploy + Cloud Scheduler wake every minute + Pub/Sub push (Step 11) |
+| Agent Platform Sessions | ~~`InMemorySessionService`~~ | **Done.** `VertexAiSessionService` on two dedicated engines — chat transcript and per-phase agent turns (Step 18) |
+| Memory Bank | **Done.** `VertexAiMemoryBankService` + 3 custom topics + `memories.generate` | **Done.** Sessions (Step 18) completed the picture |
 | Agent Identity | ~~String compare on fake emails~~ | **Done.** `--agent-identity` on all eight engines; `google.oauth2.id_token` verification in deployed mode. |
 | Agent Gateway | ~~In-process function~~ | **Done.** Caller-authenticated and deny-by-default; `PURPOSE_TO_IDENTITY` deleted. |
 | Model Armor | **Done.** `google-cloud-modelarmor` calling template `caserelay-screen` (PI/jailbreak + SDP/DLP) | Could be implemented as ADK plugin for uniform enforcement |
@@ -256,7 +277,7 @@ prerequisite for Stage 2 rather than an improvement to it.
 Invert it: Firestore is the default, and an explicit `CASERELAY_STATE=memory` opts out for offline
 development. A silent no-op that makes the demo appear to work while persisting nothing is the most
 dangerous failure mode in the repo, and an API reading from an empty database is the second.
-*Check:* a fresh `run_maya()` with no env set leaves a populated case document in Firestore.
+*Check:* a fresh run with no env set leaves a populated case document in Firestore.
 
 **Step 4 · Give every run a real identity and a real trace id.**
 **Status: DONE — `backend/runtime/context.py` exists with RunContext in contextvars; `trace-7821` literal deleted from all source files; trace_id derived from active OTel span when present.**
@@ -280,13 +301,13 @@ the portal's behaviour later.
 one pasted into Cloud Trace opens the matching span tree.
 
 **Step 5 · Per-case workflows and checkpoints.**
-**Status: DONE — `durable.py` uses `workflow_id = f"wf-{case_id}"` per case; `due_at` is a real datetime; `state` is "waiting"/"running". Two concurrent cases produce distinct checkpoint documents.**
+**Status: DONE — `durable.py` uses `workflow_id = f"wf-{case_id}"` per case; `due_at` is a real datetime; `state` is "waiting"/"running". Two concurrent cases produce distinct checkpoint documents. `infra/firestore.indexes.json` now carries the `state`/`due_at` composite and indexes only queried collections; the `partner_updates` index is gone.**
 Per §1.5 item 10, every case currently writes to the same checkpoint document. Key checkpoints by a
 per-case `workflow_id` (`wf-{case_id}-{kind}`), and give the checkpoint the two fields a sweeper
 needs: `due_at` as a real timestamp rather than the current unread `next_wake` string, and a `state`
 of `waiting | running | done`. Add the composite Firestore index for
-`state == 'waiting' AND due_at <= now` to `infra/firestore.indexes.json` — which, while you are in
-there, currently declares an index on a `partner_updates` collection nothing writes.
+`state == 'waiting' AND due_at <= now` to `infra/firestore.indexes.json`, and while you are in there,
+drop the index on the `partner_updates` collection nothing writes.
 
 Concurrent cases are the premise of both the admin page and the sweeper, so this cannot wait.
 *Check:* two cases created back to back have distinct checkpoint documents and neither clobbers the
@@ -338,7 +359,7 @@ the fleet has to make real decisions rather than walk one branch.
 
 | Scenario | Child | What it exercises |
 |---|---|---|
-| `maya` | Maya | **The flagship.** Stalled enrollment at day 17, prompt injection on the school callback, quarantine, supervisor approval, then a clean re-callback that closes the commitment. The current CR-1042 story, generated rather than fixtured. |
+| `maya` | Maya | **The flagship.** Stalled enrollment at day 17, prompt injection on the school callback, quarantine, supervisor approval, a scoped re-request the district can only answer honestly (it still has nothing), and finally a follow-up that closes the commitment and names the coordinator who took it on. The current CR-1042 story, generated rather than fixtured. The scenario's own `description` and `expected_outcome` strings in `backend/state/scenarios.py` still promise "a clean re-callback"; the commitment is closed by the follow-up, not by a second callback. |
 | `kai` | Kai | **Cascade.** Two partners fail at once — one times out, one lies. Reconciliation catches both, one escalates to a human, and the other three commitments still close. Failure tolerance under load. |
 | `amara` | Amara | **Long horizon.** Three staggered deadlines, several wakes over weeks, memory recalled across sessions with no user present. This is the scenario that substantiates "safely hold context across weeks of asynchronous operation". |
 
@@ -352,7 +373,7 @@ the agent's.
 `dataset.delete_case` removes it cleanly.
 
 **Step 8 · Fix the verification harness before relying on it.**
-**Status: PARTIAL — `harness/gate.py` implements the fast acceptance gates (31 pass, 0 fail, 3 skipped). The cloud e2e gate (t8.1) is slow-only and has not been re-verified in this audit. The gate structure exists and points at the maya scenario.**
+**Status: PARTIAL — `harness/gate.py` implements 35 gates, of which 32 are fast and 3 (`t8.1`, `t11.5`, `t12.2`) are marked `slow=True` because they talk to Vertex, Firestore or Cloud Run and cost money. The slow gates, including the cloud e2e gate `t8.1`, have not been re-verified in this audit. The gate structure exists and points at the maya scenario.**
 `infra/cloud_e2e.py` currently fails on its default invocation (§1.5 item 7) — the one script that
 is supposed to prove the system works goes red for anyone who runs it as documented. Step 7 fixes
 the root cause by letting synthetic cases carry `inject_callback`; point the harness at the `maya`
@@ -471,7 +492,7 @@ is a real A2A call to a real reasoning engine under its own agent identity, and 
 UI renders was written by the agents that did the work.
 
 **Step 11 · A wake that actually fires.**
-**Status: DONE — `durable.py` has `sweep()` + `find_due()` + `resume_wake()` with scheduler audit events. `bootstrap.sh` creates the Cloud Scheduler job (every 5 min to Pub/Sub topic `caserelay-events`). Push subscription `caserelay-events-push` configured to deliver to `${CP_URL}/v1/workflows/sweep` with OIDC authentication and dead-letter after 5 attempts. All wiring codified in `infra/bootstrap.sh` (conditional on `control_plane_url.txt` existing).**
+**Status: DONE — `durable.py` has `sweep()` + `find_due()` + `resume_wake()` with scheduler audit events. `bootstrap.sh` creates the Cloud Scheduler job on `* * * * *` — every minute, to Pub/Sub topic `caserelay-events` — so a compressed demo deadline fires within a minute of falling due rather than up to five. Push subscription `caserelay-events-push` configured to deliver to `${CP_URL}/v1/workflows/sweep` with OIDC authentication and dead-letter after 5 attempts. A wake for a checkpoint that has already completed is acked rather than retried, and a wake arriving while the case lock is held is nacked so Pub/Sub redelivers it. All wiring codified in `infra/bootstrap.sh` (conditional on `control_plane_url.txt` existing).**
 
 *Where we are.* Nothing publishes timed events and nothing has ever tested one. `write_checkpoint`
 computes `next_wake = now + 17 days`, writes it to Firestore, publishes a single Pub/Sub message
@@ -644,11 +665,9 @@ narrating.
 process**.
 
 **Step 18 · Real sessions.**
-**Status: NOT STARTED — `InMemorySessionService` still at `backend/runtime/invoke.py:30`. Sessions die with the process.**
-Replace `InMemorySessionService` at `backend/runtime/invoke.py:17` with `VertexAiSessionService`, or
-pass `session_service_uri="agentengine://{resource_id}"` to `get_fast_api_app`. Without this, "holds
-context across weeks of asynchronous operation" — the track's explicit demand — is false the moment
-Cloud Run scales. The `amara` scenario is what proves it.
+**Status: DONE — both session surfaces are on GEAP Agent Platform Sessions via `VertexAiSessionService`, on two dedicated Agent Engines. `caserelay-chat-sessions` holds the operator chat transcript (`backend/api/agui.py`), with the AG-UI thread id doubling as the platform session id so a restarted instance resolves a returning conversation with one read instead of listing every session the operator has ever held; `delete_session_on_cleanup=False` keeps the platform copy past the idle timeout. `caserelay-run-sessions` holds every orchestrator agent turn (`backend/runtime/invoke.py`), one session per phase invocation rather than one per run — the fan-out dispatches five phases concurrently and Google documents row-level locking only for `DatabaseSessionService`, with no equivalent guarantee for the Vertex one; continuity across phases already comes from Memory Bank, so sharing a session would buy nothing worth the concurrency risk. Both engines are provisioned by `infra/bootstrap.sh` into `infra/chat_sessions.env` and `infra/run_sessions.env`, and `infra/deploy_control_plane.sh` refuses to deploy if either is empty. A deployed control plane (`CASERELAY_CONTROL_PLANE=1`) raises at startup with an unset engine id rather than degrading to in-memory sessions, which look identical right up to the restart that proves they were never there; local development still falls back with a warning. A throttled append — the 300-per-minute per-project session quota is reachable by a five-way fan-out on its own — is retried three times with jittered backoff, and if it still will not land the event is kept in the session the model reads from and in the turn record Memory Bank extracts from, with the lost durable copy logged and traced as `session_not_durable`. The run continues on complete history; what is given up is the platform's copy of that one event.**
+
+**A deliberate omission, recorded so it does not read as an inconsistency:** the run event log is *not* on Sessions, and should not be. It backs the activity feed, the timeline rail and the audit trail, which need an ordered, live, permanent record. Sessions orders events by timestamp alone — no sequence field, no documented tiebreak — offers no streaming or watch API, caps appends at 300 per minute per project, and requires every session to carry an expiry. Cloud Trace retains 30 days non-configurably, and Cloud Logging's `entries.list` is capped at 60 requests per minute and explicitly not intended for bulk retrieval, so neither is a home for it either. The log therefore stays in Firestore (Step 30). Only the wire format changed to AG-UI; storage is untouched.
 *Check:* kill the process mid-journey, restart, and resume the same session id.
 
 **Step 19 · Turn on Cloud Trace on the deployed fleet.**
@@ -706,7 +725,7 @@ New `backend/runtime/supervision.py` wrapping every specialist invocation:
   implicitly, so a hallucinated commitment id cannot look like success.
 
 **Step 22 · Grounded status + reconciliation.**
-**Status: NOT STARTED — No `reconcile()` tool, no `status_reverted` event, no grounding guard requiring `audit_ref` from Gateway.**
+**Status: NOT STARTED — neither guard exists. `backend/workflows/durable.py::reconcile_commitments` is a different thing and must not be mistaken for this one: it compares a commitment's deadline against its status to decide what is overdue, and the run engine emits a `reconciliation` event from it, but it never compares a claimed status against the partner system's stored reply. There is no `reconcile()` verifier tool, no `status_reverted` event, and no grounding guard requiring the `audit_ref` the Gateway returns — the Gateway does return one (`gateway.py`), so the hook exists and nothing consumes it. The `diego` scenario therefore describes an intended behaviour rather than an observed one: it makes the SIS return a false positive and nothing catches the resulting false `completed`.**
 Two guards that are novel, fall straight out of the architecture you already have, and will land
 well with Google judges:
 - **Grounding.** Require a specialist to pass back the `audit_ref` the Gateway handed it. If no
@@ -721,19 +740,18 @@ well with Google judges:
 visible in Firestore.
 
 **Step 23 · Delete the scripted fan-out.**
-**Status: NOT DONE — PHASES still has 10 entries (one per specialist plus 4 sequential stages). Orchestration remains scripted. However, `variant` IS removed from the education agent tool signature — the partner simulator now decides replies from case state.**
-Collapse `PHASES` from ten entries to four: activate (supervisor gate), *resolve all open
+**Status: PARTIAL — the static list is gone, but the phases are not collapsed. `backend/runtime/fleet.py` now holds `PHASE_REGISTRY`, fourteen `PhaseSpec` entries each carrying a `precondition` predicate over real case state, a `priority` tie-break, an optional concurrency `group`, and the `tools` that phase is handed. The run engine re-evaluates every precondition after each completed phase and dispatches whichever are ready, so which phases run and how many is decided by the case rather than by a cursor walking an array — CR-1042 never reaches `10-unanswered` because its provider answers, and `priya` does because hers does not. `PHASES` survives only as the registry flattened into priority order for the operator CLI, which walks it without evaluating preconditions. What remains scripted is the prompt per phase and the one-specialist-per-turn fan-out, for the reason in §1.3: asked for five, the model calls two or three and reports the rest done. `variant` IS removed from the education agent tool signature — the partner simulator decides replies from the case's `partner_behaviour` field.**
+Collapse `PHASES` from fourteen entries to four: activate (supervisor gate), *resolve all open
 commitments* (one instruction, model-driven, looping until `get_commitment_states` reports no
 `pending` left), wake and re-check, then approve (supervisor gate) and close. Keep the two gates —
 they are a real HITL feature, and saying so on camera converts them from a limitation into a design
 decision.
 
-Then close the self-serve hole. It is not enough to remove the `variant='enroll'` instruction from
-the phase-8 prompt: `query_school(referral_id, variant)` at `backend/agents/education/agent.py:24`
-exposes `variant` as a **tool parameter**, so the model can request `enroll` at any point in the
-journey and then report `completed`. The agent is choosing its own answer. Drop `variant` from the
-tool signature and have the partner simulator decide the reply from case state — which Step 7 has
-already built.
+The self-serve hole is closed. It was not enough to remove the `variant='enroll'` instruction from
+the phase-8 prompt: `query_school(referral_id, variant)` exposed `variant` as a **tool parameter**, so
+the model could request `enroll` at any point in the journey and then report `completed` — the agent
+was choosing its own answer. `variant` is gone from the tool signature, and the partner simulator
+decides the reply from case state, which Step 7 built.
 
 Keep the old list behind a `--scripted` flag as a demo-day safety net. Success is three consecutive
 green end-to-end runs against the deployed fleet.
@@ -771,7 +789,7 @@ all small:
 `infra/deploy_fleet.sh` produces eight working engines and a firing scheduler.
 
 **Step 26 · Tests.**
-**Status: NOT STARTED — No `tests/` directory, no `pytest` in `pyproject.toml`, no `.github/` CI workflows. The `harness/gate.py` is the sole verification mechanism (31 fast gates pass).**
+**Status: NOT STARTED — No `tests/` directory, no `pytest` in `pyproject.toml`, no `.github/` CI workflows. The `harness/gate.py` is the sole verification mechanism (32 fast gates pass; `t8.1`, `t11.5` and `t12.2` are marked slow).**
 Not exhaustive coverage — targeted proof for the claims being scored. Add `pytest` and a `tests/`
 directory with: the governance probe (projection allow/deny per identity), audit immutability, the
 supervisor gate refusing a `draft` case, grounded-status rejection, reconciliation reverting a lie,
@@ -789,14 +807,14 @@ the walkthrough's Phase 2 claim is false. Fix the ~60s boot stall and 80-line tr
 `python-dotenv`, which is installed and never used.
 
 **Step 28 · Redeploy and re-verify end to end.**
-**Status: PARTIAL — Fleet deployed with agent identity; case CR-0825094224 completed 9 phases via real A2A. 5/5 concurrent cloud e2e runs succeeded. Full re-verification with chaos modes not done (chaos modes don't exist yet).**
+**Status: PARTIAL — Fleet deployed with agent identity; case CR-0825094224 ran to completion via real A2A. 5/5 concurrent cloud e2e runs succeeded. Full re-verification with chaos modes not done (chaos modes don't exist yet).**
 `./infra/deploy_fleet.sh` with the new env vars, then `infra/cloud_e2e.py` three times clean, then
 each `--chaos` mode once, then every simple scenario. Confirm Firestore holds a **completed**
 journey — it currently holds three empty `draft` cases, so a judge running `case_cli.py show` sees
 nothing.
 
 **Step 29 · Regenerate the evidence.**
-**Status: PARTIAL — README stack table corrected (commit 54ab89f). Cloud Run documented correctly. Model string correct. BUT: `<your-org>` placeholder remains at README:156; `.env.example:5` still says `FIRESTORE_DATABASE=(default)` (should say `caserelay` or be removed). Architecture diagrams exist under `docs/diagrams/`. Walkthrough partially updated but stale sections remain.**
+**Status: PARTIAL — README stack table corrected (commit 54ab89f). Cloud Run documented correctly. Model string correct. The `<your-org>` placeholder is gone — the README clones the real URL. `.env.example` now sets `FIRESTORE_DATABASE=caserelay` with the reason beside it, and names `CASERELAY_STATE` rather than the phantom `CASERELAY_PERSIST`. The author-specific `cd /Users/akhil.maddala/...` paths in the walkthrough are replaced with `cd "$(git rev-parse --show-toplevel)"`. Architecture diagrams exist under `docs/diagrams/`. BUT: `.env.example` does not yet document `CASERELAY_CHAT_SESSION_ENGINE_ID` or `CASERELAY_RUN_SESSION_ENGINE_ID`, both of which a deployed control plane requires; the diagrams predate Agent Platform Sessions and the AG-UI event wire; and the `tools` array on every entry in `fixtures/cr-1042/agent_cards.json` names tools the agents do not have (`generate_safe_retry` exists nowhere in the codebase), which `GET /v1/registry` serves as-is.**
 Now that the claims are true, make the docs match. Restore Cloud Run, Cloud Tasks, Cloud Trace and
 the rest to the README stack table only for services the code now uses, and delete the ones it still
 does not. Replace the `<your-org>` placeholder at `README:140` with the real clone URL. Correct the
@@ -804,9 +822,10 @@ four false rows in `docs/hackathon-rulebook.md:244-257` (now corrected: "eight a
 clarified as control-plane only, `deployment_metadata.json` dropped as evidence). Fix
 `.env.example` to name `CASERELAY_STATE` rather than the phantom `CASERELAY_PERSIST`.
 
-Redraw both diagrams as-built. Update the walkthrough, including the stale section 11 (`:596-601`)
-which documents four files that never existed in git history, and the `apr-poison` references — the
-verifier generates `apr-<uuid8>`. Remove the two hardcoded `/Users/akhil.maddala/...` paths. Rewrite
+Redraw both diagrams as-built — they predate Agent Platform Sessions, the AG-UI event wire and the
+durable run event log, so all three are missing from them. Update the walkthrough, including the
+stale section 11 (`:596-601`) which documents four files that never existed in git history, and the
+`apr-poison` references — the verifier generates `apr-<uuid8>`. Rewrite
 the README's opening around Elena rather than around systems, and make the argument that ties the two
 scored criteria together:
 
@@ -817,6 +836,31 @@ scored criteria together:
 > the only mechanism by which an outsider can be trusted with a child's data at all.
 
 *Check:* every service named in the README returns a hit in `rg` against `backend/ app/ infra/`.
+
+---
+
+### Stage 6 — Survive the restart, and lead somewhere
+
+Four pieces of work that were not in the original list because the gaps they close only became
+visible once the control plane was serving a portal. Each one was a case that looked perfectly
+valid and told the operator nothing.
+
+**Step 30 · Keep a case's history across a restart.**
+**Status: DONE — `backend/runtime/event_log.py`. Run events lived only in the serving instance's memory, so any Cloud Run restart emptied a case's activity feed, timeline rail and audit trail while the case itself stayed valid: opening a case created minutes earlier showed nothing, as if no work had been done. Each event is now its own Firestore document under its run, keyed on the position it was pushed at — not on a timestamp, which repeats within a phase — so a plain read of the subcollection sorts back into the order the live stream showed with no index and no tiebreak. The write is handed to a background thread draining one FIFO queue: `workspace.push_run_event` appends to the in-memory list the SSE stream serves *first*, so narrating a phase never waits on the database and a slow write can never surface as a stalled agent. A run flushes the queue when it finishes and `atexit` flushes it again, so a redeploy landing moments after a run completes still leaves that run's history readable. The queue is capped at 5000, so an unreachable Firestore costs lost history rather than the process. Deleting a case deletes its events too — Firestore keeps subcollections when their parent document goes, so leaving them would have stranded the history of every deleted case.**
+
+**This is deliberately not on Agent Platform Sessions, and the reasoning belongs in the record so it does not read as an inconsistency with Step 18.** An ordered, live, permanent audit trail needs four things Sessions does not offer: Sessions orders events by timestamp alone with no sequence field and no documented tiebreak; it has no streaming or watch API; appends are capped at 300 per minute per project, which a five-way fan-out can approach on its own; and every session must carry an expiry. Cloud Trace retains 30 days non-configurably, and Cloud Logging's `entries.list` is capped at 60 requests per minute and explicitly not intended for bulk retrieval. Firestore is the right store for this one thing, and saying so is stronger than quietly using a platform product where it does not fit.
+*Check:* restart the control plane and open a case created before the restart — the feed, rail and audit trail are all still there.
+
+**Step 31 · Give a missed deadline consequences.**
+**Status: DONE — `backend/workflows/escalation.py`, plus phases `9-nudge` and `10-unanswered` in the registry. A deadline that passed with a commitment still open used to wake the case and then do nothing further: if the provider never came back, the commitment simply stayed open and the run reported a shortfall nobody was told about. A wake now leads somewhere. `nudge_overdue` chases every overdue provider exactly once, scoped by the same authority grant that covered the original request, so a follow-up discloses nothing extra. A provider that answers names the officer who has taken the referral on, and that name is written back onto the referral rather than read once and discarded — the difference between a commitment nobody owns and one somebody does. A provider that stays silent is raised to the supervisor by `notify_supervisor` as a `supervisor_notice` approval with policy basis `["missed_deadline", "unanswered_followup"]`, kept deliberately distinct from the safeguarding escalation because "nobody replied" and "the reply reached outside its scope" need different things from a volunteer. The notice is not a gate on the machine: `_pending_escalation` counts only escalations, since nothing the fleet does next depends on how the volunteer answers a notice. Both paths write their own audit event (`followup`, `unresponsive_partner`).**
+*Check:* the `priya` scenario — health never answers, never answers the chase, and the supervisor holds a notice naming that commitment while the other four close.
+
+**Step 32 · Speak AG-UI on the run event wire.**
+**Status: DONE — `backend/api/wire.py` and `portal/src/lib/agui.ts`. The control plane spoke its own vocabulary on the wire — `phase_started`, `commitment_overdue`, `run_suspended` — where AG-UI is the recognised standard for streaming agent events to a UI and the chat endpoint already spoke it. Both event surfaces now carry AG-UI envelopes: the live SSE stream (`/v1/runs/{run_id}/events`) and the recorded replay (`/v1/cases/{case_id}/events`), so the portal decodes a replayed history and a live one through one decoder. Five names have a true counterpart and travel as it — a run is a run and a phase is a step. The rest have none (AG-UI cannot express a missed deadline or a quarantined reply) and travel as `CUSTOM` naming themselves, with the whole internal event alongside on `value`; typed events carry it on `rawEvent`. The feed distinguishes every one of these names, so collapsing them into five types would have cost it the distinctions it draws in red and amber. The mapping table is one-to-one in both directions, since a type standing for two of our names would arrive undecodable. The envelopes are plain dicts rather than `ag_ui.core` models, verified identical to what those models serialise: the models ship only where the chat endpoint runs, and every tool that imports the app — including the gate suite — must be able to load it without them. Storage is untouched; only the wire changed.**
+*Check:* every frame on both surfaces parses as an AG-UI event, and a frame in the older shape still passes through the portal decoder unchanged so a page held open across a deployment keeps working.
+
+**Step 33 · Hold every agent turn on Agent Platform Sessions.**
+**Status: DONE — see Step 18, which this completes. The chat transcript (commit `1f18068`) and the fleet's per-phase agent turns (commit `138abc6`) are both on dedicated Agent Engines.**
 
 ---
 
@@ -846,21 +890,25 @@ Your teammate is unblocked when all of these hold:
 - [ ] `python infra/cloud_e2e.py` with no arguments prints `CLOUD-E2E-OK`, and fails when a
       specialist is deliberately broken. *(UNVERIFIED: gate t8.1 skipped in last run; ground truth says 5/5 cloud e2e passed via a different path)*
 - [ ] A stranger can follow the README with their own `GOOGLE_CLOUD_PROJECT` and get a run.
-      *(NOT DONE: `<your-org>` placeholder at README:156; `.env.example` still references `(default)` database)*
+      *(PARTIAL: the clone URL and `.env.example` database are both fixed, and the README's local journey now drives the real run engine through the control plane rather than a `run_maya()` helper that no longer exists. Still outstanding: the project is hardcoded as a `caserelay` fallback in several modules, `.env.example` does not document the two session engine ids a deployed control plane requires, and `infra/fleet_endpoints.env` is author-only)*
 - [ ] `infra/bootstrap.sh` then `infra/deploy_fleet.sh` works on a clean project, and a failed
       deploy makes the script exit non-zero. *(PARTIAL: bootstrap.sh exists; deploy_fleet.sh lacks `-e`)*
 - [x] `rg -i "modelarmor"` returns hits in `backend/`; a novel injection string is caught. *(armor.py has the API call; deterministic layer catches broad patterns)*
 - [ ] No dead code: `assert_scope`, `idempotency.claim`, `write_audit` and the envelope contracts
       are all on live paths. *(PARTIAL: `assert_scope` is live; `write_audit`/`append_event` is live; BUT `idempotency.claim` is still dead code; `contracts/envelope.py` unused)*
 - [x] A cross-scope request is denied, audited, and visible in the API. *(rosa scenario verified: education got only child_name, dob, referral_id)*
-- [ ] `PHASES` has four entries; the orchestrator picks its own specialists. *(NOT DONE: still 10 entries; scripted fan-out)*
+- [ ] `PHASES` has four entries; the orchestrator picks its own specialists. *(PARTIAL: the static list is replaced by a fourteen-entry precondition registry, so the case decides which phases run; the prompt-per-phase and one-specialist-per-turn fan-out remain)*
 - [ ] All four `--chaos` modes produce a clean, explainable outcome. *(NOT STARTED: no chaos flag)*
 - [ ] The six simple scenarios run as CI assertions; the three complex ones reach their documented
       outcome by hand. *(NOT STARTED: no CI; scenarios exist but no test runner)*
 - [ ] `pytest` is green in CI. *(NOT STARTED: no pytest, no tests/, no CI)*
 - [ ] Every service named in the README appears in the code; every capability in the rulebook
       mapping points at a file that delivers it. *(MOSTLY: README is aligned; minor stale refs remain)*
-- [x] Firestore contains at least one **completed** journey. *(case CR-0825094224 completed all 9 phases)*
+- [x] Firestore contains at least one **completed** journey. *(case CR-0825094224 ran to completion via the real fleet, and its history now survives a restart: run events are stored one document per event under their run)*
+- [x] No conversation the platform should be holding is held in process memory. *(both session surfaces are on GEAP Agent Platform Sessions; a deployed control plane refuses to start without either engine id, so the in-memory path is unreachable in production)*
+- [x] A case opened after a restart shows the work that was done before it. *(run events are durable, written off the hot path, and read back in push order)*
+- [x] A missed deadline leads somewhere a volunteer can see. *(overdue providers are chased once within their existing grant; an answer names an owner and closes the commitment, silence reaches the supervisor as its own kind of approval)*
+- [x] Both event surfaces speak a recognised protocol rather than a private vocabulary. *(AG-UI on the live stream and the replay, decoded in one place in the portal)*
 - [ ] The `/admin` page creates, runs and deletes cases against the live fleet. *(PARTIAL: portal calls control plane via BFF; mock data still alongside real data paths)*
 
 ## Part 5 — Explicitly out of scope
