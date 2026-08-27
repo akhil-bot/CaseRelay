@@ -987,6 +987,152 @@ def _(c: Ctx) -> None:
           "caserelay-events has a subscription", out[-600:])
 
 
+# A deleted case used to keep its checkpoint and its lock, both of which live in
+# top-level collections that a case delete does not reach. The sweep fired the orphan
+# every minute, the push handler took the lock and died reading the missing case, and
+# every later wake for that id got a 409 for ever. This gate holds both halves of the
+# fix: deletion takes the debris with it, and the sweep retires debris it still finds.
+@gate("t11.6")
+def _(c: Ctx) -> None:
+    # A minimal Firestore stand-in. The property under test is which documents survive a
+    # delete, and memory mode makes every store write a no-op, so there would be nothing
+    # to observe without one. Paths are "collection/doc[/collection/doc...]".
+    fake_db = """
+        class _Snap:
+            def __init__(self, db, path):
+                self._db, self.path = db, path
+            @property
+            def id(self):
+                return self.path.rsplit("/", 1)[1]
+            @property
+            def exists(self):
+                return self.path in self._db.docs
+            @property
+            def reference(self):
+                return _Ref(self._db, self.path)
+            def to_dict(self):
+                row = self._db.docs.get(self.path)
+                return dict(row) if row is not None else None
+
+        class _Ref:
+            def __init__(self, db, path):
+                self._db, self.path = db, path
+            def collection(self, name):
+                return _Coll(self._db, self.path + "/" + name)
+            def set(self, data, merge=False):
+                base = self._db.docs.get(self.path, {}) if merge else {}
+                self._db.docs[self.path] = {**base, **data}
+            def get(self):
+                return _Snap(self._db, self.path)
+            def delete(self):
+                self._db.docs.pop(self.path, None)
+
+        class _Coll:
+            def __init__(self, db, path, filters=()):
+                self._db, self.path, self._filters = db, path, filters
+            def document(self, doc_id):
+                return _Ref(self._db, self.path + "/" + str(doc_id))
+            def where(self, field, op, value):
+                assert op == "==", "the fake only implements equality filters"
+                return _Coll(self._db, self.path, self._filters + ((field, value),))
+            def stream(self):
+                for path in sorted(self._db.docs):
+                    if path.rsplit("/", 1)[0] != self.path:
+                        continue
+                    row = self._db.docs[path]
+                    if all(row.get(f) == v for f, v in self._filters):
+                        yield _Snap(self._db, path)
+
+        class _FakeDb:
+            def __init__(self):
+                self.docs = {}
+            def collection(self, name):
+                return _Coll(self, name)
+        """
+
+    c.py(
+        fake_db + """
+        from datetime import datetime, timedelta, timezone
+        from backend.state import store
+        from backend.workflows import durable
+
+        fake = _FakeDb()
+        store.BACKEND = "firestore"
+        store._db = lambda: fake
+
+        case_id = "CASE-DELETE-DEBRIS"
+        dataset.create_case(case_id)
+        durable.write_checkpoint(case_id, due_at=datetime.now(timezone.utc) - timedelta(minutes=5))
+
+        # The lock and the run history are written the way the push handler and a run
+        # write them: documents outside the case aggregate, which a delete has to reach
+        # on its own or they outlive the case.
+        fake.docs["case_locks/" + case_id] = {
+            "case_id": case_id, "state": "running", "run_id": "runlock01",
+        }
+        run_id = "rundebris01"
+        store.save_run(run_id, {"run_id": run_id, "case_id": case_id, "state": "completed"})
+        store.save_run_event(run_id, 0, {"event": "phase_start"})
+        store.save_run_event(run_id, 1, {"event": "phase_complete"})
+
+        for prefix in ("cases/", "workflow_checkpoints/", "case_locks/", "runs/" + run_id + "/events/"):
+            assert any(p.startswith(prefix) for p in fake.docs), \\
+                f"setup wrote nothing under {prefix}; the gate would pass vacuously"
+
+        dataset.delete_case(case_id)
+
+        def left(prefix):
+            return sorted(p for p in fake.docs if p.startswith(prefix))
+
+        assert not left("workflow_checkpoints/"), \\
+            f"a checkpoint outlived its case and will be swept for ever: {left('workflow_checkpoints/')}"
+        assert not left("case_locks/"), \\
+            f"the case lock outlived its case; every future wake 409s: {left('case_locks/')}"
+        assert not left("runs/" + run_id), \\
+            f"run events outlived the case: {left('runs/' + run_id)}"
+        assert not fake.docs, f"deleting the case left documents behind: {sorted(fake.docs)}"
+        print("OK")
+        """,
+        "deleting a case leaves no checkpoint, lock or run-event document behind",
+        env={"CASERELAY_STATE": "memory"}, prelude=True,
+    )
+    c.py(
+        """
+        from datetime import datetime, timedelta, timezone
+        from backend.state import store
+        from backend.workflows import durable
+
+        now = datetime.now(timezone.utc)
+        gone = make_case("CASE-SWEEP-GONE")
+        live = make_case("CASE-SWEEP-LIVE")
+        gone_cp = durable.write_checkpoint(gone, due_at=now - timedelta(minutes=5))
+        live_cp = durable.write_checkpoint(live, due_at=now - timedelta(minutes=5))
+
+        # Debris that predates the deletion fix: the case is unloadable but its overdue
+        # checkpoint survives, which is exactly the state the sweep used to fire on.
+        workspace.cases.pop(gone, None)
+
+        released = []
+        store.delete_case_lock = lambda cid: released.append(cid)
+
+        fired = durable.sweep(now=now)
+
+        assert live_cp["workflow_id"] in fired, \\
+            f"the sweep stopped firing a live case's due checkpoint: {fired}"
+        assert gone_cp["workflow_id"] not in fired, \\
+            "the sweep published a wake for a case that no longer exists"
+        assert workspace.get_checkpoint(gone_cp["workflow_id"]) is None, \\
+            "the orphaned checkpoint survived the sweep and will be reconsidered next minute"
+        assert gone in released, "the deleted case's lock was left held"
+        assert not [d for d in durable.find_due(now=now) if d.get("case_id") == gone], \\
+            "the orphan is still due after a sweep, so the debris does not self-clear"
+        print("OK")
+        """,
+        "sweep retires a deleted case's wake instead of firing it, and still fires a live one",
+        env={"CASERELAY_STATE": "memory"}, prelude=True,
+    )
+
+
 @gate("t12.1")
 def _(c: Ctx) -> None:
     rc, out = c.sh("docker build -f backend/Dockerfile -t caserelay-control-plane:gate .", timeout=1200)
