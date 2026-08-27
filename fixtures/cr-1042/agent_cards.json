@@ -17,7 +17,7 @@
     "owner_org": "CASA Program",
     "version": "1.0.0",
     "purpose": "Dispatch scoped tasks and checkpoint workflow",
-    "tools": ["activate_case", "schedule_wake", "wake_workflow", "approve_escalation", "send_followup", "notify_supervisor", "preload_memory", "get_commitment_states", "check_overdue"],
+    "tools": ["schedule_wake", "wake_workflow", "send_followup", "notify_supervisor", "preload_memory", "get_commitment_states", "check_overdue"],
     "allowed_data_scopes": ["commitment_status"],
     "denied_data_scopes": ["raw_partner_records"],
     "identity": "caserelay-orchestrator@agent.caserelay.dev",

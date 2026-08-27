@@ -358,8 +358,13 @@ def create_case(body: dict[str, Any]) -> dict:
     }
 
 
-def _resume_after_approval(case_id: str) -> None:
-    """Resume a run that is suspended at a supervisor gate after the gate is satisfied."""
+def _resume_after_approval(case_id: str, trigger: str) -> None:
+    """Resume a run that is suspended at a supervisor gate after the gate is satisfied.
+
+    ``trigger`` names which gate was cleared. It is narration only: the successor run
+    opens by saying what restarted it, and a cleared gate must not be announced as a
+    scheduled reminder.
+    """
     blocked = [
         r for r in workspace.list_runs_for_case(case_id)
         if r.get("state") == "awaiting_supervisor"
@@ -373,7 +378,10 @@ def _resume_after_approval(case_id: str) -> None:
     workspace.create_run(run_id, case_id)
     from backend.runtime.context import current as _ctx
     workspace.update_run(run_id, trace_id=_ctx().trace_id)
-    t = threading.Thread(target=_run_background, args=(run_id, case_id), kwargs={"resume": True}, daemon=True)
+    t = threading.Thread(
+        target=_run_background, args=(run_id, case_id),
+        kwargs={"resume": True, "resume_trigger": trigger}, daemon=True,
+    )
     t.start()
 
 
@@ -386,7 +394,7 @@ def activate_case(case_id: str, body: dict[str, Any] | None = None) -> dict:
     if not supervisor_id:
         raise HTTPException(status_code=400, detail="supervisor_id is required")
     case = workspace.activate(case_id, supervisor_id)
-    _resume_after_approval(case_id)
+    _resume_after_approval(case_id, "activation")
     return {"case_id": case_id, "status": case["status"]}
 
 
@@ -408,7 +416,7 @@ def decide_approval(approval_id: str, body: dict[str, Any]) -> dict:
                 result = workspace.decide_approval(case_id, decision, decided_by)
                 if note:
                     result["note"] = note
-                _resume_after_approval(case_id)
+                _resume_after_approval(case_id, str(a.get("action_type") or "escalation"))
                 return result
     raise HTTPException(status_code=404, detail=f"approval {approval_id!r} not found")
 
@@ -532,13 +540,12 @@ async def pubsub_push(request: Request) -> JSONResponse:
             )
             return JSONResponse({"status": "discarded", "reason": "case_deleted", "retired": retired})
 
-        # If a run is already active for this case, return 409 so Pub/Sub retries with
-        # backoff. The active run's resume_wake() may not have coalesced this checkpoint
-        # yet (race between sweep and coalescing), so we must NOT ack the message —
-        # redelivery guarantees the checkpoint is eventually processed once the case is free.
+        # If a run is already active for this case — or parked at a supervisor gate —
+        # return 409 so Pub/Sub retries with backoff. A gated run must not be bypassed by
+        # a wake: the case cannot proceed until a human unblocks it via the API.
         active = [
             r for r in workspace.list_runs_for_case(case_id)
-            if r.get("state") in ("queued", "running")
+            if r.get("state") in ("queued", "running", "awaiting_supervisor")
         ]
         if active:
             _push_logger.info(
@@ -701,6 +708,19 @@ class _Narrator:
     def raised(self, service: str) -> str:
         return f"{self._supervisor} now knows {self.child}'s {self._subject(service)} is unanswered."
 
+    def resumed(self, trigger: str) -> str:
+        """The opening line of a resumed run, named for whatever actually restarted it.
+
+        A run resumed by a cleared gate and a run resumed by a fired checkpoint are both
+        ``resume=True``, but announcing a reminder immediately after someone clicked
+        approve narrates something that did not happen.
+        """
+        if trigger == "activation":
+            return f"Approved — contacting every service on {self.child}'s case."
+        if trigger == "escalation":
+            return f"Escalation decided — picking {self.child}'s case back up."
+        return f"Reminder fired — checking back on {self.child}'s open commitments."
+
     def line(self, event: str, phase: str, *, commitment_states: dict | None = None) -> str:
         child = self.child
         states = commitment_states or {}
@@ -736,7 +756,10 @@ class _Narrator:
             if "wake" in phase:
                 return f"Reminder fired — checking back on {child}'s open commitments."
             if "quarantine" in phase:
-                return "A reply came back — screening it before anyone acts."
+                return (
+                    "A reply came back from the school — the safeguarding verifier is "
+                    "screening it before anyone acts."
+                )
             if "approve" in phase:
                 return "The flagged reply is waiting for a supervisor decision."
             if "nudge" in phase:
@@ -759,11 +782,17 @@ class _Narrator:
             if "wake" in phase:
                 return f"Followed up on {child}'s open commitments."
             if "quarantine" in phase:
-                return f"That reply reached outside its scope — held for {self._supervisor}."
+                return (
+                    f"The safeguarding verifier stopped that reply — it reached outside "
+                    f"its scope. Held for {self._supervisor}."
+                )
             if "approve" in phase:
                 return "Supervisor approved the escalation — the follow-up can now be sent."
             if "nudge" in phase:
-                return f"Follow-ups are out on {child}'s overdue commitments."
+                open_now = [s for s, v in states.items() if v != "completed"]
+                if states and not open_now:
+                    return f"The follow-ups landed — every commitment on {child}'s case is fulfilled."
+                return f"Follow-ups are out; {len(open_now)} of {len(states)} still open on {child}'s case."
             if "unanswered" in phase:
                 return f"{self._supervisor} now holds the unanswered commitments."
             if service:
@@ -892,7 +921,9 @@ class _Narrator:
         return result
 
 
-def _run_background(run_id: str, case_id: str, *, resume: bool = False) -> None:
+def _run_background(
+    run_id: str, case_id: str, *, resume: bool = False, resume_trigger: str = "wake",
+) -> None:
     """Drive the real agent fleet end-to-end: intake, then precondition-driven engine.
 
     When resume=False (first run): runs intake through the checkpoint phase, then suspends.
@@ -978,8 +1009,9 @@ def _run_background(run_id: str, case_id: str, *, resume: bool = False) -> None:
             _push_event({
                 "event": "run_started", "run_id": run_id, "case_id": case_id,
                 "resumed": resume,
+                "resume_trigger": resume_trigger if resume else "",
                 "message": (
-                    narrator.line("phase_started", "wake")
+                    narrator.resumed(resume_trigger)
                     if resume else
                     narrator.line("run_started", "intake")
                 ),
@@ -1244,11 +1276,22 @@ def _run_background(run_id: str, case_id: str, *, resume: bool = False) -> None:
             if suspended:
                 run = workspace.get_run(run_id)
                 if run and run.get("state") == "awaiting_supervisor":
+                    gate_type = (run.get("current_phase") or "").removeprefix("gate:")
+                    if gate_type == "escalation":
+                        gate_msg = (
+                            f"Run paused — a quarantined reply needs a supervisor decision "
+                            f"before {child}'s case can proceed."
+                        )
+                    else:
+                        gate_msg = (
+                            f"Run paused — supervisor must activate {child}'s case "
+                            f"before services are contacted."
+                        )
                     _push_event({
                         "event": "run_completed", "run_id": run_id, "case_id": case_id,
                         "commitment_states": commitments,
                         "outcome": "awaiting_supervisor",
-                        "message": narrator.line("phase_complete", "activate", commitment_states=commitments),
+                        "message": gate_msg,
                     })
                 else:
                     workspace.update_run(

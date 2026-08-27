@@ -59,7 +59,7 @@ def grant_authority(case_id: str) -> dict[str, Any]:
     packet = workspace.packet(case_id)
     workspace.put_commitments(case_id, synthetic.build_commitments(packet))
     workspace.put_grants(case_id, synthetic.build_grants(packet))
-    return workspace.activate(case_id)
+    return workspace.activate(case_id, "test-harness")
 
 
 @contextmanager

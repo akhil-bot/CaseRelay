@@ -50,11 +50,6 @@ INSTRUCTION = (
 )
 
 
-def activate_case(case_id: str) -> dict:
-    """Supervisor HITL: grant proposed authorities and start monitoring."""
-    return {"case_id": case_id, "status": workspace.activate(case_id)["status"]}
-
-
 def schedule_wake(case_id: str) -> list:
     """Write one checkpoint per commitment, each with its own due_at anchored at NOW.
 
@@ -104,21 +99,6 @@ def check_overdue(case_id: str) -> list:
     return reconcile_commitments(case_id)
 
 
-def approve_escalation(case_id: str) -> dict:
-    """Supervisor HITL: release the quarantined action.
-
-    This tool is no longer called by the auto-firing phase (which has been removed).
-    It remains available for manual or programmatic approval via the API, which
-    supplies the actual decided_by identity.
-    """
-    approvals = workspace.list_approvals(case_id)
-    pending = [a for a in approvals if a.get("decision") == "pending" and a.get("action_type") == "escalation"]
-    if not pending:
-        return {"case_id": case_id, "decision": "none"}
-    decided_by = pending[-1].get("decided_by", "unknown")
-    return workspace.decide_approval(case_id, "approved", decided_by)
-
-
 def send_followup(case_id: str) -> list:
     """Chase every provider whose deadline passed with its commitment still open.
 
@@ -134,10 +114,8 @@ def notify_supervisor(case_id: str) -> list:
 
 
 CONTROL_PLANE_TOOLS = [
-    activate_case,
     schedule_wake,
     wake_workflow,
-    approve_escalation,
     send_followup,
     notify_supervisor,
     preload_memory,

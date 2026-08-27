@@ -135,7 +135,7 @@ function pollDelay(runs: CaseRunSummary[]): number | null {
   const newest = runs[0];
   if (!newest) return null;
   if (newest.state === "running" || newest.state === "queued") return POLL_WHILE_RUNNING;
-  if (newest.state === "suspended") return POLL_WHILE_DORMANT;
+  if (newest.state === "suspended" || newest.state === "awaiting_supervisor") return POLL_WHILE_DORMANT;
   return null;
 }
 

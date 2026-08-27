@@ -174,7 +174,7 @@ class Workspace:
         self.grants[case_id] = grants
         store.save_rows(case_id, "authority_grants", grants, "grant_id")
 
-    def activate(self, case_id: str, supervisor_id: str = "supervisor-001") -> dict[str, Any]:
+    def activate(self, case_id: str, supervisor_id: str) -> dict[str, Any]:
         """Supervisor HITL: grant proposed authorities and advance to monitoring.
 
         Idempotent: if the case is already active or monitoring, returns the current state

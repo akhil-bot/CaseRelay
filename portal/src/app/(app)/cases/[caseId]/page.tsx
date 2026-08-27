@@ -134,7 +134,9 @@ function LiveCaseDetail({ caseId }: { caseId: string }) {
     if (caseStatus === "draft" && hasCommitments) return;
     listPendingApprovals()
       .then((items) => setPendingApprovals(items.filter((a) => a.case_id === caseId)))
-      .catch(() => {});
+      .catch((err) => {
+        console.warn("[CaseRelay] Failed to fetch pending approvals:", err);
+      });
   }, [liveCase, caseId]);
 
   const handleActivate = async (supervisorId: string) => {
@@ -485,25 +487,32 @@ function SupervisorGate({
 
   const isActivation = gateType === "activation";
   const title = isActivation
-    ? `Approve activation for ${childName}`
-    : `Approve escalation for ${childName}`;
+    ? `Waiting on you — approve activation for ${childName}`
+    : `Waiting on you — approve escalation for ${childName}`;
   const body = isActivation
-    ? "CaseRelay has extracted commitments and proposed grants. It will not contact any service until you approve."
-    : reason ?? "A reply was quarantined and needs your decision before the case can proceed.";
+    ? "CaseRelay has extracted commitments and proposed grants. Nothing will happen until you decide — no service will be contacted and no data will be shared."
+    : reason ?? "A reply was quarantined. The case is paused and will not proceed until you make a decision.";
+  const consequence = isActivation
+    ? "Approving grants each specialist access to their scoped fields and begins outreach to all services on this case."
+    : "Approving releases the quarantined action. Rejecting discards it and records your decision.";
 
   return (
-    <section className={cx(surface.card, "overflow-hidden px-5 py-5")}>
+    <section className={cx(surface.card, "overflow-hidden border-2 border-warn/40 px-5 py-5")}>
       <div className="flex flex-wrap items-start gap-3">
-        <Icon name="lock" size={20} className="mt-0.5 shrink-0 text-warn" />
+        <span className="mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-full bg-warn/15">
+          <Icon name="lock" size={18} className="text-warn" />
+        </span>
         <div className="min-w-0 flex-1">
-          <p className="text-[14px] font-semibold text-ink">{title}</p>
-          <p className={cx("mt-1", type_.body)}>{body}</p>
-          <p className="mt-2 text-[12px] text-ink-muted">
-            Acting as <span className="font-medium text-ink">{supervisorId}</span>
+          <p className="text-[15px] font-semibold text-ink">{title}</p>
+          <p className={cx("mt-1.5", type_.body)}>{body}</p>
+          <p className="mt-2 text-[12px] text-ink-soft">{consequence}</p>
+          <p className="mt-3 flex items-center gap-1.5 text-[12px] text-ink-muted">
+            <Icon name="users" size={13} className="shrink-0" />
+            Deciding as <span className="font-medium text-ink">{supervisorId}</span>
           </p>
         </div>
       </div>
-      <div className={cx("-mx-5 -mb-5 mt-4 flex flex-wrap items-center gap-3 border-t px-5 py-4", "border-warn/25 bg-warn-soft")}>
+      <div className={cx("-mx-5 -mb-5 mt-4 flex flex-wrap items-center gap-3 border-t px-5 py-4", "border-warn/30 bg-warn-soft")}>
         {onReject && (
           <button
             type="button"
