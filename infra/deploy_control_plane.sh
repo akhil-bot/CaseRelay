@@ -2,6 +2,11 @@
 # Build and deploy the CaseRelay control plane to Cloud Run.
 # Idempotent and repeatable — run after any code change to ship it.
 #
+# Flow: build → deploy new revision with no traffic → probe A2A readiness
+# on the tagged canary URL → shift traffic only if the probe passes.
+# A failure at any step leaves production traffic on the current revision
+# and exits non-zero, printing the canary URL for investigation.
+#
 #   bash infra/deploy_control_plane.sh
 set -euo pipefail
 
@@ -62,13 +67,20 @@ docker buildx build --platform linux/amd64 \
   -t "$IMAGE" \
   --push .
 
-echo "=== deploying to Cloud Run (authenticated) ==="
+# Tag with a timestamp so the canary URL is unambiguous and the revision is
+# identifiable if someone needs to inspect it after a failed probe.
+DEPLOY_TAG="canary-$(date +%s)"
+
+echo "=== deploying revision (no traffic, tag=${DEPLOY_TAG}) ==="
+echo "    production traffic is unchanged until the A2A probe passes"
 gcloud run deploy "$SERVICE" \
   --project="$PROJECT" \
   --region="$REGION" \
   --image="$IMAGE" \
   --platform=managed \
   --no-allow-unauthenticated \
+  --no-traffic \
+  --tag="$DEPLOY_TAG" \
   --set-env-vars="\
 CASERELAY_STATE=firestore,\
 CASERELAY_PROJECT_ID=${PROJECT},\
@@ -110,6 +122,18 @@ CASERELAY_RUN_SESSION_LOCATION=${REGION}" \
   --no-cpu-throttling \
   --execution-environment=gen2
 
+# Construct the tagged URL. Cloud Run tagged URLs follow the pattern:
+#   https://TAG---SERVICE-HASH-REGION.a.run.app
+# where SERVICE-HASH-REGION is everything after https:// in the main service URL.
+echo "=== locating canary revision URL ==="
+SERVICE_URL=$(gcloud run services describe "$SERVICE" \
+  --project="$PROJECT" --region="$REGION" \
+  --format='value(status.url)')
+SERVICE_HOST="${SERVICE_URL#https://}"
+CANARY_URL="https://${DEPLOY_TAG}---${SERVICE_HOST}"
+echo "    canary URL: $CANARY_URL"
+echo "    production URL (unchanged): $SERVICE_URL"
+
 echo "=== granting run.invoker to portal SA ==="
 gcloud run services add-iam-policy-binding "$SERVICE" \
   --project="$PROJECT" \
@@ -146,26 +170,48 @@ _grant_with_retry() {
 }
 _grant_with_retry "serviceAccount:${CP_SA}" "roles/aiplatform.user"
 
-URL=$(gcloud run services describe "$SERVICE" \
-  --project="$PROJECT" --region="$REGION" \
-  --format='value(status.url)')
-
-echo "$URL" > infra/control_plane_url.txt
-echo "=== deployed: $URL ==="
-
-echo "=== verifying (authenticated health check) ==="
-TOKEN=$(gcloud auth print-identity-token --audiences="$URL" 2>/dev/null || true)
-if [ -n "$TOKEN" ]; then
-  curl -fsS -H "Authorization: Bearer $TOKEN" "$URL/health"
-  echo ""
-else
-  echo "SKIP: could not mint identity token for health check"
+# Probe A2A readiness on the canary revision. The token audience is the main
+# service URL — Cloud Run validates identity tokens at the service level, not
+# per tagged-URL, so the same token reaches the canary revision.
+echo "=== probing A2A readiness on canary revision ==="
+echo "    this exercises the outbound authenticated HTTP path that broke"
+echo "    when a sync hook was registered; /health cannot catch this"
+TOKEN=$(gcloud auth print-identity-token --audiences="$SERVICE_URL" 2>/dev/null || true)
+if [ -z "$TOKEN" ]; then
+  echo "FAIL: cannot mint identity token — cannot verify canary revision" >&2
+  echo "  production traffic is UNCHANGED" >&2
+  echo "  canary revision for investigation: $CANARY_URL" >&2
+  exit 1
 fi
 
-echo "=== verifying unauthenticated access is blocked ==="
-HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" "$URL/health" || true)
-if [ "$HTTP_CODE" = "403" ]; then
-  echo "PASS: unauthenticated request returned 403"
-else
-  echo "WARN: expected 403, got $HTTP_CODE"
+PROBE_BODY=$(mktemp)
+PROBE_HTTP=$(curl -s \
+  -o "$PROBE_BODY" \
+  -w "%{http_code}" \
+  -H "Authorization: Bearer $TOKEN" \
+  --max-time 60 \
+  "$CANARY_URL/v1/probe" 2>/dev/null) || PROBE_HTTP="000"
+
+if [ "$PROBE_HTTP" != "200" ]; then
+  echo "FAIL: A2A probe returned HTTP $PROBE_HTTP — production traffic is UNCHANGED" >&2
+  echo "  canary revision for investigation: $CANARY_URL" >&2
+  echo "  probe response body:" >&2
+  cat "$PROBE_BODY" >&2
+  rm -f "$PROBE_BODY"
+  exit 1
 fi
+
+echo "    PASS: A2A probe succeeded (HTTP $PROBE_HTTP)"
+cat "$PROBE_BODY"
+echo ""
+rm -f "$PROBE_BODY"
+
+# Only reached when the probe passes. Shift all traffic to the verified revision.
+echo "=== shifting traffic to verified revision ==="
+gcloud run services update-traffic "$SERVICE" \
+  --project="$PROJECT" \
+  --region="$REGION" \
+  --to-latest
+
+echo "$SERVICE_URL" > infra/control_plane_url.txt
+echo "=== deployed and verified: $SERVICE_URL ==="

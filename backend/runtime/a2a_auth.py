@@ -6,6 +6,7 @@ no credentials, so it needs one that mints and refreshes an access token from th
 service account.
 """
 
+import asyncio
 import logging
 
 import httpx
@@ -65,9 +66,23 @@ async def _inject_ae_traceparent(request: httpx.Request) -> None:
         logger.warning("Failed to inject %s: %s", _AE_TRACEPARENT_HEADER, exc)
 
 
+# Hooks registered on every authenticated client. Declared here so the guard below
+# runs at import time rather than on first use — a sync hook kills every outbound
+# call with a confusing TypeError, so we must refuse to start rather than fail later.
+_REQUEST_HOOKS: list = [_inject_ae_traceparent]
+
+for _hook in _REQUEST_HOOKS:
+    if not asyncio.iscoroutinefunction(_hook):
+        raise TypeError(
+            f"a2a_auth: event hook {_hook.__name__!r} must be declared 'async def'; "
+            f"httpx.AsyncClient awaits every request hook and raises TypeError when it "
+            f"returns None instead of a coroutine. Fix: 'async def {_hook.__name__}(...)'."
+        )
+
+
 def authenticated_client(timeout: float = 600.0) -> httpx.AsyncClient:
     return httpx.AsyncClient(
         auth=GoogleAuth(),
         timeout=timeout,
-        event_hooks={"request": [_inject_ae_traceparent]},
+        event_hooks={"request": list(_REQUEST_HOOKS)},
     )

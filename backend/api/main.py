@@ -112,6 +112,54 @@ def health() -> dict:
     return {"ok": True}
 
 
+@app.get("/v1/probe", include_in_schema=False)
+async def probe_a2a() -> dict:
+    """Deployment readiness probe: fetch one specialist's A2A agent card via authenticated_client().
+
+    Called by the deploy script on the canary revision before traffic is shifted.
+    Unlike /health, this exercises the outbound authenticated HTTP path that broke
+    when a sync event hook was registered — every health check stayed green while
+    every A2A call failed. This probe fails in the same conditions that break production.
+    """
+    import os
+
+    from backend.runtime.a2a_auth import authenticated_client
+
+    _PROBE_CANDIDATES = [
+        ("intake", "CASERELAY_URL_INTAKE", "intake"),
+        ("education", "CASERELAY_URL_EDUCATION", "education"),
+        ("health", "CASERELAY_URL_HEALTH", "health"),
+        ("legal", "CASERELAY_URL_LEGAL", "legal"),
+    ]
+
+    target_url = None
+    target_name = None
+    for name, env_var, folder in _PROBE_CANDIDATES:
+        base = os.environ.get(env_var, "").rstrip("/")
+        if base:
+            target_url = f"{base}/a2a/{folder}/.well-known/agent-card.json"
+            target_name = name
+            break
+
+    if not target_url:
+        raise HTTPException(
+            status_code=503,
+            detail="No specialist endpoints configured (CASERELAY_URL_*); cannot perform A2A probe.",
+        )
+
+    async with authenticated_client(timeout=30.0) as client:
+        try:
+            resp = await client.get(target_url)
+            resp.raise_for_status()
+        except Exception as exc:
+            raise HTTPException(
+                status_code=502,
+                detail=f"A2A probe to {target_name!r} agent card failed: {exc}",
+            )
+
+    return {"ok": True, "probed_agent": target_name, "http_status": resp.status_code}
+
+
 # ---------------------------------------------------------------------------
 # helpers
 # ---------------------------------------------------------------------------
