@@ -218,6 +218,43 @@ html aside[data-copilot-sidebar] {
   box-shadow: var(--shadow-pop);
 }
 
+/*
+ * ── Chat thread rhythm ───────────────────────────────────────────────────────
+ * CopilotKit spaces the thread for a full-width article, and two of its layers
+ * dominate a 492px panel.
+ *
+ * The user message root carries `pt-10` as its turn separator. And the
+ * assistant's markdown sits in `prose`, whose paragraphs take 1.25em top and
+ * bottom; prose does reset that on its own first and last child, but Streamdown
+ * puts a wrapper of its own in between, so the reset never reaches the
+ * paragraphs and the full margin escapes above the first line and below the
+ * last. Between them that is most of the air around a short reply, and none of
+ * it is reachable from the components in `chat-parts.tsx`.
+ *
+ * So the spacing hierarchy is set here: tight within a turn, one clear gap
+ * between turns. `html [data-copilotkit]` for the same reason as the theme
+ * bridge above — it outranks the package's utilities whatever the import order.
+ * The steps and the timestamp keep their spacing in `chat-parts.tsx`, next to
+ * the markup they belong to.
+ */
+html [data-copilotkit] .copilotKitUserMessage {
+  padding-top: 1.25rem;
+}
+
+html [data-copilotkit] .copilotKitAssistantMessage :is(p, ul, ol, blockquote) {
+  margin-block: 0.25rem;
+}
+
+/*
+ * Streamdown separates its blocks with `space-y-4`, and once the margins above
+ * have collapsed that is what actually sets the distance between two
+ * paragraphs. Should a later version drop the class, the paragraphs fall back
+ * to the 4px above rather than breaking.
+ */
+html [data-copilotkit] .copilotKitAssistantMessage :where(.space-y-4 > :not(:last-child)) {
+  margin-block-end: 0.5rem;
+}
+
 .thin-scroll {
   scrollbar-width: thin;
   scrollbar-color: var(--color-line-strong) transparent;

@@ -152,13 +152,7 @@ function StepLine({ steps, messages }: { steps: ToolStep[]; messages: ChatMessag
   const running = Array.from(settledByName.values()).some((done) => !done);
 
   return (
-    <p
-      className={cx(
-        type_.meta,
-        "mb-1.5 leading-relaxed",
-        running && "motion-safe:animate-pulse",
-      )}
-    >
+    <p className={cx(type_.meta, "mb-1 leading-snug", running && "motion-safe:animate-pulse")}>
       {Array.from(new Set(phrases)).join(" · ")}
     </p>
   );
@@ -178,7 +172,9 @@ function ReplyTime({ id }: { id: string }) {
   const label = at === null ? "" : formatEventTime(at);
   if (!label) return null;
 
-  return <p className={cx(type_.monoSmall, "mb-1.5 text-right tabular-nums")}>{label}</p>;
+  return (
+    <p className={cx(type_.monoSmall, "mb-1 text-right leading-none tabular-nums")}>{label}</p>
+  );
 }
 
 /**
@@ -214,10 +210,13 @@ function AssistantMessageView({
     message,
   );
 
-  // A reply arrives in pieces. Steps stay tight against each other so they read
-  // as one list, and the prose that answers gets the gap the markdown puts
-  // between paragraphs, so the whole thing still reads as a single reply.
-  const gap = leads ? undefined : hasText(message) ? "mt-4" : "mt-1.5";
+  // A reply arrives in pieces, and this is the middle of the thread's spacing
+  // hierarchy. Steps carry their own 4px on `StepLine`, so a run of them needs
+  // nothing here and reads as one list. The answer that follows opens a small
+  // break from them, and a reply as a whole stands 12px clear of the question
+  // above it — still inside the 20px turn boundary that `globals.css` sets on
+  // CopilotKit's user-message padding.
+  const gap = leads ? "mt-3" : hasText(message) ? "mt-1" : undefined;
 
   return (
     <div className={cx(gap)}>

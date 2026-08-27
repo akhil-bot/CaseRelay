@@ -117,7 +117,15 @@ function ConnectedChat() {
         width={492}
         header={{ closeButton: ChatCloseButton, children: ChatHeader }}
         toggleButton={{ openIcon: ToggleOpenIcon, closeIcon: ToggleCloseIcon }}
-        messageView={{ assistantMessage: AssistantMessage, intelligenceIndicator: Hidden }}
+        messageView={{
+          assistantMessage: AssistantMessage,
+          intelligenceIndicator: Hidden,
+          // The user-message toolbar is only a copy button, and it ships
+          // `invisible group-hover:visible` — which still reserves its 36px
+          // under every question the volunteer asks. Dropping the slot reclaims
+          // the space instead of styling around a control we do not offer.
+          userMessage: { toolbar: Hidden },
+        }}
         input={{
           className: "caserelay-chat-input",
           addMenuButton: Hidden,
