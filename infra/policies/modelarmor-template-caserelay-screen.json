@@ -1,0 +1,19 @@
+{
+  "filterConfig": {
+    "piAndJailbreakFilterSettings": {
+      "filterEnforcement": "ENABLED",
+      "confidenceLevel": "LOW_AND_ABOVE"
+    },
+    "maliciousUriFilterSettings": {
+      "filterEnforcement": "ENABLED"
+    },
+    "sdpSettings": {
+      "advancedConfig": {
+        "inspectTemplate": "projects/caserelay/locations/us-central1/inspectTemplates/caserelay-cross-scope"
+      }
+    }
+  },
+  "templateMetadata": {
+    "dataResidencyCompliant": true
+  }
+}

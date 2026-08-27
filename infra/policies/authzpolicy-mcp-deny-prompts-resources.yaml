@@ -1,0 +1,27 @@
+# Slot 3 of 4 on caserelay-egress.
+#
+# Blocks MCP tool-poisoning / line-jumping at the network layer: a compromised partner
+# MCP server cannot deliver a server-authored prompts/ template or resources/ blob whose
+# content is instructions rather than data. The partner server in backend/partners/mcp_server.py
+# registers tools only, so nothing legitimate uses these methods.
+#
+# Order-insensitive by construction: the match set (prompts/*, resources/*) is disjoint from
+# anything caserelay-iap-authz-policy governs, so the documented "execution order is not
+# guaranteed between policies sharing a profile" caveat cannot bite here.
+#
+# Syntax verified against:
+#   https://docs.cloud.google.com/gemini-enterprise-agent-platform/govern/gateways/delegate-authorization
+#   ("DENY policy example" — methods matched by bare family name, no trailing slash)
+name: caserelay-deny-mcp-prompts-resources
+target:
+  resources:
+  - "projects/caserelay/locations/us-central1/agentGateways/caserelay-egress"
+policyProfile: REQUEST_AUTHZ
+httpRules:
+- to:
+    operations:
+    - mcp:
+        methods:
+        - name: "prompts"
+        - name: "resources"
+action: DENY

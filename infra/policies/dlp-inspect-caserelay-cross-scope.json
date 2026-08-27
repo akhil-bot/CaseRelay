@@ -1,0 +1,85 @@
+{
+  "displayName": "CaseRelay Cross-Scope Screening",
+  "description": "Detects cross-scope data references in agent callbacks. Dictionary terms at POSSIBLE base; hotword proximity boosts to VERY_LIKELY when action verbs are within 50 chars.",
+  "inspectConfig": {
+    "infoTypes": [
+      { "name": "CREDIT_CARD_NUMBER" },
+      { "name": "US_SOCIAL_SECURITY_NUMBER" }
+    ],
+    "minLikelihood": "LIKELY",
+    "limits": {},
+    "customInfoTypes": [
+      {
+        "infoType": { "name": "CASERELAY_CROSS_SCOPE_MEDICAL" },
+        "likelihood": "POSSIBLE",
+        "dictionary": {
+          "wordList": {
+            "words": [
+              "medical notes",
+              "medical records",
+              "clinical notes",
+              "clinical records",
+              "health records",
+              "health information",
+              "diagnosis",
+              "medication",
+              "treatment records",
+              "treatment plan",
+              "psychiatric records",
+              "therapy notes",
+              "immunization records"
+            ]
+          }
+        }
+      },
+      {
+        "infoType": { "name": "CASERELAY_CROSS_SCOPE_LEGAL" },
+        "likelihood": "POSSIBLE",
+        "dictionary": {
+          "wordList": {
+            "words": [
+              "legal strategy",
+              "sealed records",
+              "attorney notes",
+              "counsel notes"
+            ]
+          }
+        }
+      },
+      {
+        "infoType": { "name": "CASERELAY_CROSS_SCOPE_FAMILY" },
+        "likelihood": "POSSIBLE",
+        "dictionary": {
+          "wordList": {
+            "words": [
+              "family notes",
+              "confidential assessment",
+              "restricted records",
+              "private records"
+            ]
+          }
+        }
+      }
+    ],
+    "ruleSet": [
+      {
+        "infoTypes": [
+          { "name": "CASERELAY_CROSS_SCOPE_MEDICAL" },
+          { "name": "CASERELAY_CROSS_SCOPE_LEGAL" },
+          { "name": "CASERELAY_CROSS_SCOPE_FAMILY" }
+        ],
+        "rules": [
+          {
+            "hotwordRule": {
+              "hotwordRegex": {
+                "pattern": "(?i)(retrieve|access|fetch|extract|get|pull|send|disclose|share|reveal|return|provide)"
+              },
+              "proximity": { "windowBefore": 50, "windowAfter": 50 },
+              "likelihoodAdjustment": { "fixedLikelihood": "VERY_LIKELY" }
+            }
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -1,0 +1,72 @@
+{
+  "policy": {
+    "bindings": [
+      {
+        "role": "roles/iap.egressor",
+        "members": [
+          "principal://agents.global.org-126484209344.system.id.goog/resources/aiplatform/projects/189353698936/locations/us-central1/reasoningEngines/6205121908900364288"
+        ],
+        "condition": {
+          "title": "EducationSchoolCallbackOnly",
+          "description": "The education liaison may call school_callback and nothing else. The empty-toolName clause admits base-protocol MCP RPCs (initialize, ping, tools/list); without it no MCP session can be established.",
+          "expression": "api.getAttribute('iap.googleapis.com/request.auth.type', '') == 'MCP' && (api.getAttribute('iap.googleapis.com/mcp.toolName', '') == '' || api.getAttribute('iap.googleapis.com/mcp.toolName', '') == 'school_callback')"
+        }
+      },
+      {
+        "role": "roles/iap.egressor",
+        "members": [
+          "principal://agents.global.org-126484209344.system.id.goog/resources/aiplatform/projects/189353698936/locations/us-central1/reasoningEngines/3044580132904763392"
+        ],
+        "condition": {
+          "title": "VerifierSchoolCallbackReadOnly",
+          "description": "The safeguarding verifier may only read the school callback it screens. The isReadOnly clause is self-asserted: it reflects readOnlyHint in the partner server's toolspec, which CaseRelay authors, and every partner tool currently declares readOnlyHint true, so this clause adds no restriction today. It becomes load-bearing the moment a mutating partner tool is added.",
+          "expression": "api.getAttribute('iap.googleapis.com/request.auth.type', '') == 'MCP' && (api.getAttribute('iap.googleapis.com/mcp.toolName', '') == '' || (api.getAttribute('iap.googleapis.com/mcp.toolName', '') == 'school_callback' && api.getAttribute('iap.googleapis.com/mcp.tool.isReadOnly', false) == true))"
+        }
+      },
+      {
+        "role": "roles/iap.egressor",
+        "members": [
+          "principal://agents.global.org-126484209344.system.id.goog/resources/aiplatform/projects/189353698936/locations/us-central1/reasoningEngines/2657974252392677376"
+        ],
+        "condition": {
+          "title": "HealthClinicStatusOnly",
+          "description": "The health coordinator may call clinic_status only. It is structurally unable to reach the school, legal, shelter or family tools.",
+          "expression": "api.getAttribute('iap.googleapis.com/request.auth.type', '') == 'MCP' && (api.getAttribute('iap.googleapis.com/mcp.toolName', '') == '' || api.getAttribute('iap.googleapis.com/mcp.toolName', '') == 'clinic_status')"
+        }
+      },
+      {
+        "role": "roles/iap.egressor",
+        "members": [
+          "principal://agents.global.org-126484209344.system.id.goog/resources/aiplatform/projects/189353698936/locations/us-central1/reasoningEngines/3107630527687950336"
+        ],
+        "condition": {
+          "title": "LegalLegalStatusOnly",
+          "description": "The legal aid agent may call legal_status only.",
+          "expression": "api.getAttribute('iap.googleapis.com/request.auth.type', '') == 'MCP' && (api.getAttribute('iap.googleapis.com/mcp.toolName', '') == '' || api.getAttribute('iap.googleapis.com/mcp.toolName', '') == 'legal_status')"
+        }
+      },
+      {
+        "role": "roles/iap.egressor",
+        "members": [
+          "principal://agents.global.org-126484209344.system.id.goog/resources/aiplatform/projects/189353698936/locations/us-central1/reasoningEngines/8689420053348614144"
+        ],
+        "condition": {
+          "title": "ShelterShelterStatusOnly",
+          "description": "The shelter status agent may call shelter_status only.",
+          "expression": "api.getAttribute('iap.googleapis.com/request.auth.type', '') == 'MCP' && (api.getAttribute('iap.googleapis.com/mcp.toolName', '') == '' || api.getAttribute('iap.googleapis.com/mcp.toolName', '') == 'shelter_status')"
+        }
+      },
+      {
+        "role": "roles/iap.egressor",
+        "members": [
+          "principal://agents.global.org-126484209344.system.id.goog/resources/aiplatform/projects/189353698936/locations/us-central1/reasoningEngines/7993613910919872512"
+        ],
+        "condition": {
+          "title": "FamilyFamilyStatusOnly",
+          "description": "The family services agent may call family_status only.",
+          "expression": "api.getAttribute('iap.googleapis.com/request.auth.type', '') == 'MCP' && (api.getAttribute('iap.googleapis.com/mcp.toolName', '') == '' || api.getAttribute('iap.googleapis.com/mcp.toolName', '') == 'family_status')"
+        }
+      }
+    ]
+  }
+}

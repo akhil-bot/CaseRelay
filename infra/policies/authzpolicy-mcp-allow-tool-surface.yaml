@@ -1,0 +1,48 @@
+# Slot 4 of 4 on caserelay-egress. HOLD IN RESERVE — see the caveat below.
+#
+# Gateway-wide allowlist of the partner MCP tool surface. Any MCP method not named here is
+# denied, which also implicitly covers prompts/ and resources/ (the docs' own ALLOW example
+# states this explicitly). It does NOT express per-agent isolation — an AuthzPolicy targets
+# the gateway, not a caller identity. Per-agent narrowing lives in
+# iam-partner-mcp-server.json, which does not consume a policy slot.
+#
+# CAVEAT — why this is reserve and not slot 3:
+# caserelay-iap-authz-policy already occupies REQUEST_AUTHZ with action: CUSTOM. The docs
+# state "if you configure multiple custom authorization policies that use the same profile,
+# their execution order is not guaranteed" and do not define how an ALLOW policy composes
+# with a CUSTOM one on the same profile. Applying this alongside the IAP policy is therefore
+# an unverified interaction. Apply it only with time to test a full case run, and keep the
+# delete command to hand.
+#
+# baseProtocolMethodsOption is mandatory in an ALLOW policy: without it, initialize / ping /
+# logging / notifications are denied and no MCP session can be established at all.
+#
+# Tool names mirror backend/partners/mcp_server.py exactly. school_status is included for
+# surface parity but no agent calls it today (education calls school_callback) — dropping it
+# is a free tightening once the MCP wiring is frozen.
+#
+# Syntax verified against:
+#   https://docs.cloud.google.com/gemini-enterprise-agent-platform/govern/gateways/delegate-authorization
+#   ("ALLOW policy example")
+name: caserelay-allow-partner-tool-surface
+target:
+  resources:
+  - "projects/caserelay/locations/us-central1/agentGateways/caserelay-egress"
+policyProfile: REQUEST_AUTHZ
+httpRules:
+- to:
+    operations:
+    - mcp:
+        baseProtocolMethodsOption: MATCH_BASE_PROTOCOL_METHODS
+        methods:
+        - name: "tools/list"
+        - name: "tools/call"
+          params:
+          - exact: "school_status"
+          - exact: "school_callback"
+          - exact: "clinic_status"
+          - exact: "legal_status"
+          - exact: "shelter_status"
+          - exact: "family_status"
+          - exact: "followup"
+action: ALLOW

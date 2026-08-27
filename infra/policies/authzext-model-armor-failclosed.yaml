@@ -1,0 +1,32 @@
+# Replaces the live caserelay-ma-authz-ext, which currently carries failOpen: true.
+#
+# failOpen: true means a Model Armor timeout or outage lets the traffic through unscreened.
+# backend/gateway/armor.py raises ScreeningUnavailable and quarantines. In a system holding
+# minors' records the gateway must not be laxer than the application, so this sets
+# failOpen: false.
+#
+# What fail-closed at the gateway does NOT give you: a structured verdict. A gateway block
+# surfaces to the caller as a transport error with no {verdict, rules} payload, so the
+# verifier's escalation precondition (open_escalation refuses without a recorded quarantine)
+# has nothing to read. armor.py must stay in place as the decision that produces the audit
+# event; the gateway is the outer ring only. See docs/agent-gateway-adoption-plan.md.
+#
+# timeout is left at the documented 1s. Raising it trades demo latency for fewer spurious
+# denies; 1s on a streamed body callout is tight but is what Google's sample uses.
+#
+# Extensions do not count against the four-policy-per-gateway ceiling — only authzPolicies do.
+#
+# Templates verified live: caserelay-screen exists and references the
+# caserelay-cross-scope DLP inspect template (inspect only, no de-identify template, so
+# Model Armor issues a block verdict rather than passing sanitized content through).
+name: caserelay-ma-authz-ext
+service: modelarmor.us-central1.rep.googleapis.com
+metadata:
+  model_armor_settings: '[
+    {
+      "request_template_id":  "projects/caserelay/locations/us-central1/templates/caserelay-screen",
+      "response_template_id": "projects/caserelay/locations/us-central1/templates/caserelay-screen"
+    }
+  ]'
+failOpen: false
+timeout: 1s
