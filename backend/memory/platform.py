@@ -96,29 +96,6 @@ def search_sync(case_id: str, query: str) -> list[str]:
     return asyncio.run(search(case_id, query))
 
 
-async def write_memory(case_id: str, fact: str) -> None:
-    """Write an explicit coordination fact to Memory Bank (immediately retrievable).
-
-    This is the demo-reliable path: memories.create produces an immediately-indexed
-    fact. Used alongside commit_session_events which feeds the async extraction pipeline.
-    """
-    svc = get_service()
-    if svc is None:
-        return
-    try:
-        from google.adk.memory.memory_entry import MemoryEntry
-        from google.genai import types as _types
-
-        await svc.add_memory(
-            app_name=APP_NAME,
-            user_id=case_id,
-            memories=[MemoryEntry(content=_types.Content(parts=[_types.Part(text=fact)]))],
-        )
-        logger.info("Wrote explicit memory for case %s: %s", case_id, fact[:80])
-    except Exception:
-        logger.exception("Failed to write explicit memory for case %s", case_id)
-
-
 _EXTRACTION_TOPICS = [
     {"custom_memory_topic_label": "partner_contacts"},
     {"custom_memory_topic_label": "institutional_shortcuts"},

@@ -27,7 +27,7 @@ import { fieldLabel, purposeLabel } from "@/design/copy";
 import { control, layout, row, surface, tone, type as type_ } from "@/design/tokens";
 import { auditView, formatEventTime } from "@/lib/case-events";
 import { useDemo } from "@/lib/demo-store";
-import { submitRun, type CaseRunSummary, type RunEvent } from "@/lib/api";
+import { submitRun, activateCase, decideApproval, listPendingApprovals, type CaseRunSummary, type RunEvent, type PendingApproval } from "@/lib/api";
 import { useLiveCase, useLiveRunEvents } from "@/lib/live-case";
 import { AUTHORITY_GRANT, CASES, PRIMARY_CASE_ID } from "@/lib/mock/cases";
 import { EDUCATION_PROJECTION } from "@/lib/mock/policy";
@@ -73,6 +73,9 @@ function LiveCaseDetail({ caseId }: { caseId: string }) {
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [startedRunId, setStartedRunId] = useState<string | null>(null);
+  const [approving, setApproving] = useState(false);
+  const [approveError, setApproveError] = useState<string | null>(null);
+  const [pendingApprovals, setPendingApprovals] = useState<PendingApproval[]>([]);
 
   const runs = liveCase.status === "loaded" ? liveCase.runs : NO_RUNS;
   const caseEvents = liveCase.status === "loaded" ? liveCase.events : NO_EVENTS;
@@ -121,6 +124,43 @@ function LiveCaseDetail({ caseId }: { caseId: string }) {
       setSubmitError(err instanceof Error ? err.message : String(err));
     } finally {
       setSubmitting(false);
+    }
+  };
+
+  useEffect(() => {
+    if (liveCase.status !== "loaded") return;
+    const caseStatus = String(liveCase.data.case.status ?? "");
+    const hasCommitments = Object.keys(liveCase.data.commitments).length > 0;
+    if (caseStatus === "draft" && hasCommitments) return;
+    listPendingApprovals()
+      .then((items) => setPendingApprovals(items.filter((a) => a.case_id === caseId)))
+      .catch(() => {});
+  }, [liveCase, caseId]);
+
+  const handleActivate = async (supervisorId: string) => {
+    setApproving(true);
+    setApproveError(null);
+    try {
+      await activateCase(caseId, supervisorId);
+      refreshCase();
+    } catch (err: unknown) {
+      setApproveError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setApproving(false);
+    }
+  };
+
+  const handleDecideApproval = async (approvalId: string, decision: "approve" | "reject", decidedBy: string) => {
+    setApproving(true);
+    setApproveError(null);
+    try {
+      await decideApproval(approvalId, decision, decidedBy);
+      setPendingApprovals((prev) => prev.filter((a) => String(a.approval_id) !== approvalId));
+      refreshCase();
+    } catch (err: unknown) {
+      setApproveError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setApproving(false);
     }
   };
 
@@ -268,6 +308,34 @@ function LiveCaseDetail({ caseId }: { caseId: string }) {
         )}
       </section>
 
+      {/* Supervisor activation gate */}
+      {status === "draft" && commitmentEntries.length > 0 && (
+        <SupervisorGate
+          gateType="activation"
+          caseId={caseId}
+          childName={childName}
+          approving={approving}
+          error={approveError}
+          onApprove={(supervisorId) => handleActivate(supervisorId)}
+        />
+      )}
+
+      {/* Pending escalation approvals */}
+      {pendingApprovals.length > 0 && pendingApprovals.map((a) => (
+        <SupervisorGate
+          key={String(a.approval_id)}
+          gateType="escalation"
+          caseId={caseId}
+          childName={childName}
+          approvalId={String(a.approval_id)}
+          reason={a.reason}
+          approving={approving}
+          error={approveError}
+          onApprove={(decidedBy) => handleDecideApproval(String(a.approval_id), "approve", decidedBy)}
+          onReject={(decidedBy) => handleDecideApproval(String(a.approval_id), "reject", decidedBy)}
+        />
+      ))}
+
       <NeedsAttention commitments={commitmentStates} events={mergedEvents} />
 
       <CaseTimeline
@@ -391,6 +459,75 @@ function caseStatusLabel(status: string): string {
   if (status === "approval_required") return "Waiting on you";
   if (status === "completed" || status === "closed") return "Completed";
   return status.replace(/_/g, " ");
+}
+
+function SupervisorGate({
+  gateType,
+  childName,
+  reason,
+  approving,
+  error,
+  onApprove,
+  onReject,
+}: {
+  gateType: "activation" | "escalation";
+  caseId: string;
+  childName: string;
+  approvalId?: string;
+  reason?: string;
+  approving: boolean;
+  error: string | null;
+  onApprove: (supervisorId: string) => void;
+  onReject?: (supervisorId: string) => void;
+}) {
+  const { profile } = useViewer();
+  const supervisorId = profile?.id ?? profile?.name ?? "portal-operator";
+
+  const isActivation = gateType === "activation";
+  const title = isActivation
+    ? `Approve activation for ${childName}`
+    : `Approve escalation for ${childName}`;
+  const body = isActivation
+    ? "CaseRelay has extracted commitments and proposed grants. It will not contact any service until you approve."
+    : reason ?? "A reply was quarantined and needs your decision before the case can proceed.";
+
+  return (
+    <section className={cx(surface.card, "overflow-hidden px-5 py-5")}>
+      <div className="flex flex-wrap items-start gap-3">
+        <Icon name="lock" size={20} className="mt-0.5 shrink-0 text-warn" />
+        <div className="min-w-0 flex-1">
+          <p className="text-[14px] font-semibold text-ink">{title}</p>
+          <p className={cx("mt-1", type_.body)}>{body}</p>
+          <p className="mt-2 text-[12px] text-ink-muted">
+            Acting as <span className="font-medium text-ink">{supervisorId}</span>
+          </p>
+        </div>
+      </div>
+      <div className={cx("-mx-5 -mb-5 mt-4 flex flex-wrap items-center gap-3 border-t px-5 py-4", "border-warn/25 bg-warn-soft")}>
+        {onReject && (
+          <button
+            type="button"
+            onClick={() => onReject(supervisorId)}
+            disabled={approving}
+            className={control.secondary}
+          >
+            <Icon name="close" size={15} />
+            Reject
+          </button>
+        )}
+        <button
+          type="button"
+          onClick={() => onApprove(supervisorId)}
+          disabled={approving}
+          className={cx(control.primary, "ml-auto")}
+        >
+          <Icon name="check" size={15} />
+          {approving ? "Approving…" : isActivation ? "Approve & activate" : "Approve escalation"}
+        </button>
+      </div>
+      {error && <p className="mt-2 px-5 text-[12px] text-danger">{error}</p>}
+    </section>
+  );
 }
 
 // ═══════════════════════════════════════════════════════════════════════════

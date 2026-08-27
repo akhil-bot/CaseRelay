@@ -105,8 +105,18 @@ def check_overdue(case_id: str) -> list:
 
 
 def approve_escalation(case_id: str) -> dict:
-    """Supervisor HITL: release the quarantined action."""
-    return workspace.decide_approval(case_id, "approved", "supervisor-001")
+    """Supervisor HITL: release the quarantined action.
+
+    This tool is no longer called by the auto-firing phase (which has been removed).
+    It remains available for manual or programmatic approval via the API, which
+    supplies the actual decided_by identity.
+    """
+    approvals = workspace.list_approvals(case_id)
+    pending = [a for a in approvals if a.get("decision") == "pending" and a.get("action_type") == "escalation"]
+    if not pending:
+        return {"case_id": case_id, "decision": "none"}
+    decided_by = pending[-1].get("decided_by", "unknown")
+    return workspace.decide_approval(case_id, "approved", decided_by)
 
 
 def send_followup(case_id: str) -> list:

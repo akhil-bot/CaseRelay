@@ -141,6 +141,43 @@ export function streamRunEvents(runId: string): EventSource {
   return new EventSource(`${BASE}/v1/runs/${runId}/events`);
 }
 
+// ─── Approval endpoints ──────────────────────────────────────────────────────
+
+export interface PendingApproval {
+  approval_id: string;
+  case_id: string;
+  action_type: string;
+  reason?: string;
+  decision: string;
+  [key: string]: unknown;
+}
+
+export async function listPendingApprovals(): Promise<PendingApproval[]> {
+  return request("/v1/approvals");
+}
+
+export async function activateCase(
+  caseId: string,
+  supervisorId: string,
+): Promise<{ case_id: string; status: string }> {
+  return request(`/v1/cases/${caseId}/activate`, {
+    method: "POST",
+    body: JSON.stringify({ supervisor_id: supervisorId }),
+  });
+}
+
+export async function decideApproval(
+  approvalId: string,
+  decision: "approve" | "reject",
+  decidedBy: string,
+  note?: string,
+): Promise<Record<string, unknown>> {
+  return request(`/v1/approvals/${approvalId}/decide`, {
+    method: "POST",
+    body: JSON.stringify({ decision, decided_by: decidedBy, note }),
+  });
+}
+
 /**
  * One SSE frame, decoded. Returns null for anything unreadable — a partial
  * frame, or a heartbeat that arrived as data — which the caller ignores.

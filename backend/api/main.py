@@ -8,12 +8,25 @@ from __future__ import annotations
 import asyncio
 import contextvars
 import json
+import logging
 import os
 import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta, timezone
 from typing import Any
 from uuid import uuid4
+
+# Root logging configuration — ensures INFO-level application logs reach Cloud Logging.
+# Without this, logging.lastResort applies at WARNING and everything below is dropped.
+# Scoped to caserelay.* and backend.* loggers; third-party libraries stay at WARNING
+# to avoid excessive noise from google-adk, httpx, etc.
+_log_level = logging.DEBUG if os.environ.get("CASERELAY_DEBUG") else logging.INFO
+logging.basicConfig(
+    level=logging.WARNING,
+    format="%(levelname)s %(name)s: %(message)s",
+)
+for _ns in ("caserelay", "backend"):
+    logging.getLogger(_ns).setLevel(_log_level)
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -37,9 +50,7 @@ app = FastAPI(
     description="Versioned HTTP control plane for the CaseRelay multi-agent fleet.",
 )
 
-import logging as _logging
-
-_agui_logger = _logging.getLogger("caserelay.agui")
+_agui_logger = logging.getLogger("caserelay.agui")
 
 try:
     from backend.api.agui import agui_app
@@ -56,13 +67,13 @@ try:
     from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
     FastAPIInstrumentor.instrument_app(app)
 except Exception as _e:
-    _logging.getLogger("caserelay.otel").warning("FastAPI OTel instrumentation failed: %s", _e)
+    logging.getLogger("caserelay.otel").warning("FastAPI OTel instrumentation failed: %s", _e)
 
 try:
     from opentelemetry.instrumentation.httpx import HTTPXClientInstrumentor
     HTTPXClientInstrumentor().instrument()
 except Exception as _e:
-    _logging.getLogger("caserelay.otel").warning("HTTPX OTel instrumentation failed: %s", _e)
+    logging.getLogger("caserelay.otel").warning("HTTPX OTel instrumentation failed: %s", _e)
 
 app.add_middleware(
     CORSMiddleware,
@@ -347,13 +358,35 @@ def create_case(body: dict[str, Any]) -> dict:
     }
 
 
+def _resume_after_approval(case_id: str) -> None:
+    """Resume a run that is suspended at a supervisor gate after the gate is satisfied."""
+    blocked = [
+        r for r in workspace.list_runs_for_case(case_id)
+        if r.get("state") == "awaiting_supervisor"
+    ]
+    if not blocked:
+        return
+    old_run = blocked[0]
+    old_run_id = old_run["run_id"]
+    workspace.update_run(old_run_id, state="completed", current_phase="approved")
+    run_id = uuid4().hex[:12]
+    workspace.create_run(run_id, case_id)
+    from backend.runtime.context import current as _ctx
+    workspace.update_run(run_id, trace_id=_ctx().trace_id)
+    t = threading.Thread(target=_run_background, args=(run_id, case_id), kwargs={"resume": True}, daemon=True)
+    t.start()
+
+
 @app.post(
     "/v1/cases/{case_id}/activate",
     responses={404: {"description": "Case not found"}},
 )
 def activate_case(case_id: str, body: dict[str, Any] | None = None) -> dict:
-    supervisor_id = (body or {}).get("supervisor_id", "supervisor-001")
+    supervisor_id = (body or {}).get("supervisor_id")
+    if not supervisor_id:
+        raise HTTPException(status_code=400, detail="supervisor_id is required")
     case = workspace.activate(case_id, supervisor_id)
+    _resume_after_approval(case_id)
     return {"case_id": case_id, "status": case["status"]}
 
 
@@ -363,17 +396,19 @@ def activate_case(case_id: str, body: dict[str, Any] | None = None) -> dict:
 )
 def decide_approval(approval_id: str, body: dict[str, Any]) -> dict:
     decision = body.get("decision")
-    decided_by = body.get("decided_by", "supervisor-001")
+    decided_by = body.get("decided_by")
     note = body.get("note", "")
+    if not decided_by:
+        raise HTTPException(status_code=400, detail="decided_by is required")
     if decision not in ("approve", "reject", "approved", "rejected"):
         raise HTTPException(status_code=400, detail="decision must be 'approve' or 'reject'")
-    # Find the case that owns this approval.
     for case_id in workspace.cases:
         for a in workspace.list_approvals(case_id):
             if str(a.get("approval_id")) == approval_id:
                 result = workspace.decide_approval(case_id, decision, decided_by)
                 if note:
                     result["note"] = note
+                _resume_after_approval(case_id)
                 return result
     raise HTTPException(status_code=404, detail=f"approval {approval_id!r} not found")
 
@@ -400,9 +435,8 @@ def wake_workflow(workflow_id: str) -> dict:
 
 
 import base64
-import logging as _push_logging
 
-_push_logger = _push_logging.getLogger("caserelay.pubsub_push")
+_push_logger = logging.getLogger("caserelay.pubsub_push")
 
 
 def _verify_oidc_token(request: Request) -> dict | None:
@@ -696,7 +730,7 @@ class _Narrator:
             if phase == "intake":
                 return f"Reading the {self._household} family's referral for {child}."
             if "activate" in phase:
-                return f"Sending the proposed commitments to {self._supervisor} for review."
+                return f"Waiting for supervisor approval before activating {self.child}'s case."
             if "checkpoint" in phase:
                 return "Setting a reminder to follow up on anything still open."
             if "wake" in phase:
@@ -704,7 +738,7 @@ class _Narrator:
             if "quarantine" in phase:
                 return "A reply came back — screening it before anyone acts."
             if "approve" in phase:
-                return f"{self._supervisor} is reviewing the flagged reply."
+                return "The flagged reply is waiting for a supervisor decision."
             if "nudge" in phase:
                 return f"Following up on {child}'s missed deadlines."
             if "unanswered" in phase:
@@ -717,9 +751,9 @@ class _Narrator:
 
         if event == "phase_complete":
             if phase == "intake":
-                return f"Found {len(states)} commitments — {self._supervisor} reviews them next."
+                return f"Found {len(states)} commitments — waiting for supervisor approval to proceed."
             if "activate" in phase:
-                return f"{self._supervisor} approved — contacting every service on {child}'s case."
+                return f"Supervisor approved — contacting every service on {child}'s case."
             if "checkpoint" in phase:
                 return f"Reminder set — {child}'s open commitments will be chased automatically."
             if "wake" in phase:
@@ -727,7 +761,7 @@ class _Narrator:
             if "quarantine" in phase:
                 return f"That reply reached outside its scope — held for {self._supervisor}."
             if "approve" in phase:
-                return f"{self._supervisor} approved — the follow-up can now be sent."
+                return "Supervisor approved the escalation — the follow-up can now be sent."
             if "nudge" in phase:
                 return f"Follow-ups are out on {child}'s overdue commitments."
             if "unanswered" in phase:
@@ -868,13 +902,12 @@ def _run_background(run_id: str, case_id: str, *, resume: bool = False) -> None:
     The wake phase fires because the checkpoint is in running state (sweep set it) with
     current_step still at sleeping, and reconciliation runs before continuing.
     """
-    import logging
     import warnings
 
     from backend.agents.orchestrator.agent import build_for_run as _build_orchestrator
     from backend.memory.platform import enabled as _mb_enabled, search_sync as _mb_search
     from backend.runtime.context import bind as _bind
-    from backend.runtime.fleet import PHASE_REGISTRY
+    from backend.runtime.fleet import PHASE_REGISTRY, awaiting_supervisor as _awaiting_supervisor
     from backend.runtime.invoke import finalize_run_memory, run_agent
     from backend.workflows import escalation
     from backend.workflows.durable import reconcile_commitments
@@ -955,11 +988,9 @@ def _run_background(run_id: str, case_id: str, *, resume: bool = False) -> None:
             recall_count = 0
             child = narrator.child
 
-            if _mb_enabled():
+            if _mb_enabled() and resume:
                 query = (
                     f"partner contacts, strategies, and prior outcomes for case {case_id}'s open commitments"
-                    if resume else
-                    f"coordination history and outcomes for case {case_id}"
                 )
                 try:
                     recalled = _mb_search(case_id, query)
@@ -974,8 +1005,11 @@ def _run_background(run_id: str, case_id: str, *, resume: bool = False) -> None:
                                 f"from earlier work on {child}'s case."
                             ),
                         })
-                except Exception:  # noqa: BLE001
-                    pass
+                except Exception as _mb_exc:  # noqa: BLE001
+                    logging.getLogger("caserelay.memory").warning(
+                        "Memory Bank search failed for case %s (run %s): %s",
+                        case_id, run_id, repr(_mb_exc),
+                    )
 
             if not resume:
                 from backend.agents.intake.agent import root_agent as intake_agent
@@ -1022,6 +1056,22 @@ def _run_background(run_id: str, case_id: str, *, resume: bool = False) -> None:
                 ]
 
                 if not ready:
+                    gate_type = _awaiting_supervisor(case_id)
+                    if gate_type:
+                        _push_event({
+                            "event": "awaiting_supervisor", "run_id": run_id, "case_id": case_id,
+                            "gate_type": gate_type,
+                            "message": (
+                                f"Waiting for supervisor approval ({gate_type}) before continuing "
+                                f"with {child}'s case."
+                            ),
+                        })
+                        workspace.update_run(
+                            run_id, state="awaiting_supervisor",
+                            current_phase=f"gate:{gate_type}",
+                            commitment_states=workspace.commitment_states(case_id),
+                        )
+                        suspended = True
                     break
 
                 first = min(ready, key=lambda s: s.priority)
@@ -1192,16 +1242,25 @@ def _run_background(run_id: str, case_id: str, *, resume: bool = False) -> None:
                 })
 
             if suspended:
-                workspace.update_run(
-                    run_id, state="suspended", current_phase="checkpoint",
-                    commitment_states=commitments,
-                )
-                _push_event({
-                    "event": "run_completed", "run_id": run_id, "case_id": case_id,
-                    "commitment_states": commitments,
-                    "outcome": "suspended",
-                    "message": narrator.line("phase_complete", "checkpoint", commitment_states=commitments),
-                })
+                run = workspace.get_run(run_id)
+                if run and run.get("state") == "awaiting_supervisor":
+                    _push_event({
+                        "event": "run_completed", "run_id": run_id, "case_id": case_id,
+                        "commitment_states": commitments,
+                        "outcome": "awaiting_supervisor",
+                        "message": narrator.line("phase_complete", "activate", commitment_states=commitments),
+                    })
+                else:
+                    workspace.update_run(
+                        run_id, state="suspended", current_phase="checkpoint",
+                        commitment_states=commitments,
+                    )
+                    _push_event({
+                        "event": "run_completed", "run_id": run_id, "case_id": case_id,
+                        "commitment_states": commitments,
+                        "outcome": "suspended",
+                        "message": narrator.line("phase_complete", "checkpoint", commitment_states=commitments),
+                    })
                 return
 
             pending_commitments = [k for k, v in commitments.items() if v == "pending"]
@@ -1385,7 +1444,7 @@ def get_run(run_id: str) -> dict:
     return result
 
 
-_TERMINAL_STATES = {"completed", "failed", "partial_failure", "suspended"}
+_TERMINAL_STATES = {"completed", "failed", "partial_failure", "suspended", "awaiting_supervisor"}
 
 _SSE_HEARTBEAT_INTERVAL = 15
 _SSE_MAX_DURATION = 1800

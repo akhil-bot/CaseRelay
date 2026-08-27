@@ -185,21 +185,25 @@ def _checkpoint_awake_no_pending_escalation(case_id: str) -> bool:
     return _awake(case_id) and not _pending_escalation(case_id)
 
 
+def awaiting_supervisor(case_id: str) -> str | None:
+    """Return the type of approval the case is blocked on, or None if not blocked.
+
+    The run engine calls this when no phase precondition is satisfiable. If it returns
+    a non-None value, the run suspends with an awaiting_supervisor event rather than
+    ending — allowing the supervisor to unblock it via the real API endpoints.
+    """
+    if _case_draft_with_commitments(case_id):
+        return "activation"
+    if _pending_escalation(case_id):
+        return "escalation"
+    return None
+
+
 # ---------------------------------------------------------------------------
 # Phase registry — the single source of truth for the run engine
 # ---------------------------------------------------------------------------
 
 PHASE_REGISTRY: list[PhaseSpec] = [
-    PhaseSpec(
-        label="2-activate",
-        prompt_template=(
-            "A supervisor reviewed and approved the proposed grants for case {case_id}. "
-            "Call activate_case, report the new status, then stop."
-        ),
-        precondition=_case_draft_with_commitments,
-        priority=10,
-        tools=("activate_case",),
-    ),
     *[
         PhaseSpec(
             label=f"3-fanout-{name}",
@@ -241,16 +245,6 @@ PHASE_REGISTRY: list[PhaseSpec] = [
         ),
         precondition=_checkpoint_awake_and_has_inject,
         priority=50,
-    ),
-    PhaseSpec(
-        label="7-approve",
-        prompt_template=(
-            "A supervisor reviewed the quarantined callback for case {case_id} and approved the "
-            "escalation. Call approve_escalation, report the decision, then stop."
-        ),
-        precondition=_pending_escalation,
-        priority=60,
-        tools=("approve_escalation",),
     ),
     PhaseSpec(
         label="8-followup",
