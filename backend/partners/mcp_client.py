@@ -129,8 +129,8 @@ async def _call_tool(tool_name: str, arguments: dict[str, Any]) -> Any:
                 return {}
 
 
-def _call_tool_sync(tool_name: str, arguments: dict[str, Any]) -> Any:
-    """Synchronous wrapper around the async MCP call."""
+def _dispatch(tool_name: str, arguments: dict[str, Any]) -> Any:
+    """Run the async MCP call from whichever context the caller is on."""
     import asyncio
 
     try:
@@ -145,6 +145,32 @@ def _call_tool_sync(tool_name: str, arguments: dict[str, Any]) -> Any:
             return future.result(timeout=30)
     else:
         return asyncio.run(_call_tool(tool_name, arguments))
+
+
+def _call_tool_sync(tool_name: str, arguments: dict[str, Any]) -> Any:
+    """Call a partner tool, retrying once on a discarded token.
+
+    Cloud Run occasionally rejects a valid, freshly minted ID token at the edge with
+    "the access token could not be verified" — a 401 at zero latency that never reaches
+    the server. It hit roughly one call in fifteen during a fan-out, and a single dropped
+    call leaves a commitment unresolved for the rest of the run.
+
+    Every partner tool is declared readOnly and idempotent, so repeating one is safe.
+    The cached token is discarded first so the retry mints a fresh one rather than
+    replaying whatever was just refused.
+    """
+    try:
+        return _dispatch(tool_name, arguments)
+    except Exception as exc:
+        audience = _mcp_url()
+        _log.warning(
+            "partner MCP call %s failed (%s); discarding token and retrying once",
+            tool_name, exc,
+        )
+        with _token_lock:
+            _token_cache.pop(audience, None)
+        time.sleep(1)
+        return _dispatch(tool_name, arguments)
 
 
 def school_status(referral_id: str, case_id: str | None = None) -> dict:
