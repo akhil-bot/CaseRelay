@@ -4,6 +4,8 @@
 
 The **maya** scenario exercises the flagship demo flow: multi-agent fan-out over A2A to all specialist engines, Model Armor catching a cross-scope data-exfiltration attempt in a partner callback, quarantine and human escalation, a real supervisor decision taken in the portal, and a follow-up that finally closes the commitment by naming who owns it — plus durable state across a timed wake and an audit trail attributing every action to a per-agent platform identity. It is the only scenario that reaches `6-quarantine` and the escalation gate behind it, because it is the only one carrying `inject_callback` on its education referral.
 
+Underneath all of that, every one of the eight engines now runs its outbound traffic through a Google **Agent Gateway** that terminates TLS, parses MCP method names out of the request body and rules on them against policy. It is the claim in this demo with the least hand-waving in it, because the gateway writes its own logs on the far side of the fleet from anything CaseRelay controls. The Agent Gateway section below has the query and the exact wording that survives scrutiny.
+
 **Two things about the fleet, so you do not overclaim on camera.** Eight agents are deployed as Reasoning Engines, but a maya run only ever invokes **six of them over A2A** — the five specialists and the safeguarding verifier. The orchestrator runs in-process on the control plane (`build_for_run` in `backend/agents/orchestrator/agent.py`), and intake is invoked in-process too (`_run_background` imports `backend.agents.intake.agent.root_agent` directly). `CASERELAY_URL_INTAKE` is read only by `/v1/probe`. The orchestrator and intake engines are real deployments and their cards resolve, but no engine log line appears for them during a run.
 
 **And the injection is refused twice, not once.** `sim.school_callback` returns the poisoned payload to whoever asks while the escalation is undecided — so the education liaison receives it during fan-out (`3-fanout-education_liaison`), refuses it under its own instruction, and reports its commitment `blocked`. The safeguarding verifier then fetches the *same* payload in `6-quarantine` and puts it through Model Armor. Model Armor is the enforcement decision that produces the audit event and the escalation; the liaison's refusal is a model-level refusal with no policy artefact behind it. Worth narrating as defence in depth — but do not present the fan-out refusal as the guardrail.
@@ -14,7 +16,9 @@ Phases are not a fixed sequence. `PHASE_REGISTRY` in `backend/runtime/fleet.py` 
 
 So maya is three runs, not one, and the demo has two deliberate stops in it. Plan the narration around them: this is the part of the story where the system refuses to act and records who unblocked it.
 
-**What maya does NOT cover:** cross-scope denial at the Gateway layer (that is `rosa`). In maya, the poisoned callback is caught by Model Armor in phase 6; the Gateway's field-level scope denial (`IdentityDenied` on a denied field) is exercised only by `rosa`. If you need to show that, run rosa as a short second demo after maya completes — ~2 minutes plus its own activation gate, which every scenario now has, and it produces a `denial` audit event with `denied_field` populated.
+**Two different things in this document are called a gateway, so keep them apart on camera.** CaseRelay's **authority gateway** (`backend/gateway/gateway.py`) is application code: it checks a caller's grant and strips fields the caller has no authority over. Google's **Agent Gateway** (`caserelay-egress`) is infrastructure: every reasoning engine's outbound traffic is bound to it and intercepted there. Both are real and both are in the request path, but they enforce different things at different layers. Below, "the authority gateway" always means ours and "the Agent Gateway" always means Google's.
+
+**What maya does NOT cover:** cross-scope denial at the authority gateway (that is `rosa`). In maya, the poisoned callback is caught by Model Armor in phase 6; the authority gateway's field-level scope denial (`IdentityDenied` on a denied field) is exercised only by `rosa`. If you need to show that, run rosa as a short second demo after maya completes — ~2 minutes plus its own activation gate, which every scenario now has, and it produces a `denial` audit event with `denied_field` populated.
 
 ---
 
@@ -109,7 +113,7 @@ Run 1 is fast — under a minute. If you are waiting three minutes for fan-out, 
 | 3-fanout-legal_aid | `phase_started` | "Contacting Statewide Legal Aid Collective about Maya's legal aid referral." | — | Concurrent fan-out |
 | 3-fanout-shelter_status | `phase_started` | "Contacting Harborlight Youth Shelter about Maya's shelter placement." | — | Concurrent fan-out |
 | 3-fanout-family_services | `phase_started` | "Contacting Mesa County Family Services about Maya's family services assessment." | — | Concurrent fan-out |
-| 3-fanout-* | `phase_complete` | Names the contact the partner gave, e.g. "David Chen has confirmed Maya's clinic visit.", "Anna Reed has confirmed Maya's legal aid referral." | 20–60s each | Each specialist reads from Gateway, contacts sim partner, submits status |
+| 3-fanout-* | `phase_complete` | Names the contact the partner gave, e.g. "David Chen has confirmed Maya's clinic visit.", "Anna Reed has confirmed Maya's legal aid referral." | 20–60s each | Each specialist reads through the authority gateway, contacts sim partner, submits status |
 | 3-fanout-education_liaison | `phase_complete` | Most often "Lincoln Unified reports Maya's school enrollment is blocked." — rendered as a **red, alert-weight row** with the guardrail note under it | — | The school returns the **poisoned payload**, not `enrollment_found: false`. The liaison's instruction tells it to refuse and report `blocked`. The payload also carries `"status": "unresolved"`, so the model sometimes lands on `unresolved` instead — either is a valid outcome and the rest of the run is unaffected. The referral names no contact, so the line falls back to the organisation |
 | 4-checkpoint | `phase_started` | "Setting a reminder to follow up on anything still open." | — | Durable state |
 | 4-checkpoint | `phase_complete` | "Reminder set — Maya's open commitments will be chased automatically." | 5–15s | Workflow persisted to Firestore |
@@ -170,7 +174,8 @@ Each organisation is named in full the first time the run mentions it and by its
 
 **What to look for in the UI:**
 - Phase `6-quarantine` completes with "That reply reached outside its scope — held for Dana Whitfield."
-- `9-nudge` runs, and then the feed **stops** at the escalation gate. Nothing further happens until you decide. That is the point: a pending safeguarding escalation is the only thing standing between the fleet and `11-memory`, and the engine has no way to clear it itself.
+- `9-nudge` runs, and then the feed **stops** at the escalation gate. Nothing further happens until you decide. That is the point: an undecided safeguarding escalation is the only thing standing between the fleet and `11-memory`, and the engine has no way to clear it itself.
+- **One click is enough**, and it is worth knowing why before you are live. The verifier can open more than one approval record for the same callback, and it used to take a click per record to get past a single safeguarding decision. Both the gate and the `11-memory` precondition now ask whether an escalation has been *decided* rather than whether one is still pending, so one human ruling settles the case. If you click once and the run resumes while a duplicate still shows `pending`, that is the fix working, not a missed approval.
 - The escalation card's body text is the verifier's own `reason` string, served from `GET /v1/approvals` — not portal copy. Reading it aloud off the screen is worth doing.
 - **Reject** is a real branch and it is wired (`decideApproval(..., "reject", ...)`). It also resumes the run, so do not click it expecting nothing to happen.
 
@@ -183,7 +188,7 @@ Each organisation is named in full the first time the run mentions it and by its
 
 ## Verification in Google Cloud after the run
 
-This section doubles as the on-camera proof script. Open each console tab **before** you start recording and leave them parked on the right page — every one of them is slow to first paint, and a run's evidence is easier to narrate over than to hunt for. The order below is the order worth showing: durable state first, then the agents that produced it, then the guardrails.
+This section doubles as the on-camera proof script. Open each console tab **before** you start recording and leave them parked on the right page — every one of them is slow to first paint, and a run's evidence is easier to narrate over than to hunt for. The order below is the order worth showing: durable state first, then the agents that produced it, then the guardrails — finishing on the Agent Gateway and Cloud Trace, which are the two places where something other than CaseRelay vouches for what happened.
 
 ### Firestore (database: `caserelay`, NOT `(default)`)
 
@@ -197,7 +202,7 @@ Navigate to: **Console → Firestore → Select database "caserelay"**
 | `cases/{case_id}/commitments` | 5 docs keyed by type. Education should show `status: "completed"` after a full run — closed by the follow-up in `9-nudge`, not by `8-followup` |
 | `cases/{case_id}` referral packet | The education referral's `contact` starts null and ends as Sarah Miller, Enrollment Coordinator. That write is the escalation ladder's visible result |
 | `cases/{case_id}/authority_grants` | 5 docs. Each has `granted_to` matching an agent identity, `status: "granted"`, and **`granted_by: "advocate"`** — see below |
-| `cases/{case_id}/human_approvals` | 1 doc with `action_type: "escalation"`, `decision: "approve"`, `recipient: "Lincoln Unified School District"`, and **`decided_by: "advocate"`**. A `supervisor_notice` doc appears only on scenarios where a chased provider stayed silent |
+| `cases/{case_id}/human_approvals` | At least one doc with `action_type: "escalation"` — the one you ruled on reads `decision: "approve"`, `recipient: "Lincoln Unified School District"` and **`decided_by: "advocate"`**. **Do not promise exactly one on camera.** The verifier mints a fresh `apr-{uuid4}` on every `open_escalation` call, so a single quarantined callback often leaves duplicate records behind, and the extras stay `pending` forever. That is cosmetic, not a stuck gate: the run asks whether an escalation has been *decided*, not whether one is still pending, so your one click clears it. A `supervisor_notice` doc appears only on scenarios where a chased provider stayed silent |
 | `cases/{case_id}/audit_events` | Multiple docs. Filter for `event_type: "quarantine"` — should have `agent_identity` set. Filter for `event_type: "disclosure"` — each specialist got exactly its `allowed_fields` |
 | `runs/{run_id}` | **Three docs for one maya walkthrough.** The first two are `state: "completed"` with `current_phase: "approved"` — that is `_resume_after_approval` closing out a gated run as it hands over to its successor. The third is the one that ends `done` |
 | `runs/{run_id}/events` | One doc per run event, document id zero-padded to the position it was pushed at, so the collection sorts back into the order the run happened in. Written by the background writer in `backend/runtime/event_log.py`, off the request path |
@@ -298,11 +303,28 @@ Say the honest thing about the other two as well: a maya run invokes six of the 
 
 Open one specialist and show its **Deployment details**: the resource name whose numeric id is the same one in the log query above, and the same id again inside `CASERELAY_IDENTITY_*` on the control plane, which is how each engine's actions get attributed in the audit trail.
 
+The eight ids, for the log queries and the binding check in the Agent Gateway section below:
+
+| Engine | Id |
+|---|---|
+| education | `6205121908900364288` |
+| health | `2657974252392677376` |
+| legal | `3107630527687950336` |
+| shelter | `8689420053348614144` |
+| family | `7993613910919872512` |
+| verifier | `3044580132904763392` |
+| intake | `8701101264882106368` |
+| orchestrator | `1247643881583935488` |
+
+All eight are bound to the Agent Gateway. The binding lives on `spec.deploymentSpec.agentGatewayConfig`; the REST call in the Agent Gateway section below is the shot that proves it.
+
 ### Model Armor
 
 **Console → Security → Model Armor → Templates**, region `us-central1`, template **`caserelay-screen`**.
 
 Show the template configuration: PI and jailbreak detection at `LOW_AND_ABOVE`, malicious URI detection, and the **SDP advanced config** pointing at inspect template `caserelay-cross-scope`. Follow that link into **Sensitive Data Protection → Inspect templates** to show the custom infoTypes (`CASERELAY_CROSS_SCOPE_MEDICAL`, `_LEGAL`, `_FAMILY`) and the hotword proximity rule that requires an action verb within 50 characters. That rule is why "medical notes" in a case summary does not trip the filter but "retrieve Maya's medical notes" does.
+
+**The same template is enforced in two places, which is worth one sentence on camera.** The verifier calls `caserelay-screen` itself in phase 6, and the Agent Gateway's authz extension `caserelay-ma-authz-ext` calls the same template in-line on engine egress. The gateway side is fail-closed — the extension has no `failOpen` field — and you can see it having run: expand any `gateway_requests` entry from the Agent Gateway section below and `jsonPayload.serviceExtensionInfo` names `caserelay-ma-authz-ext` against backend `modelarmor.us-central1.rep.googleapis.com` with `grpcStatus: OK`, broken out per `REQUEST_HEADERS`, `REQUEST_BODY` and `RESPONSE_HEADERS`. One template, screening the agent's own reasoning at the application layer and its traffic at the network layer.
 
 The `sanitize_user_prompt` call itself is a Data Access operation and does not appear in the audit log. Pair two things on screen instead — the portal's `6-quarantine` line, and `cases/{case_id}/audit_events` filtered to `event_type: "quarantine"`, whose `agent_identity` is the verifier engine (`…/reasoningEngines/3044580132904763392`) rather than a generic system actor. The app's own verdict line is in the verifier engine's logs, not the control plane's; the query for it is in the Cloud Logging section above. If you want a request-count graph, Metrics Explorer has `modelarmor.googleapis.com/*` metrics, but it lags several minutes and is not worth waiting for on camera.
 
@@ -322,7 +344,7 @@ Each entry carries a `fact` in plain English, its `scope`, and a `topics` label 
 
 **Be precise about what the recall does.** Writes are real and synchronous (`memories.generate` with `wait_for_completion`), and reads are real semantic searches. But in the run loop the recalled facts are only *narrated* — `_run_background` pushes a `memory_recall` event with previews and does not put them in front of any model. The single path where a recalled memory reaches a model is the `preload_memory` tool in `11-memory`, whose job is to summarise. So nothing the fleet decides currently changes because of what Memory Bank remembered. If a judge asks "what did it do differently because it remembered?", the honest answer today is "nothing yet" — see the strengthening notes before you claim otherwise.
 
-### Agent Registry / Agent Gateway
+### Agent Registry
 
 ```bash
 gcloud alpha agent-registry agents list --project caserelay --location us-central1
@@ -332,13 +354,70 @@ The `caserelay-*-a2a` entries each carry a published A2A **card** — descriptio
 
 **But be careful how you word the runtime claim.** Nothing in a run reads the registry. `SPECIALIST_MODULES` in `backend/agents/orchestrator/agent.py` maps each specialist to a fixed `CASERELAY_URL_*` env var, and `RemoteA2aAgent` resolves the card from that URL. `GET /v1/registry` serves the static `fixtures/cr-1042/agent_cards.json` file, not the live registry. So: "the fleet is published in Agent Registry, and each engine serves the A2A card the registry advertises" is true and demonstrable; "the orchestrator discovers its specialists through the registry" is not. Show one registry card next to the matching `GET …/agent-card.json … 200 OK` log line and describe it as card resolution, which is what the log shows.
 
-Be accurate about the Gateway. `gcloud network-services agent-gateways list` shows **`caserelay-egress`** exists with an mTLS endpoint and a TLS inspection CA, but **the eight reasoning engines are not currently bound to it** — A2A traffic in the demo goes engine-to-engine over authenticated HTTPS, not through the gateway. Show it as provisioned infrastructure if you want, and say plainly that binding the fleet to it is next. Claiming it is in the request path is a claim the logs contradict.
+### Agent Gateway
+
+**The Agent Gateway is in the request path now, and this is the strongest infrastructure claim in the demo.** `gcloud network-services agent-gateways list` shows **`caserelay-egress`** with its mTLS endpoint and TLS inspection CA, and **all eight reasoning engines are bound to it** — each engine's `spec.deploymentSpec.agentGatewayConfig` carries `agentToAnywhereConfig.agentGateway` pointing at `projects/caserelay/locations/us-central1/agentGateways/caserelay-egress`. They were bound in place, so no engine id moved and no Firestore grant changed; the ids in this document and in `infra/pinned_identities.env` are still the right ones. A full maya walkthrough passes with all eight bound, both gates holding and `11-memory` completing.
+
+**Say "egress", not "A2A".** What the gateway governs is what a bound engine calls *outward* — the partner MCP server, Firestore, Vertex, Cloud Trace. The A2A hop runs control-plane-to-engine, and the control plane is not a bound engine, so fan-out traffic still does not traverse the gateway. "Every outbound call the engines make is intercepted and policy-evaluated" is true and demonstrable. "The agents talk to each other through the gateway" is not.
+
+`protocols: ["MCP"]` on the gateway sets *semantic handling*, not proxying scope — a distinction worth having ready, because a judge reading that field may assume only MCP is proxied. MCP requests get their method parsed out of the body and matched against the MCP authz policy; everything else passes as `allowed_as_no_custom_policies_matched_request`. All of it is intercepted either way, which the log query below shows directly.
+
+**Be careful with the word "enforcement" — the four policy slots are not all switched on to the same degree.** Three of the four are in use. The DENY policy `caserelay-deny-mcp-prompts-resources` is live and enforcing, denying MCP `prompts` and `resources` on this gateway. The Model Armor extension `caserelay-ma-authz-ext` is fail-closed — it has no `failOpen` field — and targets template `caserelay-screen`, the same template the verifier calls in phase 6. But the IAP extension `caserelay-iap-authz-ext` is `failOpen: true` with `iamEnforcementMode: DRY_RUN`: it evaluates and logs, and it blocks nothing. Do not narrate IAP as gating anything. The honest sentence — "every engine's egress is intercepted and policy-evaluated, with an MCP deny rule enforcing and IAP deliberately still in dry-run" — is strong enough on its own, and it survives someone reading the extension config back to you.
+
+**The gateway proof shot.** This is the one to record, and it is a single command with a legible table for output. Run it after a maya walkthrough:
+
+```bash
+gcloud logging read \
+  'logName="projects/caserelay/logs/networkservices.googleapis.com%2Fgateway_requests"
+   AND jsonPayload.agentGatewayInfo.mcpInfo.method!=""' \
+  --project caserelay --freshness=1h --limit 5 \
+  --format='table(timestamp,
+                  jsonPayload.agentGatewayInfo.mcpInfo.method,
+                  httpRequest.requestUrl,
+                  jsonPayload.enforcedGatewaySecurityPolicy.requestWasTlsIntercepted,
+                  jsonPayload.authzPolicyInfo.result)'
+```
+
+What comes back is the partner MCP conversation as the gateway saw it — `initialize`, `notifications/initialized`, `tools/list`, `tools/call` — each against `https://caserelay-partners-….run.app/mcp`, each with `REQUEST_WAS_TLS_INTERCEPTED` reading `True` and `RESULT` reading `ALLOWED`. That the `METHOD` column is populated at all is the point worth narrating: the gateway opened the TLS session, parsed the JSON-RPC body, recognised the MCP method by name and ruled on it. It is not proxying bytes it cannot read.
+
+The same view in the console is **Logging → Logs Explorer** with:
+
+```
+logName="projects/caserelay/logs/networkservices.googleapis.com%2Fgateway_requests"
+resource.labels.gateway_name="caserelay-egress"
+jsonPayload.agentGatewayInfo.mcpInfo.method!=""
+```
+
+Expand one entry and the fields worth pointing at are `jsonPayload.enforcedGatewaySecurityPolicy.requestWasTlsIntercepted: true`, `jsonPayload.agentGatewayInfo.mcpInfo.method`, the `authzPolicyInfo.policies` list naming `caserelay-iap-authz-policy` and `caserelay-ma-authz-policy`, and `httpRequest.userAgent: python-httpx2/2.12.0` — which is the engine's own HTTP client, not a proxy's.
+
+Drop the `mcpInfo.method` line from either filter and you get everything else the engines emit, which is the wider claim: Firestore gRPC (`google.firestore.v1.Firestore/RunQuery`, `Commit`, `BatchGetDocuments` from `grpc-python/1.83.1`) and Vertex (`aiplatform.mtls.googleapis.com/…:generateContent`) both intercepted, status 200. Non-MCP traffic carries no `mcpInfo` because there is no MCP method to parse — not because it bypassed the gateway.
+
+Confirm the binding itself on camera with:
+
+```bash
+curl -s -H "Authorization: Bearer $(gcloud auth print-access-token)" \
+  "https://us-central1-aiplatform.googleapis.com/v1beta1/projects/caserelay/locations/us-central1/reasoningEngines/3044580132904763392" \
+  | python3 -c "import sys,json;print(json.load(sys.stdin)['spec']['deploymentSpec']['agentGatewayConfig'])"
+```
+
+That is the verifier; substitute any of the eight ids from the table in the Vertex AI Agent Runtime section above. There is no `gcloud ai reasoning-engines describe` — the REST call is the only way to read this field, so do not go hunting for a gcloud shorthand mid-recording.
 
 ### Cloud Trace
 
-**Not demo-safe right now — skip it.** Traces for this project currently list with zero spans; the trace ids stamped on run events return `404 NOT_FOUND` from the Trace API. On camera that reads as a broken integration rather than an incomplete one.
+**This section used to say "skip it, the traces have no spans." That is no longer true**, and the shot it unlocks is arguably the best one in the tour — because the Agent Gateway, not CaseRelay, is what writes it.
 
-If it gets fixed, the shot is `https://console.cloud.google.com/traces/list?project=caserelay&tid={trace_id}` using the `trace_id` from the UI's "Run Complete" card, showing ADK spans (`invoke_agent`, `call_llm`, `execute_tool`) with `gen_ai.*` attributes and token counts, plus `caserelay.gateway` spans carrying `caserelay.case_id`, `caserelay.commitment_type` and `caserelay.workflow_id`. Even then, control-plane and engine traces do NOT share a trace id — Agent Runtime starts a fresh trace context rather than honouring the incoming `traceparent` — so the gateway spans and the ADK agent spans land in two separate traces.
+A partner MCP call renders as a four-span waterfall: `MCP send tools/call family_status` as the `RPC_CLIENT` root, `apply_guardrail "Google Cloud Model Armor"` as an `RPC_SERVER` span underneath it, and `Request Path` and `Response Path` under that. The `Request Path` span is labelled `gen_ai.security.policy.name: caserelay-screen`, `gen_ai.security.decision.type: allow`, and `gcp.modelarmor.filter.match.state: NO_MATCH_FOUND`. One screen showing an agent's MCP tool call, the guardrail that ran inside it, the policy consulted by name and the ruling it returned — and none of those spans are ours. Pull it deterministically:
+
+```bash
+curl -s -G -H "Authorization: Bearer $(gcloud auth print-access-token)" \
+  --data-urlencode 'filter=span:"MCP send"' \
+  --data-urlencode 'view=COMPLETE' \
+  --data-urlencode 'pageSize=1' \
+  "https://cloudtrace.googleapis.com/v1/projects/caserelay/traces" \
+  | python3 -m json.tool
+```
+
+**Do not build the shot on the trace id from the UI's "Run Complete" card.** Those still resolve only sometimes — of three sampled from `runs/{run_id}.trace_id`, one returned spans and two returned `404 NOT_FOUND`. Look the trace up by span filter as above, or browse `https://console.cloud.google.com/traces/list?project=caserelay`. Control-plane and engine traces also still do NOT share a trace id — Agent Runtime starts a fresh trace context rather than honouring the incoming `traceparent` — so CaseRelay's own `caserelay.gateway` spans (that is the authority gateway, ours) and the ADK agent spans land in separate traces from each other and from the Agent Gateway's.
 
 ---
 
@@ -361,6 +440,8 @@ If it gets fixed, the shot is `https://console.cloud.google.com/traces/list?proj
 | `10-unanswered` never fires on maya | **Normal.** Its precondition needs a chased provider that stayed silent, and the district answers its follow-up. Run `priya` to see it. |
 | Run 2 never reaches `6-quarantine` and ends `partial_failure` with education `blocked` | **Almost always the deadline.** Check `due_in` on the case: at anything above ~`10s` the earliest per-commitment checkpoint is not due when `5-wake` asks, so nothing wakes, `_awake` stays false and the quarantine/nudge phases never become ready. Re-run at `10s`. The sweep may fire the checkpoints a minute later and start a Pub/Sub wake that does reach them, so the arc can still complete one run late — but do not rely on that on camera, and do not raise the deadline to "look realistic". |
 | Approving returns `400 supervisor_id is required` | **Broken.** The portal always sends one; a 400 means the request did not come from the gate card. |
+| Run 3 starts, but a `pending` escalation is still listed on the case | **Normal.** The verifier mints duplicate approval records; the gate and `11-memory` both key off whether an escalation has been decided, so one ruling releases the run and the leftovers are inert. |
+| A gateway log query returns nothing | **Check the freshness window, not the binding.** `gateway_requests` only has entries when a bound engine made an outbound call, so it is empty until a run has actually reached fan-out. Widen `--freshness` before concluding anything is unbound. |
 
 ---
 
@@ -379,3 +460,5 @@ If it gets fixed, the shot is `https://console.cloud.google.com/traces/list?proj
 6. **The red `blocked` row in fan-out carries a note that is one phase early.** When education comes back `blocked`, the feed appends a fixed line — "Their reply asked for medical records while answering a question about enrollment, so it was held back and passed to your supervisor" (`GUARDRAIL_NOTE` in `portal/src/lib/case-events.ts`). At `3-fanout-education_liaison` nothing has been passed to a supervisor yet; that happens at `6-quarantine`. The note is right about the case and early about the sequence.
 
 7. **The gate cards only exist on `/cases/{caseId}`.** The admin page streams the run but has no approval control and no link to the case, so the handover between the two pages is manual. Have the case id ready, or start the run from the chat panel, which routes there for you.
+
+8. **One quarantine can leave several escalation approval records behind.** The verifier mints a fresh `apr-{uuid4}` on every `open_escalation` call, so `cases/{case_id}/human_approvals` may hold duplicates, all but one still `pending`. It no longer costs you a click — the gate and the `11-memory` precondition both key off whether an escalation has been *decided* — but it does mean you should not promise "exactly one approval record" while a Firestore panel is on screen. Fixing the minting itself needs a fleet redeploy, because it lives in the verifier's engine image.
