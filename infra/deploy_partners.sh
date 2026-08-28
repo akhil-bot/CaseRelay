@@ -60,11 +60,11 @@ if [ "$REGISTER_ONLY" -eq 0 ]; then
     --format="value(status.url)")
   echo "  Deployed: ${PARTNER_URL}"
 else
-  PARTNER_URL=$(gcloud run services describe "${SERVICE_NAME}" \
+  if ! PARTNER_URL=$(gcloud run services describe "${SERVICE_NAME}" \
     --project="${PROJECT}" --region="${REGION}" \
-    --format="value(status.url)" 2>/dev/null || echo "")
-  if [ -z "$PARTNER_URL" ]; then
-    echo "FATAL: service not deployed yet, cannot register" >&2
+    --format="value(status.url)" 2>&1); then
+    echo "FATAL: cannot resolve ${SERVICE_NAME}, so there is nothing to register" >&2
+    echo "  ${PARTNER_URL}" >&2
     exit 1
   fi
 fi
@@ -82,24 +82,49 @@ PARTNERS=(
   "family|CaseRelay Family Services Partner (Mesa County)"
 )
 
+reg_ok=0
+reg_fail=0
+
 for entry in "${PARTNERS[@]}"; do
   IFS='|' read -r key display <<<"$entry"
   svc_name="caserelay-partner-${key}"
   mcp_url="${PARTNER_URL}/mcp"
 
   echo "  Registering: ${svc_name} -> ${mcp_url}"
-  gcloud agent-registry services create "${svc_name}" \
+  # no-spec, not tool-spec: tool-spec makes --mcp-server-spec-content mandatory. The entry
+  # exists to give IAP a per-resource handle; the CEL conditions in infra/policies read
+  # toolName and readOnlyHint off the live request, not off a registered spec.
+  #
+  # create returns ALREADY_EXISTS on re-run, which is the normal path, so fall through to
+  # update. Only report the create error if the update fails too.
+  if create_out=$(gcloud agent-registry services create "${svc_name}" \
     --project="${PROJECT}" --location="${REGION}" \
     --display-name="${display}" \
-    --mcp-server-spec-type=tool-spec \
+    --mcp-server-spec-type=no-spec \
     --interfaces=url="${mcp_url}",protocolBinding=jsonrpc \
-    --format="value(name)" 2>/dev/null || \
-  gcloud agent-registry services update "${svc_name}" \
+    --format="value(name)" 2>&1); then
+    echo "    created: ${create_out}"
+    reg_ok=$((reg_ok + 1))
+  elif update_out=$(gcloud agent-registry services update "${svc_name}" \
     --project="${PROJECT}" --location="${REGION}" \
     --interfaces=url="${mcp_url}",protocolBinding=jsonrpc \
-    --format="value(name)" 2>/dev/null || \
-  echo "    WARNING: registry update failed for ${svc_name} (may need manual fix)"
+    --format="value(name)" 2>&1); then
+    echo "    updated: ${update_out}"
+    reg_ok=$((reg_ok + 1))
+  else
+    echo "    FAIL: ${svc_name}" >&2
+    echo "      create: ${create_out}" >&2
+    echo "      update: ${update_out}" >&2
+    reg_fail=$((reg_fail + 1))
+  fi
 done
+
+echo ""
+echo "=== registration summary: ${reg_ok} OK, ${reg_fail} failed ==="
+if [ "$reg_fail" -ne 0 ]; then
+  echo "FATAL: ${reg_fail} partner registration(s) failed" >&2
+  exit 1
+fi
 
 echo ""
 echo "=== IAP Grants (per-resource, per-agent) ==="
