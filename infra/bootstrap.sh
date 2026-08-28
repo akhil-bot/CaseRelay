@@ -176,11 +176,16 @@ fi
 echo "=== Memory Bank IAM ==="
 MB_SA="service-${PROJECT_NUMBER}@gcp-sa-aiplatform-re.iam.gserviceaccount.com"
 # The control plane service account needs memoryUser to call Memory Bank.
-# Grant is idempotent — re-applying the same binding is a no-op.
-gcloud projects add-iam-policy-binding "$PROJECT" \
+# Grant is idempotent — re-applying the same binding is a no-op. Idempotent means a repeat
+# succeeds, though, not that a failure is harmless: without this role Memory Bank calls
+# 403 at runtime, so report what went wrong rather than discarding it.
+if ! MB_GRANT=$(gcloud projects add-iam-policy-binding "$PROJECT" \
   --member="serviceAccount:${MB_SA}" \
   --role="roles/aiplatform.memoryUser" \
-  --condition=None --quiet 2>/dev/null || true
+  --condition=None --quiet 2>&1); then
+  echo "WARNING: could not grant memoryUser to ${MB_SA} — Memory Bank calls will 403" >&2
+  echo "  $MB_GRANT" >&2
+fi
 
 echo "=== chat Sessions engine ==="
 # Agent Platform Sessions are hosted by an Agent Engine. The chat agent gets its own

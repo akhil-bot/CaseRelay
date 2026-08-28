@@ -81,11 +81,19 @@ echo "=== resolving partner MCP server registry IDs ==="
 # applying to all of them makes the outcome independent of duplicate-URL behaviour.
 # Built with a read loop rather than mapfile so this runs on macOS's bash 3.2.
 MCP_SERVER_IDS=()
+# Captured rather than piped straight into the loop so a failed list is distinguishable
+# from an empty one. Both used to render as "none registered", which would silently skip
+# the per-agent IAM step and leave you believing isolation had been applied.
+if ! MCP_LIST=$(gcloud agent-registry mcp-servers list \
+  --project="$PROJECT" --location="$REGION" \
+  --format="value(name.basename())" 2>&1); then
+  echo "refusing: could not list MCP servers" >&2
+  echo "  $MCP_LIST" >&2
+  exit 1
+fi
 while IFS= read -r _id; do
   [[ -n "$_id" ]] && MCP_SERVER_IDS+=("$_id")
-done < <(gcloud agent-registry mcp-servers list \
-  --project="$PROJECT" --location="$REGION" \
-  --format="value(name.basename())" 2>/dev/null || true)
+done <<<"$MCP_LIST"
 if [[ ${#MCP_SERVER_IDS[@]} -eq 0 ]]; then
   echo "  (none registered — the partner IAM step will be skipped)"
 else
