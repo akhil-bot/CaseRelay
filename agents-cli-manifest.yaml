@@ -1,0 +1,28 @@
+# Project manifest read by agents-cli (google.agents.cli._project.read_project_config).
+#
+# Hand-written rather than generated. `agents-cli scaffold enhance . --agent-gateway`
+# would produce the same agent_gateway flag but also runs `uv add` on five packages,
+# and the `gcp` extra on google-adk downgrades google-cloud-aiplatform 2.0.1 -> 1.165.1.
+# The control-plane image installs straight from pyproject.toml, so that downgrade
+# would ship to production.
+#
+# agent_gateway: true is what lets `agents-cli deploy --agent-gateway-egress` past the
+# _require_gateway_ready_project() guard. The guard checks this flag as a proxy for the
+# image trusting the gateway's root CA; the Dockerfile does that already via the
+# AGENT_GATEWAY_ROOT_CERTIFICATES build arg the platform injects.
+#
+# region must stay us-central1 — the whole fleet lives there and the scaffold default is
+# us-east1. deploy_fleet.sh passes --region explicitly, so this only governs bare
+# `agents-cli` invocations, where the wrong value would be a trap.
+name: "caserelay"
+acli_version: "1.4.0"
+agent_directory: "app"
+region: "us-central1"
+base_template: "adk"
+language: "python"
+create_params:
+  deployment_target: "agent_runtime"
+  session_type: "none"
+  cicd_runner: "skip"
+  is_a2a: true
+  agent_gateway: true
