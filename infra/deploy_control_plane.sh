@@ -179,10 +179,16 @@ echo "    when a sync hook was registered; /health cannot catch this"
 
 # Mint with retry — a transient gcloud auth failure returns an empty string;
 # an empty bearer token produces HTTP 401 indistinguishable from a bad audience.
+#
+# --audiences only works when the active credential is a service account; gcloud
+# refuses it outright on a user account ("Invalid account type for --audiences").
+# Cloud Run accepts a plain user identity token, so fall back to one rather than
+# failing an otherwise healthy deploy on whose credentials happened to run it.
 MINT_ERR=$(mktemp)
 TOKEN=""
 for _mint_i in 1 2 3; do
-  TOKEN=$(gcloud auth print-identity-token --audiences="$SERVICE_URL" 2>"$MINT_ERR" || true)
+  TOKEN=$(gcloud auth print-identity-token --audiences="$SERVICE_URL" 2>"$MINT_ERR" \
+    || gcloud auth print-identity-token 2>>"$MINT_ERR" || true)
   [ -n "$TOKEN" ] && break
   echo "  token mint attempt ${_mint_i}/3 failed" >&2
   cat "$MINT_ERR" >&2
