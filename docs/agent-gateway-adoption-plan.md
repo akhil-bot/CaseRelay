@@ -159,21 +159,19 @@ Surface A with a CEL condition. Verified format:
 
 ```json
 {
-  "policy": {
-    "bindings": [
-      {
-        "role": "roles/iap.egressor",
-        "members": [
-          "principal://agents.global.org-126484209344.system.id.goog/resources/aiplatform/projects/189353698936/locations/us-central1/reasoningEngines/3044580132904763392"
-        ],
-        "condition": {
-          "title": "VerifierReadOnlyOnPartners",
-          "description": "The safeguarding verifier may only invoke read-only partner tools.",
-          "expression": "api.getAttribute('iap.googleapis.com/request.auth.type', '') == 'MCP' && (api.getAttribute('iap.googleapis.com/mcp.tool.isReadOnly', false) == true || api.getAttribute('iap.googleapis.com/mcp.toolName', '') == '')"
-        }
+  "bindings": [
+    {
+      "role": "roles/iap.egressor",
+      "members": [
+        "principal://agents.global.org-126484209344.system.id.goog/resources/aiplatform/projects/189353698936/locations/us-central1/reasoningEngines/3044580132904763392"
+      ],
+      "condition": {
+        "title": "VerifierReadOnlyOnPartners",
+        "description": "The safeguarding verifier may only invoke read-only partner tools.",
+        "expression": "api.getAttribute('iap.googleapis.com/request.auth.type', '') == 'MCP' && (api.getAttribute('iap.googleapis.com/mcp.tool.isReadOnly', false) == true || api.getAttribute('iap.googleapis.com/mcp.toolName', '') == '')"
       }
-    ]
-  }
+    }
+  ]
 }
 ```
 
@@ -629,23 +627,21 @@ While IAP is in `DRY_RUN`, missing grants log but do not block. Start registry-w
 ```bash
 cat > /tmp/caserelay-registry-egress.json <<'EOF'
 {
-  "policy": {
-    "bindings": [
-      {
-        "role": "roles/iap.egressor",
-        "members": [
-          "principal://agents.global.org-126484209344.system.id.goog/resources/aiplatform/projects/189353698936/locations/us-central1/reasoningEngines/1247643881583935488",
-          "principal://agents.global.org-126484209344.system.id.goog/resources/aiplatform/projects/189353698936/locations/us-central1/reasoningEngines/6205121908900364288",
-          "principal://agents.global.org-126484209344.system.id.goog/resources/aiplatform/projects/189353698936/locations/us-central1/reasoningEngines/2657974252392677376",
-          "principal://agents.global.org-126484209344.system.id.goog/resources/aiplatform/projects/189353698936/locations/us-central1/reasoningEngines/3107630527687950336",
-          "principal://agents.global.org-126484209344.system.id.goog/resources/aiplatform/projects/189353698936/locations/us-central1/reasoningEngines/8689420053348614144",
-          "principal://agents.global.org-126484209344.system.id.goog/resources/aiplatform/projects/189353698936/locations/us-central1/reasoningEngines/7993613910919872512",
-          "principal://agents.global.org-126484209344.system.id.goog/resources/aiplatform/projects/189353698936/locations/us-central1/reasoningEngines/3044580132904763392",
-          "principal://agents.global.org-126484209344.system.id.goog/resources/aiplatform/projects/189353698936/locations/us-central1/reasoningEngines/8701101264882106368"
-        ]
-      }
-    ]
-  }
+  "bindings": [
+    {
+      "role": "roles/iap.egressor",
+      "members": [
+        "principal://agents.global.org-126484209344.system.id.goog/resources/aiplatform/projects/189353698936/locations/us-central1/reasoningEngines/1247643881583935488",
+        "principal://agents.global.org-126484209344.system.id.goog/resources/aiplatform/projects/189353698936/locations/us-central1/reasoningEngines/6205121908900364288",
+        "principal://agents.global.org-126484209344.system.id.goog/resources/aiplatform/projects/189353698936/locations/us-central1/reasoningEngines/2657974252392677376",
+        "principal://agents.global.org-126484209344.system.id.goog/resources/aiplatform/projects/189353698936/locations/us-central1/reasoningEngines/3107630527687950336",
+        "principal://agents.global.org-126484209344.system.id.goog/resources/aiplatform/projects/189353698936/locations/us-central1/reasoningEngines/8689420053348614144",
+        "principal://agents.global.org-126484209344.system.id.goog/resources/aiplatform/projects/189353698936/locations/us-central1/reasoningEngines/7993613910919872512",
+        "principal://agents.global.org-126484209344.system.id.goog/resources/aiplatform/projects/189353698936/locations/us-central1/reasoningEngines/3044580132904763392",
+        "principal://agents.global.org-126484209344.system.id.goog/resources/aiplatform/projects/189353698936/locations/us-central1/reasoningEngines/8701101264882106368"
+      ]
+    }
+  ]
 }
 EOF
 
