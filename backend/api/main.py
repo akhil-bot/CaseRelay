@@ -413,7 +413,7 @@ def decide_approval(approval_id: str, body: dict[str, Any]) -> dict:
     for case_id in workspace.cases:
         for a in workspace.list_approvals(case_id):
             if str(a.get("approval_id")) == approval_id:
-                result = workspace.decide_approval(case_id, decision, decided_by)
+                result = workspace.decide_approval(case_id, decision, decided_by, approval_id)
                 if note:
                     result["note"] = note
                 _resume_after_approval(case_id, str(a.get("action_type") or "escalation"))

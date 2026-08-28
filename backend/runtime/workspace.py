@@ -257,17 +257,29 @@ class Workspace:
             store.append_row(case_id, "human_approvals", approval, str(approval["approval_id"]))
             return approval
 
-    def decide_approval(self, case_id: str, decision: str, decided_by: str) -> dict[str, Any]:
+    def decide_approval(
+        self, case_id: str, decision: str, decided_by: str, approval_id: str
+    ) -> dict[str, Any]:
+        """Record a human decision against one named approval.
+
+        Matched by id, never by position. A case can hold several pending approvals at
+        once — safeguarding escalations alongside an unrelated supervisor notice — so
+        deciding the most recently appended record would attribute the operator's ruling
+        to whichever one happened to land last. An approval that has already been decided
+        is returned untouched, so a repeated POST cannot rewrite the first ruling.
+        """
         with self._lock_for(case_id):
             self.load(case_id)
-            pending = [a for a in self.approvals.get(case_id, []) if a.get("decision") == "pending"]
-            if not pending:
-                return {"decision": "none"}
-            approval = pending[-1]
-            approval["decision"] = decision
-            approval["decided_by"] = decided_by
-            store.append_row(case_id, "human_approvals", approval, str(approval["approval_id"]))
-            return approval
+            for approval in self.approvals.get(case_id, []):
+                if str(approval.get("approval_id")) != str(approval_id):
+                    continue
+                if approval.get("decision") != "pending":
+                    return approval
+                approval["decision"] = decision
+                approval["decided_by"] = decided_by
+                store.append_row(case_id, "human_approvals", approval, str(approval["approval_id"]))
+                return approval
+            return {"decision": "none"}
 
     def list_approvals(self, case_id: str) -> list[dict[str, Any]]:
         with self._lock_for(case_id):
