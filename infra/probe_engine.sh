@@ -127,7 +127,7 @@ if gw is None:
 elif not gw or (isinstance(gw, dict) and not any(gw.values())):
     status = 'EMPTY'
 else:
-    has_ref = any(v for v in gw.values() if v and 'agentGateway' in str(v).lower())
+    has_ref = any(v for v in gw.values() if v and 'agentgateway' in str(v).lower())
     status = 'BOUND' if has_ref else 'EMPTY'
 print(status)
 print(raw)
@@ -197,18 +197,20 @@ A2A_BASE="https://${REGION}-aiplatform.googleapis.com/reasoningEngines/v1/${RESO
 
 _verbose "sending health probe task (case=$PROBE_CASE) to $A2A_BASE"
 
-# Use the tasks/send endpoint to invoke the agent synchronously
+# JSON-RPC goes to the A2A base path — there is no /tasks/send route, and the
+# method is message/send (matches backend/runtime/a2a_client.send, the client the
+# fleet actually uses). Posting elsewhere returns 404 before the agent ever runs.
 PROBE_PAYLOAD=$(python3 -c "
 import json
 payload = {
     'jsonrpc': '2.0',
-    'method': 'tasks/send',
+    'method': 'message/send',
     'id': 'probe-health-01',
     'params': {
-        'id': 'probe-health-01',
         'message': {
             'role': 'user',
-            'parts': [{'text': 'For case $PROBE_CASE, run get_authorized_context now. Report the result exactly.'}]
+            'parts': [{'kind': 'text', 'text': 'For case $PROBE_CASE, run get_authorized_context now. Report the result exactly.'}],
+            'messageId': 'probe-health-01'
         }
     }
 }
@@ -221,7 +223,7 @@ PROBE_HTTP=$(curl -s -o "$PROBE_BODY" -w "%{http_code}" \
   -H "Content-Type: application/json" \
   --max-time 120 \
   -d "$PROBE_PAYLOAD" \
-  "${A2A_BASE}/tasks/send" 2>/dev/null) || PROBE_HTTP="000"
+  "${A2A_BASE}" 2>/dev/null) || PROBE_HTTP="000"
 
 _verbose "probe HTTP: $PROBE_HTTP"
 
