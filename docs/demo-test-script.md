@@ -35,7 +35,9 @@ The portal's BFF proxy (`/api/control-plane/[...path]`) forwards all traffic ser
 ## Click path
 
 1. Navigate to **http://localhost:3000/admin** (the "Synthetic Data Lab" card loads).
-2. Set the **Deadline** field to `45s` (compresses the wake timer so it fires in-run rather than 17 real days).
+2. Set the **Deadline** field to `10s` (compresses the wake timer so it fires in-run rather than 17 real days).
+
+> **Use `10s`, and do not raise it.** `schedule_commitment_checkpoints` spaces the five per-commitment wakes proportionally across the window it is given, at `now + due_in × (i+1)/5`, and it computes them during `4-checkpoint`. `5-wake` asks for due checkpoints a few seconds later. At `10s` the earliest wake is due at +2s, so it has already fired and the run continues through `6-quarantine` and `9-nudge`. At `45s` the earliest is not due until +9s — several seconds *after* `5-wake` has already asked — so nothing wakes, `_awake` stays false, the quarantine and nudge phases never become ready, and the run ends `partial_failure`. A longer deadline looks more realistic and reliably breaks the demo.
 3. Under **Complex**, click the **Maya** card ("Flagship — stalled enrollment, cross-scope callback, quarantine, approval, close").
 4. The "Case CR-XXXX" card appears with scenario details and a due timestamp. **Write the case id down** — you will need it in the address bar twice.
 5. Click **"Run the fleet"**.
@@ -63,9 +65,9 @@ Open the CopilotKit chat panel on the admin page. These prompts exercise the thr
 | # | Prompt to type | Expected behaviour | Underlying tool |
 |---|---|---|---|
 | 1 | "What scenarios are available?" | Returns a list of 9 scenarios with id, child_name, complexity, title | `list_scenarios` |
-| 2 | "Create a case for maya with deadline 45s" | Returns case_id, scenario "maya", due_at ~45s from now | `create_case` (params: scenario="maya", due_in="45s") |
+| 2 | "Create a case for maya with deadline 10s" | Returns case_id, scenario "maya", due_at ~10s from now | `create_case` (params: scenario="maya", due_in="10s") |
 | 3 | "Run it" | Submits the run, then **routes you to `/cases/CR-XXXX` after ~1.5s** — which is where the gate card appears | `start_outreach` (params: case_ref="it" → resolves to most recent case) |
-| 4 | "Create a case for rosa with deadline 45s" | Returns a new case_id for the rosa scenario | `create_case` (params: scenario="rosa", due_in="45s") |
+| 4 | "Create a case for rosa with deadline 10s" | Returns a new case_id for the rosa scenario | `create_case` (params: scenario="rosa", due_in="10s") |
 | 5 | "Run rosa's case" | Starts outreach for the rosa case and routes to it | `start_outreach` (params: case_ref="rosa") |
 
 **Prefer this over the admin "Run the fleet" button.** `start_outreach` navigates to the case detail page for you, so you are already on the page the approval card renders on when the run parks. The admin button leaves you on a page with no approval control and no link out.
@@ -76,7 +78,7 @@ Note: prompts 4–5 are optional and only needed if you want to demo cross-scope
 
 ---
 
-## Phase-by-phase expected events (maya, deadline=45s)
+## Phase-by-phase expected events (maya, deadline=10s)
 
 The event log renders the `message` field from each event. These strings come from `_Narrator.line` in `backend/api/main.py`, which resolves organisations and people from this case's referral packet rather than from a template — so the wording below is what CR-1042's packet produces, with Maya as the child, Dana Whitfield as the supervisor and the Nguyen household as the placement.
 
@@ -226,15 +228,33 @@ resource.labels.service_name="caserelay-control-plane"
 textPayload:"in appends"
 ```
 
-gives you one line per orchestrator turn — `INFO caserelay.invoke: session … (continuity_orchestrator/…): 14 events, 0.42s in appends, 0 not persisted` — which is the Agent Platform Sessions write path, per turn, with its cost. And:
+gives you one line per orchestrator turn — `INFO caserelay.invoke: session … (continuity_orchestrator/…): 14 events, 0.42s in appends, 0 not persisted` — which is the Agent Platform Sessions write path, per turn, with its cost.
+
+**Do not look for the Model Armor verdict on the control plane.** `screen()` is called from `backend/agents/verifier/agent.py`, which runs inside the **verifier engine** — so `INFO backend.gateway.armor: Model Armor quarantine: ['sdp']` is written by that Reasoning Engine and a control-plane query for it returns nothing at all. On camera an empty result panel reads as a broken guardrail, which is the opposite of the point.
+
+Show the **quarantine audit event** instead. It is the durable artefact of the same decision, it carries the deciding agent's identity, and it cannot come back empty if the run reached `6-quarantine`:
 
 ```
-resource.type="cloud_run_revision"
-resource.labels.service_name="caserelay-control-plane"
+cases/{case_id}/audit_events   filtered to   event_type: "quarantine"
+```
+
+in Firestore, or over the API:
+
+```bash
+curl -s -H "Authorization: Bearer $(gcloud auth print-access-token)" \
+  "$(cat infra/control_plane_url.txt)/v1/cases/CR-XXXXXXXXXX/audit" \
+  | python3 -m json.tool
+```
+
+The event's `agent_identity` is the verifier engine's platform-managed principal (`…/reasoningEngines/3044580132904763392`), not a generic system actor — which is the claim worth making: a named agent took the enforcement decision and the record says which one.
+
+If you do want the log line itself, query the engine that wrote it:
+
+```
+resource.type="aiplatform.googleapis.com/ReasoningEngine"
+resource.labels.reasoning_engine_id="3044580132904763392"
 textPayload:"Model Armor quarantine"
 ```
-
-fires exactly once per maya run, at `6-quarantine`, reading `INFO backend.gateway.armor: Model Armor quarantine: ['sdp']`. That is the enforcement decision itself in the log, timestamped against the portal line you are showing. Have this query typed and run before you start; it returns one row and it is the row that matters.
 
 **Control plane, run traffic only:**
 
@@ -284,7 +304,7 @@ Open one specialist and show its **Deployment details**: the resource name whose
 
 Show the template configuration: PI and jailbreak detection at `LOW_AND_ABOVE`, malicious URI detection, and the **SDP advanced config** pointing at inspect template `caserelay-cross-scope`. Follow that link into **Sensitive Data Protection → Inspect templates** to show the custom infoTypes (`CASERELAY_CROSS_SCOPE_MEDICAL`, `_LEGAL`, `_FAMILY`) and the hotword proximity rule that requires an action verb within 50 characters. That rule is why "medical notes" in a case summary does not trip the filter but "retrieve Maya's medical notes" does.
 
-The `sanitize_user_prompt` call itself is a Data Access operation and does not appear, but the app's own verdict now does: the `Model Armor quarantine: ['sdp']` query above returns it. Pair three things on screen — that log line, the portal's `6-quarantine` line, and `cases/{case_id}/audit_events` filtered to `event_type: "quarantine"`, whose `agent_identity` is the verifier engine (`…/reasoningEngines/3044580132904763392`) rather than a generic system actor. If you want a request-count graph, Metrics Explorer has `modelarmor.googleapis.com/*` metrics, but it lags several minutes and is not worth waiting for on camera.
+The `sanitize_user_prompt` call itself is a Data Access operation and does not appear in the audit log. Pair two things on screen instead — the portal's `6-quarantine` line, and `cases/{case_id}/audit_events` filtered to `event_type: "quarantine"`, whose `agent_identity` is the verifier engine (`…/reasoningEngines/3044580132904763392`) rather than a generic system actor. The app's own verdict line is in the verifier engine's logs, not the control plane's; the query for it is in the Cloud Logging section above. If you want a request-count graph, Metrics Explorer has `modelarmor.googleapis.com/*` metrics, but it lags several minutes and is not worth waiting for on camera.
 
 ### Memory Bank
 
@@ -339,7 +359,7 @@ If it gets fixed, the shot is `https://console.cloud.google.com/traces/list?proj
 | `6-quarantine` never fires | **Broken.** The `inject_callback` flag is probably not set on the case. Verify the scenario was "maya" not a generic create. |
 | `8-followup` never fires | **Normal.** `9-nudge` closed education before the escalation gate, so the scoped re-request has nothing left to ask. |
 | `10-unanswered` never fires on maya | **Normal.** Its precondition needs a chased provider that stayed silent, and the district answers its follow-up. Run `priya` to see it. |
-| Run 2 never reaches `6-quarantine` and ends with education `blocked` | **Timing, and it recovers.** `5-wake` calls `wake_workflow` seconds after `4-checkpoint` wrote the per-commitment checkpoints, so if none has come due yet nothing wakes, `_awake` stays false and the quarantine/nudge phases are not ready. The sweep fires the checkpoints a minute later and a Pub/Sub wake starts another run that does reach them — so the arc completes, just one run later than the table above. Requires the sweep to be running against whichever control plane holds the case. |
+| Run 2 never reaches `6-quarantine` and ends `partial_failure` with education `blocked` | **Almost always the deadline.** Check `due_in` on the case: at anything above ~`10s` the earliest per-commitment checkpoint is not due when `5-wake` asks, so nothing wakes, `_awake` stays false and the quarantine/nudge phases never become ready. Re-run at `10s`. The sweep may fire the checkpoints a minute later and start a Pub/Sub wake that does reach them, so the arc can still complete one run late — but do not rely on that on camera, and do not raise the deadline to "look realistic". |
 | Approving returns `400 supervisor_id is required` | **Broken.** The portal always sends one; a 400 means the request did not come from the gate card. |
 
 ---
