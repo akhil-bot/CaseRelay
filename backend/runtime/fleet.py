@@ -146,6 +146,17 @@ def _pending_escalation(case_id: str) -> bool:
     )
 
 
+def _escalation_blocking(case_id: str) -> bool:
+    """An escalation is still waiting for its first human decision.
+
+    The verifier can open more than one approval record for a single quarantined
+    callback, so a pending record is not by itself evidence that nobody has ruled. One
+    decision settles the question for the whole case: surviving duplicates must not
+    re-park the run for a second click, nor keep the closing memory phase from running.
+    """
+    return _pending_escalation(case_id) and not _escalation_decided(case_id)
+
+
 def _checkpoint_awake_and_has_inject(case_id: str) -> bool:
     """An injected callback is waiting to be screened and has not been screened before.
 
@@ -180,9 +191,9 @@ def _followup_went_unanswered(case_id: str) -> bool:
     return bool(unanswered(case_id))
 
 
-def _checkpoint_awake_no_pending_escalation(case_id: str) -> bool:
+def _checkpoint_awake_and_escalation_settled(case_id: str) -> bool:
     """Wake has fired and no escalation is blocking — safe to write final memory."""
-    return _awake(case_id) and not _pending_escalation(case_id)
+    return _awake(case_id) and not _escalation_blocking(case_id)
 
 
 def awaiting_supervisor(case_id: str) -> str | None:
@@ -194,7 +205,7 @@ def awaiting_supervisor(case_id: str) -> str | None:
     """
     if _case_draft_with_commitments(case_id):
         return "activation"
-    if _pending_escalation(case_id):
+    if _escalation_blocking(case_id):
         return "escalation"
     return None
 
@@ -283,7 +294,7 @@ PHASE_REGISTRY: list[PhaseSpec] = [
             "Close the loop for case {case_id}: call preload_memory, then summarize every "
             "commitment status and which fields were withheld from each specialist."
         ),
-        precondition=_checkpoint_awake_no_pending_escalation,
+        precondition=_checkpoint_awake_and_escalation_settled,
         priority=80,
         tools=("preload_memory",),
     ),
