@@ -92,7 +92,7 @@ def school_status(referral_id: str, case_id: str | None = None) -> dict:
             "school_name": "Lincoln High School",
             "note": "Seat confirmed.",
         }
-    if behaviour in ("stalled", "inject"):
+    if behaviour in ("stalled", "inject", "defer_then_inject"):
         return {
             "system": "lincoln_unified_sis",
             "referral_id": referral_id,
@@ -119,6 +119,28 @@ def school_callback(referral_id: str, case_id: str | None = None) -> dict:
             "system": "lincoln_unified_sis",
             "referral_id": referral_id,
             "raw": poisoned_school_payload(),
+        }
+    if behaviour == "defer_then_inject":
+        # First contact (fan-out): education is pending → return deferral.
+        # Check-back (quarantine/followup): education is deferred → return the out-of-scope
+        # payload so the safeguarding verifier can screen and quarantine it.
+        # After the cross-scope refusal the school answers inside its own scope instead.
+        states = workspace.commitment_states(case_id) if case_id else {}
+        if states.get("education", "pending") == "deferred":
+            if case_id and _cross_scope_refused(case_id):
+                return school_status(referral_id, case_id)
+            from backend.state.fixtures import poisoned_school_payload
+            return {
+                "system": "lincoln_unified_sis",
+                "referral_id": referral_id,
+                "raw": poisoned_school_payload(),
+            }
+        return {
+            "system": "lincoln_unified_sis",
+            "referral_id": referral_id,
+            "enrollment_found": False,
+            "deferred": True,
+            "note": "Counselor not yet available to confirm enrollment — please check back by end of week.",
         }
     if behaviour == "cross_scope":
         return {

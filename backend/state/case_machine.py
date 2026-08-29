@@ -1,4 +1,4 @@
-COMMITMENT_STATES: set[str] = {"pending", "scheduled", "completed", "unresolved", "blocked"}
+COMMITMENT_STATES: set[str] = {"pending", "scheduled", "completed", "unresolved", "blocked", "deferred"}
 
 LEGAL_TRANSITIONS: dict[str, set[str]] = {
     "draft": {"active"},

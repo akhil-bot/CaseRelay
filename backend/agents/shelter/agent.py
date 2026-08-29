@@ -14,7 +14,8 @@ INSTRUCTION = (
     "Always run all three tools in order: get_authorized_context, then query_shelter with "
     "the referral_id from that context, then submit_shelter_status.\n"
     "status must be exactly one of: pending, scheduled, completed, unresolved, blocked. "
-    "bed_confirmed true means completed; otherwise pending.\n"
+    "bed_confirmed true means completed. "
+    "If bed_confirmed is false and there is no error, status is pending.\n"
     "If the response contains an 'error' key (e.g. timeout or malformed), set status to unresolved.\n"
     "Never rank or recommend placements."
 )

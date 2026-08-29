@@ -1,7 +1,7 @@
+import hashlib
 import logging
 import threading
 import time
-from uuid import uuid4
 
 from google.adk.agents import Agent
 
@@ -122,16 +122,14 @@ def inspect_school_callback(case_id: str) -> dict:
 def open_escalation(case_id: str, reason: str) -> dict:
     """Open a human-approval escalation for a quarantined callback.
 
+    Idempotent: the approval_id is derived deterministically from (case_id,
+    recipient) so repeated calls within the same quarantine phase converge on
+    one record instead of minting duplicates.
+
     Refuses if no recent quarantine verdict is on record for this case. The
     verdict is checked first in the in-process cache (same replica), then in
     Firestore (cross-replica). If neither source has a quarantine, the tool
     returns an error to the model.
-
-    Failure-mode reasoning: refusing when the verdict is unreadable protects
-    against false escalations of clean cases (the original demo-breaking bug).
-    If Firestore is genuinely down, the same-replica cache still covers the
-    common path. The cross-replica + Firestore-down combination is an infra
-    failure that will break the session regardless.
     """
     recorded = _resolve_verdict(case_id)
 
@@ -151,32 +149,41 @@ def open_escalation(case_id: str, reason: str) -> dict:
 
     packet = workspace.packet(case_id)
     referrals = packet.get("referrals", [])
-    # The triggering referral is the one with inject_callback set; fall back to the
-    # education referral (the only service whose callback the verifier screens today).
     trigger_ref = next(
         (r for r in referrals if r.get("inject_callback")),
         next((r for r in referrals if r.get("type") == "education"), None),
     )
     recipient = (trigger_ref or {}).get("target_org", "")
 
+    # Deterministic id: same case + recipient always yields the same approval record.
+    stable_key = f"{case_id}:escalation:{recipient}"
+    approval_id = f"apr-{hashlib.sha256(stable_key.encode()).hexdigest()[:8]}"
+
     approval = {
-        "approval_id": f"apr-{uuid4().hex[:8]}",
+        "approval_id": approval_id,
         "action_type": "escalation",
         "recipient": recipient,
         "policy_basis": ["block_cross_scope_request", "CR-POLICY-003"],
         "decision": "pending",
         "reason": reason,
     }
-    workspace.add_approval(case_id, approval)
-    workspace.append_audit(
-        case_id,
-        {
-            "event_type": "quarantine",
-            "agent_identity": AGENT_IDENTITY,
-            "verdict": "quarantine",
-            "explanation": reason,
-        },
-    )
+    approval = workspace.add_approval(case_id, approval)
+
+    audit_event_id = f"evt-q-{hashlib.sha256(stable_key.encode()).hexdigest()[:8]}"
+    try:
+        workspace.append_audit(
+            case_id,
+            {
+                "event_id": audit_event_id,
+                "event_type": "quarantine",
+                "agent_identity": AGENT_IDENTITY,
+                "verdict": "quarantine",
+                "explanation": reason,
+            },
+        )
+    except Exception:
+        pass
+
     return approval
 
 

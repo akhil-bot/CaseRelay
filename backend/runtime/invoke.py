@@ -216,9 +216,12 @@ def finalize_run_memory(run_id: str, case_id: str) -> int:
 
     Called once at end of _run_background. Builds a synthetic session from all
     orchestrator phases' events and runs a single synchronous extraction.
+    Also generates a Gemma narrative summary of the session (independent of Memory Bank).
 
     Returns the number of session events fed into extraction, or 0 if nothing was committed.
     """
+    _generate_gemma_summary(run_id, case_id)
+
     if not memory_bank_enabled():
         return 0
     with _run_buffers_lock:
@@ -227,6 +230,23 @@ def finalize_run_memory(run_id: str, case_id: str) -> int:
         return 0
     asyncio.run(_extract_run(case_id, events))
     return len(events)
+
+
+def _generate_gemma_summary(run_id: str, case_id: str) -> None:
+    """Use Gemma to produce a natural-language session narrative from run events."""
+    try:
+        from backend.narration.gemma import summarize_session
+        from backend.runtime.workspace import workspace
+
+        events = workspace.run_events(run_id)
+        if not events:
+            return
+        summary = summarize_session(events)
+        if summary:
+            workspace.update_run(run_id, gemma_summary=summary)
+            logger.info("Gemma session summary stored for run %s (%d chars)", run_id, len(summary))
+    except Exception:
+        logger.debug("Gemma session summary skipped for run %s", run_id, exc_info=True)
 
 
 async def _extract_run(case_id: str, events: list) -> None:

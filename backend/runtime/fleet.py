@@ -182,8 +182,12 @@ def _escalation_decided_and_still_open(case_id: str) -> bool:
 
 
 def _overdue_and_unchased(case_id: str) -> bool:
-    """A deadline has passed undelivered and that provider has not been chased yet."""
-    return _awake(case_id) and bool(pending_nudges(case_id))
+    """A deadline has passed undelivered and that provider has not been chased yet.
+
+    Blocked while an escalation is pending so the nudge cannot chase providers —
+    and potentially resolve commitments — before the supervisor sees the escalation gate.
+    """
+    return _awake(case_id) and bool(pending_nudges(case_id)) and not _escalation_blocking(case_id)
 
 
 def _followup_went_unanswered(case_id: str) -> bool:

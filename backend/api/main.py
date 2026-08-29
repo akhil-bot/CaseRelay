@@ -696,6 +696,9 @@ class _Narrator:
     def overdue(self, service: str) -> str:
         return f"{self._who(service)} is overdue on {self.child}'s {self._subject(service)}."
 
+    def blocked(self, service: str) -> str:
+        return f"{self._org(service)}'s {self._subject(service)} for {self.child} is still blocked."
+
     def chasing(self, service: str) -> str:
         return f"Chasing {self._org(service)} on {self.child}'s {self._subject(service)}."
 
@@ -706,7 +709,14 @@ class _Narrator:
         return f"{self._org(service)} still has not answered on {self.child}'s {self._subject(service)}."
 
     def raised(self, service: str) -> str:
-        return f"{self._supervisor} now knows {self.child}'s {self._subject(service)} is unanswered."
+        return f"A supervisor has been told {self.child}'s {self._subject(service)} is unanswered."
+
+    def deferred(self, service: str) -> str:
+        return f"{self._org(service)} asked for more time on {self.child}'s {self._subject(service)} — the fleet will check back."
+
+    def checking_back(self, service: str) -> str:
+        """Used when a commitment that was deferred is revisited on the follow-up wake."""
+        return f"Checking back with {self._org(service)} on {self.child}'s {self._subject(service)} — they asked for more time."
 
     def resumed(self, trigger: str) -> str:
         """The opening line of a resumed run, named for whatever actually restarted it.
@@ -765,7 +775,7 @@ class _Narrator:
             if "nudge" in phase:
                 return f"Following up on {child}'s missed deadlines."
             if "unanswered" in phase:
-                return f"Nobody replied — bringing {self._supervisor} in."
+                return f"Nobody replied — escalating to a supervisor."
             if service:
                 return f"Contacting {self._org(service)} about {child}'s {self._subject(service)}."
             if "memory" in phase:
@@ -783,8 +793,8 @@ class _Narrator:
                 return f"Followed up on {child}'s open commitments."
             if "quarantine" in phase:
                 return (
-                    f"The safeguarding verifier stopped that reply — it reached outside "
-                    f"its scope. Held for {self._supervisor}."
+                    "The safeguarding verifier stopped that reply — it reached outside "
+                    "its scope. Escalated — held for human review."
                 )
             if "approve" in phase:
                 return "Supervisor approved the escalation — the follow-up can now be sent."
@@ -794,12 +804,23 @@ class _Narrator:
                     return f"The follow-ups landed — every commitment on {child}'s case is fulfilled."
                 return f"Follow-ups are out; {len(open_now)} of {len(states)} still open on {child}'s case."
             if "unanswered" in phase:
-                return f"{self._supervisor} now holds the unanswered commitments."
+                return "The unanswered commitments have been escalated to a supervisor."
             if service:
                 subject = self._subject(service)
                 status = states.get(service, "")
                 if status == "completed":
                     return f"{self._who(service)} has confirmed {child}'s {subject}."
+                if status == "blocked":
+                    return (
+                        f"{self._org(service)}'s reply asked for information outside the "
+                        f"{_SERVICE_WORDS.get(service, service)} scope — "
+                        f"{child}'s {subject} is blocked."
+                    )
+                if status == "deferred":
+                    return (
+                        f"{self._org(service)} asked for more time on {child}'s {subject}"
+                        f" — the fleet will check back."
+                    )
                 if status == "unresolved":
                     return f"{self._who(service)} could not resolve {child}'s {subject}."
                 if status == "pending":
@@ -846,17 +867,17 @@ class _Narrator:
             if a.get("action_type") == SUPERVISOR_NOTICE:
                 service = a.get("commitment_type", "")
                 next_actions.append({
-                    "action": f"{self._supervisor} was told nobody answered on the {self._subject(service)}.",
+                    "action": f"A supervisor was told nobody answered on the {self._subject(service)}.",
                     "context": a.get("reason", "The deadline passed and the follow-up went unanswered."),
                 })
             else:
                 next_actions.append({
-                    "action": f"An escalation is waiting for {self._supervisor}.",
+                    "action": "An escalation is waiting for a supervisor decision.",
                     "context": a.get("reason", "A reply was flagged and needs a decision."),
                 })
 
         for service, status in commitment_states.items():
-            if status not in ("blocked", "pending", "unresolved"):
+            if status not in ("blocked", "pending", "unresolved", "deferred"):
                 continue
             who = self._who(service)
             subject = self._subject(service)
@@ -864,6 +885,11 @@ class _Narrator:
                 next_actions.append({
                     "action": f"Follow up with {who} about {child}'s {subject}.",
                     "context": "It is blocked and needs a nudge to move.",
+                })
+            elif status == "deferred":
+                next_actions.append({
+                    "action": f"Check back with {self._org(service)} about {child}'s {subject}.",
+                    "context": "They asked for more time; a scheduled reminder will follow up.",
                 })
             elif status == "pending":
                 next_actions.append({
@@ -885,10 +911,11 @@ class _Narrator:
                 if due and (next_due is None or due < next_due):
                     next_due = due
         if next_due is not None:
-            due_str = next_due.isoformat() if hasattr(next_due, "isoformat") else str(next_due)
+            scheduled_at = next_due.isoformat() if hasattr(next_due, "isoformat") else str(next_due)
             next_actions.append({
-                "action": f"A follow-up is already scheduled for {due_str}.",
+                "action": "A follow-up is already scheduled.",
                 "context": "Anything still open will be chased again at that time.",
+                "scheduled_at": scheduled_at,
             })
 
         if not next_actions:
@@ -987,6 +1014,23 @@ def _run_background(
                 })
                 return (label, err_msg, "")
             states = workspace.commitment_states(case_id)
+            # Control-plane deferral override: the deployed specialist engine may predate
+            # the `deferred` status and report a defer response as pending or completed.
+            # Detect this from partner_behaviour on the referral and correct the commitment
+            # state before narrating phase_complete so the feed tells one consistent story
+            # (never a superseded "confirmed" line followed by a correction).
+            if label.startswith("3-fanout-"):
+                _cp_svc = _SPECIALIST_TO_SERVICE.get(label.removeprefix("3-fanout-"), "")
+                if _cp_svc and states.get(_cp_svc) in ("pending", "completed", "unresolved", "blocked"):
+                    _cp_ref = next(
+                        (r for r in workspace.packet(case_id).get("referrals", [])
+                         if r.get("type") == _cp_svc),
+                        None,
+                    )
+                    if _cp_ref and _cp_ref.get("partner_behaviour", "").startswith("defer"):
+                        workspace.set_commitment(case_id, _cp_svc, "deferred")
+                        states = dict(states)
+                        states[_cp_svc] = "deferred"
             _push_event({
                 "event": "phase_complete", "run_id": run_id,
                 "phase": label, "summary": (text or "")[:300],
@@ -1018,6 +1062,7 @@ def _run_background(
             })
 
             recall_count = 0
+            recalled: list[str] = []
             child = narrator.child
 
             if _mb_enabled() and resume:
@@ -1031,7 +1076,10 @@ def _run_background(
                         _push_event({
                             "event": "memory_recall", "run_id": run_id, "case_id": case_id,
                             "memory_count": recall_count,
-                            "previews": [m[:150] for m in recalled[:3]],
+                            "previews": [
+                                m[:150] if len(m) <= 150 else m[:147].rsplit(" ", 1)[0] + "…"
+                                for m in recalled[:3]
+                            ],
                             "message": (
                                 f"Recalled {recall_count} note{'s' if recall_count != 1 else ''} "
                                 f"from earlier work on {child}'s case."
@@ -1104,6 +1152,20 @@ def _run_background(
                             commitment_states=workspace.commitment_states(case_id),
                         )
                         suspended = True
+                        break
+
+                    # Re-evaluate: case state may have changed between the initial
+                    # precondition sweep and _awaiting_supervisor returning None.
+                    # This closes the race window where supervisor activation concurrent
+                    # with the engine loop causes the run to exit as partial_failure
+                    # instead of proceeding with the now-ready fanout phases.
+                    re_ready = [
+                        spec for spec in PHASE_REGISTRY
+                        if spec.label not in completed_phases
+                        and spec.precondition(case_id)
+                    ]
+                    if re_ready:
+                        continue
                     break
 
                 first = min(ready, key=lambda s: s.priority)
@@ -1131,29 +1193,83 @@ def _run_background(
                     for spec in group_phases:
                         completed_phases.add(spec.label)
 
+                    for _svc, _st in workspace.commitment_states(case_id).items():
+                        if _st == "deferred":
+                            _defer_detected = True
+                        else:
+                            _ref = next(
+                                (r for r in workspace.packet(case_id).get("referrals", [])
+                                 if r.get("type") == _svc),
+                                None,
+                            )
+                            _defer_detected = bool(
+                                _ref and _ref.get("partner_behaviour", "").startswith("defer")
+                                and _st in ("pending", "completed", "unresolved", "blocked")
+                            )
+                        if _defer_detected:
+                            if _st != "deferred":
+                                workspace.set_commitment(case_id, _svc, "deferred")
+                                # Only emit the feed event when phase_complete didn't
+                                # already narrate the deferral (i.e., when the override
+                                # in _run_single_phase left _st as pending/completed
+                                # because the engine itself reported deferred natively).
+                                _push_event({
+                                    "event": "commitment_deferred", "run_id": run_id,
+                                    "case_id": case_id, "commitment_type": _svc,
+                                    "message": narrator.deferred(_svc),
+                                })
+                            # Always write the audit so the record is complete and honest,
+                            # regardless of whether a feed event was emitted.
+                            workspace.append_audit(case_id, {
+                                "event_id": f"evt-defer-{uuid4().hex[:8]}",
+                                "event_type": "commitment_deferred",
+                                "commitment_type": _svc,
+                                "verdict": "deferred",
+                                "explanation": (
+                                    f"{narrator._org(_svc)} asked for more time on the "
+                                    f"{_svc} commitment; the fleet will check back when "
+                                    f"the scheduled reminder fires."
+                                ),
+                            })
+
                 else:
                     label = first.label
 
                     if label == "5-wake" and resume:
                         recon = reconcile_commitments(case_id)
                         overdue = [r for r in recon if r.get("overdue")]
+                        blocked_overdue = [r for r in overdue if r.get("status") == "blocked"]
+                        plain_overdue = [r for r in overdue if r.get("status") != "blocked"]
+                        parts: list[str] = []
+                        if blocked_overdue:
+                            parts.append(f"{len(blocked_overdue)} blocked")
+                        if plain_overdue:
+                            parts.append(f"{len(plain_overdue)} overdue")
+                        on_track = len(recon) - len(overdue)
+                        if on_track:
+                            parts.append(f"{on_track} on track")
+                        recon_summary = ", ".join(parts) if parts else "all on track"
                         _push_event({
                             "event": "reconciliation", "run_id": run_id, "case_id": case_id,
                             "results": recon,
                             "overdue_count": len(overdue),
                             "message": (
-                                f"Reconciled {child}'s commitments: "
-                                f"{len(overdue)} overdue, {len(recon) - len(overdue)} on track."
+                                f"Reconciled {child}'s commitments: {recon_summary}."
                             ),
                         })
                         for r in overdue:
                             ctype = r.get("type", "")
+                            cstatus = r.get("status", "")
                             _push_event({
                                 "event": "commitment_overdue", "run_id": run_id, "case_id": case_id,
                                 "commitment_type": ctype,
                                 "deadline": r.get("deadline", ""),
-                                "status": r.get("status", ""),
-                                "message": narrator.overdue(ctype),
+                                "status": cstatus,
+                                "message": (
+                                    narrator.blocked(ctype) if cstatus == "blocked"
+                                    else narrator.checking_back(ctype) if cstatus == "deferred"
+                                    else narrator.overdue(ctype)
+                                ),
                             })
 
                     # Which providers this phase is about has to be read before it runs:
@@ -1162,6 +1278,34 @@ def _run_background(
                     silent = escalation.unanswered(case_id) if label == "10-unanswered" else []
 
                     prompt = first.prompt_template.format(case_id=case_id)
+
+                    # Inject recalled memories into decision-phase prompts so they
+                    # genuinely inform orchestrator behaviour on resume.
+                    _MEMORY_DECISION_PHASES = {"5-wake", "8-followup", "9-nudge"}
+                    injected_memories: list[str] = []
+                    if resume and recalled and label in _MEMORY_DECISION_PHASES:
+                        injected_memories = recalled[:5]
+                        memory_block = "\n".join(
+                            f"- {m}" for m in injected_memories
+                        )
+                        prompt = (
+                            f"[RECALLED CONTEXT from prior sessions]\n{memory_block}\n\n"
+                            f"Use the above recalled notes to inform your approach — for example "
+                            f"which strategies worked, which contacts responded, and what was tried "
+                            f"before. Prefer approaches that succeeded previously.\n\n"
+                            f"{prompt}"
+                        )
+                        _push_event({
+                            "event": "memory_injected", "run_id": run_id, "case_id": case_id,
+                            "phase": label,
+                            "memory_count": len(injected_memories),
+                            "previews": [m[:200] for m in injected_memories],
+                            "message": (
+                                f"Injected {len(injected_memories)} recalled "
+                                f"note{'s' if len(injected_memories) != 1 else ''} "
+                                f"into {label} phase prompt."
+                            ),
+                        })
                     workspace.update_run(
                         run_id, current_phase=label,
                         commitment_states=workspace.commitment_states(case_id),
@@ -1306,7 +1450,7 @@ def _run_background(
                     })
                 return
 
-            pending_commitments = [k for k, v in commitments.items() if v == "pending"]
+            pending_commitments = [k for k, v in commitments.items() if v in ("pending", "deferred")]
             has_unresolved = bool(pending_commitments)
 
             if total_phases_run > 0 and phase_failures == total_phases_run:
@@ -1341,7 +1485,12 @@ def _run_background(
                 if phase_failures > 0:
                     error_parts.append(f"{phase_failures}/{total_phases_run} phases failed")
                 if has_unresolved:
-                    error_parts.append(f"commitments still pending: {pending_commitments}")
+                    _readable_pending = ", ".join(
+                        f"{_SERVICE_WORDS.get(c, c.replace('_', ' '))} "
+                        f"{_SERVICE_NOUNS.get(c, 'request')}"
+                        for c in pending_commitments
+                    )
+                    error_parts.append(f"commitments still pending: {_readable_pending}")
                 error_msg = "; ".join(error_parts)
                 workspace.update_run(
                     run_id, state="partial_failure", current_phase="done",

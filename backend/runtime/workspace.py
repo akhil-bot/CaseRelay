@@ -253,6 +253,11 @@ class Workspace:
     def add_approval(self, case_id: str, approval: dict[str, Any]) -> dict[str, Any]:
         with self._lock_for(case_id):
             self.load(case_id)
+            aid = approval.get("approval_id")
+            if aid:
+                for existing in self.approvals.get(case_id, []):
+                    if existing.get("approval_id") == aid:
+                        return existing
             self.approvals.setdefault(case_id, []).append(approval)
             store.append_row(case_id, "human_approvals", approval, str(approval["approval_id"]))
             return approval

@@ -10,6 +10,7 @@ RUN uv pip install --system --no-cache \
     "google-cloud-aiplatform[agent_engines,adk]" \
     "google-cloud-firestore" \
     "google-cloud-pubsub" \
+    "google-cloud-modelarmor" \
     "fastapi>=0.115" \
     "uvicorn[standard]" \
     "pydantic>=2.0" \
