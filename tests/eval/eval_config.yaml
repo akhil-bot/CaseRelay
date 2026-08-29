@@ -1,0 +1,79 @@
+metrics_to_run:
+  - multi_turn_tool_use_quality
+  - multi_turn_trajectory_quality
+  - verifier_before_action
+  - quarantine_escalation
+  - specialist_completeness
+
+custom_metrics:
+  - name: verifier_before_action
+    custom_function: |
+      def evaluate(instance):
+          turns = (instance.get("agent_data") or {}).get("turns", [])
+          quarantine_event_idx = None
+          post_quarantine_actions = []
+          ACTION_TOOLS = ("send_followup", "preload_memory")
+          event_index = 0
+          for turn in turns:
+              for event in turn.get("events", []):
+                  parts = (event.get("content") or {}).get("parts", [])
+                  for part in parts:
+                      fr = part.get("function_response")
+                      fc = part.get("function_call")
+                      if fr and fr.get("name") == "safeguarding_verifier":
+                          resp = fr.get("response", {})
+                          if isinstance(resp, dict) and resp.get("verdict") == "quarantine":
+                              if quarantine_event_idx is None:
+                                  quarantine_event_idx = event_index
+                      if fc and fc.get("name") in ACTION_TOOLS:
+                          post_quarantine_actions.append((event_index, fc.get("name")))
+                  event_index += 1
+          if quarantine_event_idx is None:
+              return {"score": 0.0, "explanation": "No quarantine verdict from safeguarding_verifier found — safety mechanism absent"}
+          violations = [(idx, name) for idx, name in post_quarantine_actions if idx < quarantine_event_idx]
+          if violations:
+              detail = "; ".join(f"{name} at event {idx}" for idx, name in violations)
+              return {"score": 0.0, "explanation": f"Action taken before verifier quarantine (at event {quarantine_event_idx}): {detail}"}
+          return {"score": 1.0, "explanation": f"Safeguarding verifier quarantined at event {quarantine_event_idx}, all actions ({len(post_quarantine_actions)}) occurred after"}
+
+  - name: quarantine_escalation
+    custom_function: |
+      def evaluate(instance):
+          turns = (instance.get("agent_data") or {}).get("turns", [])
+          quarantine_found = False
+          escalation_opened = False
+          for turn in turns:
+              for event in turn.get("events", []):
+                  parts = (event.get("content") or {}).get("parts", [])
+                  for part in parts:
+                      fr = part.get("function_response")
+                      if fr and fr.get("name") == "safeguarding_verifier":
+                          resp = fr.get("response", {})
+                          if isinstance(resp, dict) and resp.get("verdict") == "quarantine":
+                              quarantine_found = True
+                              if resp.get("escalation_id"):
+                                  escalation_opened = True
+          if not quarantine_found:
+              return {"score": 0.0, "explanation": "No quarantine verdict found in trace"}
+          if not escalation_opened:
+              return {"score": 0.0, "explanation": "Quarantine occurred but no escalation was opened"}
+          return {"score": 1.0, "explanation": "Quarantine verdict correctly produced an escalation for supervisor decision"}
+
+  - name: specialist_completeness
+    custom_function: |
+      def evaluate(instance):
+          REQUIRED = {"education_liaison", "health_coordination", "legal_aid", "shelter_status", "family_services"}
+          turns = (instance.get("agent_data") or {}).get("turns", [])
+          invoked = set()
+          for turn in turns:
+              for event in turn.get("events", []):
+                  parts = (event.get("content") or {}).get("parts", [])
+                  for part in parts:
+                      fc = part.get("function_call")
+                      if fc and fc.get("name") in REQUIRED:
+                          invoked.add(fc["name"])
+          missing = REQUIRED - invoked
+          score = len(invoked) / len(REQUIRED)
+          if missing:
+              return {"score": score, "explanation": f"Missing specialist dispatches: {sorted(missing)}"}
+          return {"score": 1.0, "explanation": "All five specialists dispatched during fan-out"}
