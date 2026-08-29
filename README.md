@@ -104,11 +104,11 @@ Eight agents deployed as Vertex AI reasoning engines, each with a platform-manag
 
 1. Supervisor activates monitoring after verifying court authority.
 2. Orchestrator delegates scoped tasks to five partner agents, reaching each over authenticated A2A.
-3. Legal completes. Healthcare schedules. Education goes 17 days without a verified owner.
-4. A Pub/Sub push event (driven by Cloud Scheduler every minute) wakes the dormant workflow — no user prompt, no open browser.
+3. Four partners confirm. Lincoln Unified asks for more time on the school enrollment, so that commitment goes to `deferred` and the fleet writes down when to come back — it is also the one referral with nobody named on the other side.
+4. The run ends there on its checkpoints rather than holding a session open. A Pub/Sub push event (driven by Cloud Scheduler every minute) wakes the workflow — no user prompt, no open browser — and the resumed run's first act is to check back with the district.
 5. The Education Agent requests only enrollment-status fields through the Gateway.
-6. A malicious school response tries to retrieve medical notes; Model Armor quarantines it. The instruction is never carried out.
-7. The Safeguarding Verifier opens an escalation showing evidence, recipient, policy basis, and withheld fields, and records the quarantine against its own platform identity. A supervisor approves.
+6. The district's reply to that check-back tries to retrieve medical notes; Model Armor quarantines it. The instruction is never carried out.
+7. The Safeguarding Verifier opens an escalation showing evidence, recipient, policy basis, and withheld fields, and records the quarantine against its own platform identity. The run parks there with school enrollment still open — nothing has been chased and no coordinator has been found. A supervisor approves.
 8. Only then may the scoped follow-up go out. The district is chased once within the same authority grant that covered the original request.
 9. The district answers, naming the enrollment coordinator who has taken the referral on. That name is written back onto the referral, the commitment closes, and Maya's timeline updates. Had nobody answered, the supervisor would have been told instead.
 
@@ -119,7 +119,7 @@ Eight agents deployed as Vertex AI reasoning engines, each with a platform-manag
 ## GEAP Capabilities Demonstrated
 
 - **Agent Registry** — 24 registered services: eight A2A agent endpoints, one MCP partner server, and fifteen infrastructure dependencies (Firestore, Model Armor, Vertex AI, Telemetry, Cloud Logging), auto-registered and updated by `agents-cli deploy`; Agent Gateway request logs reference the registered entry for each call (`agentRegistryResource`). The registry is a live catalogue, not a runtime routing layer — agents find each other through environment variables, not registry lookups
-- **Agent Runtime** — eight reasoning engines in `us-central1` with checkpoint, sleep, and deadline-triggered resume via Pub/Sub push + Cloud Scheduler (one-minute sweep, dead-letter after 5 attempts, codified in `infra/bootstrap.sh`)
+- **Agent Runtime** — eight reasoning engines in `us-central1` hosting the fleet. The checkpoint / sleep / deadline-triggered resume cycle around them is Firestore plus Pub/Sub push and Cloud Scheduler (one-minute sweep, dead-letter after 5 attempts, codified in `infra/bootstrap.sh`) rather than Agent Runtime itself: a Maya run ends on its checkpoints and a sweep restarts it, observed with a 23-second gap and nobody at the keyboard
 - **Memory Bank** — GEAP Memory Bank (instance `8631858420611284992`) via ADK's `VertexAiMemoryBankService`; sessions extracted once per wake via synchronous `memories.generate`; recalled memories searched on resume and, when non-empty, injected into orchestrator prompts for the wake, nudge and follow-up phases (`_MEMORY_DECISION_PHASES` in `backend/api/main.py`), with a `memory_injected` audit event recording which memories entered which phase; observed end-to-end on run `de73dabce1d4` (case `CR-0828195744`), where one recalled memory was injected into `5-wake` and `8-followup`; the recalled content so far is general process observations rather than operationally specific intelligence (named contacts, institutional shortcuts), because the compressed end-to-end script re-executes orchestrator phases that the specialists already handled, producing process-level rather than partner-interaction detail; scoped per case (`case_id` → ADK `user_id`); three custom memory topics: `partner_contacts`, `institutional_shortcuts`, `unblocking_strategies`; cross-session consolidation is live (six memories have evolved across sessions with revision history)
 - **Agent Platform Sessions** — two dedicated Agent Engines via ADK's `VertexAiSessionService`. `caserelay-chat-sessions` holds the operator chat transcript, keyed on the AG-UI thread id so a returning conversation resolves in one read. `caserelay-run-sessions` holds every orchestrator agent turn, one session per phase invocation rather than one per run, because the fan-out dispatches five phases at once and Google documents row-level locking only for `DatabaseSessionService`. A deployed control plane refuses to start without both rather than falling back to in-memory sessions that look identical until the instance recycles. A throttled append is retried with jittered backoff and, if it still will not land, kept in memory and logged rather than failing the case
 - **Agent Identity** — platform-managed identity per agent (`--agent-identity`); SPIFFE-style principals (`principal://agents.global.org-…`); caller principal verified at the gateway; cross-scope denial demonstrated
@@ -215,9 +215,16 @@ RUN=$(curl -s -X POST "localhost:8000/v1/cases/$CASE/runs" \
 curl -N "localhost:8000/v1/runs/$RUN/events"
 ```
 
-Keep `due_in` at `10s`. `schedule_wake` spreads the five per-commitment checkpoints proportionally across the window it is given, at `now + due_in × (i+1)/5`, so a longer deadline leaves even the earliest checkpoint in the future when the wake phase asks for due work. Nothing wakes, the quarantine, follow-up and memory phases never become reachable, and the run ends `partial_failure`.
+Keep `due_in` at `10s`. `schedule_wake` spreads the five per-commitment checkpoints proportionally across the window it is given, at `now + due_in × (i+1)/5`. At `10s` all five have lapsed by the time the run checkpoints, so the resumed run finds education overdue and checks back with the school. A longer deadline leaves the later checkpoints in the future, the resumed run arrives before education's check-back is due, and the quarantine, follow-up and memory phases never become reachable.
 
-The first run ends at `run_suspended`, which is the point of the design: the case is checkpointed and the work that remains is waiting on a deadline, not on a session. In the cloud, Cloud Scheduler's one-minute sweep publishes the wake and the push handler starts the continuation run. Locally there is no Pub/Sub, so stand in for it once the deadline has passed:
+That first run stops after intake at the activation gate. No phase can approve it — release it with the real endpoint, which starts a second run:
+
+```bash
+curl -s -X POST "localhost:8000/v1/cases/$CASE/activate" -H 'content-type: application/json' \
+  -d '{"supervisor_id":"supervisor-001"}'
+```
+
+The second run fans out and then ends at `run_suspended`, which is the point of the design: the case is checkpointed and the work that remains is waiting on a deadline, not on a session. In the cloud, Cloud Scheduler's one-minute sweep publishes the wake and the push handler starts the continuation run. Locally there is no Pub/Sub, so stand in for it once the deadline has passed:
 
 ```bash
 curl -s -X POST localhost:8000/v1/workflows/sweep     # marks due checkpoints running

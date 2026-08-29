@@ -75,7 +75,6 @@ def propose_grant(
 ) -> dict[str, Any]:
     """Propose one field-scoped authority grant. Intake can propose but never activate."""
     workspace.get_case(case_id)
-    grants = list(workspace.grants.get(case_id) or [])
     raw = {
         "grant_id": f"grant-{purpose}",
         "granted_to": agent_identity,
@@ -83,14 +82,14 @@ def propose_grant(
         "allowed_fields": allowed_fields,
         "legal_basis": legal_basis,
     }
-    grant = _normalize_grant(raw)
-    grants = [g for g in grants if g["purpose"] != grant["purpose"]] + [grant]
-    workspace.put_grants(case_id, grants)
+    grant = workspace.upsert_grant(
+        case_id, _normalize_grant(raw), canonical=_canonical_key(raw) is not None,
+    )
     return {
         "ok": True,
         "recorded": grant["purpose"],
         "allowed_fields": grant["allowed_fields"],
-        "grant_count": len(grants),
+        "grant_count": len(workspace.grants.get(case_id) or []),
         "approval_required": True,
     }
 
@@ -156,15 +155,19 @@ CANONICAL_GRANTS = {
 }
 
 
-def _normalize_grant(raw: dict) -> dict:
+def _canonical_key(raw: dict) -> str | None:
+    """Which of the five standard grants this proposal is, or None if it is not one."""
     blob = " ".join(str(v) for v in raw.values()).lower()
-    key = None
     for name in CANONICAL_GRANTS:
         if name.replace("_", " ") in blob or name in blob or CANONICAL_GRANTS[name]["granted_to"] in blob:
-            key = name
-            break
-    if key is None and raw.get("purpose") in {v["purpose"] for v in CANONICAL_GRANTS.values()}:
-        key = next(k for k, v in CANONICAL_GRANTS.items() if v["purpose"] == raw.get("purpose"))
+            return name
+    if raw.get("purpose") in {v["purpose"] for v in CANONICAL_GRANTS.values()}:
+        return next(k for k, v in CANONICAL_GRANTS.items() if v["purpose"] == raw.get("purpose"))
+    return None
+
+
+def _normalize_grant(raw: dict) -> dict:
+    key = _canonical_key(raw)
     if key:
         return {**raw, **CANONICAL_GRANTS[key], "status": "proposed"}
     return {**raw, "status": "proposed"}

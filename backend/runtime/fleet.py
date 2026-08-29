@@ -245,8 +245,9 @@ PHASE_REGISTRY: list[PhaseSpec] = [
     PhaseSpec(
         label="5-wake",
         prompt_template=(
-            "Day 17 for case {case_id} with no user session. Call wake_workflow, then ask "
-            "education_liaison to re-check its commitment for case {case_id}. Then stop."
+            "Day 17 for case {case_id} with no user session. Call wake_workflow to register "
+            "the wake, then call check_overdue to surface any overdue commitments. "
+            "Do not call any specialist agents. Then stop."
         ),
         precondition=_checkpoint_committed_and_waiting,
         priority=40,

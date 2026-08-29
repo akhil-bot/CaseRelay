@@ -715,8 +715,45 @@ class _Narrator:
         return f"{self._org(service)} asked for more time on {self.child}'s {self._subject(service)} — the fleet will check back."
 
     def checking_back(self, service: str) -> str:
-        """Used when a commitment that was deferred is revisited on the follow-up wake."""
-        return f"Checking back with {self._org(service)} on {self.child}'s {self._subject(service)} — they asked for more time."
+        """Used when a commitment that was deferred is revisited on the follow-up wake.
+
+        Says the promised moment has arrived rather than restating the request, because
+        the point of the beat is that the fleet came back when it said it would.
+        """
+        return (
+            f"Checking back with {self._org(service)} on {self.child}'s "
+            f"{self._subject(service)} — the time they asked for has arrived."
+        )
+
+    def check_back_at(self, service: str) -> str:
+        """When the fleet has undertaken to look at this commitment again, ISO-8601.
+
+        Prefers the commitment's own checkpoint. During fan-out none exist yet — the
+        checkpoint phase writes them afterwards — so the case-level checkpoint stands in,
+        which is the window the case was opened with. Empty when nothing is scheduled.
+
+        The timestamp travels beside the message rather than inside it: the operator's
+        timezone belongs to the operator's browser, not to a string built in us-central1.
+        """
+        earliest = None
+        for cp in workspace.list_case_checkpoints(self.case_id):
+            due = cp.get("due_at")
+            if isinstance(due, str):
+                try:
+                    due = datetime.fromisoformat(due.replace("Z", "+00:00"))
+                except ValueError:
+                    continue
+            if not isinstance(due, datetime):
+                continue
+            if not due.tzinfo:
+                due = due.replace(tzinfo=timezone.utc)
+            # The commitment's own checkpoint answers the question whether or not it has
+            # fired yet; only the case-level stand-in has to still be pending.
+            if cp.get("commitment_type") == service:
+                return due.isoformat()
+            if cp.get("state") == "waiting" and (earliest is None or due < earliest):
+                earliest = due
+        return earliest.isoformat() if earliest else ""
 
     def resumed(self, trigger: str) -> str:
         """The opening line of a resumed run, named for whatever actually restarted it.
@@ -1027,16 +1064,24 @@ def _run_background(
                          if r.get("type") == _cp_svc),
                         None,
                     )
-                    if _cp_ref and _cp_ref.get("partner_behaviour", "").startswith("defer"):
+                    if _cp_ref and (
+                        _cp_ref.get("partner_behaviour", "").startswith("defer")
+                        or _cp_ref.get("first_contact_defer")
+                    ):
                         workspace.set_commitment(case_id, _cp_svc, "deferred")
                         states = dict(states)
                         states[_cp_svc] = "deferred"
-            _push_event({
+            _complete: dict[str, Any] = {
                 "event": "phase_complete", "run_id": run_id,
                 "phase": label, "summary": (text or "")[:300],
                 "commitment_states": states,
                 "message": narrator.line("phase_complete", label, commitment_states=states),
-            })
+            }
+            if label.startswith("3-fanout-"):
+                _svc_done = _SPECIALIST_TO_SERVICE.get(label.removeprefix("3-fanout-"), "")
+                if _svc_done and states.get(_svc_done) == "deferred":
+                    _complete["scheduled_at"] = narrator.check_back_at(_svc_done)
+            _push_event(_complete)
             return (label, None, text or "")
         return ctx.run(_inner)
 
@@ -1203,7 +1248,10 @@ def _run_background(
                                 None,
                             )
                             _defer_detected = bool(
-                                _ref and _ref.get("partner_behaviour", "").startswith("defer")
+                                _ref and (
+                                    _ref.get("partner_behaviour", "").startswith("defer")
+                                    or _ref.get("first_contact_defer")
+                                )
                                 and _st in ("pending", "completed", "unresolved", "blocked")
                             )
                         if _defer_detected:
@@ -1216,6 +1264,7 @@ def _run_background(
                                 _push_event({
                                     "event": "commitment_deferred", "run_id": run_id,
                                     "case_id": case_id, "commitment_type": _svc,
+                                    "scheduled_at": narrator.check_back_at(_svc),
                                     "message": narrator.deferred(_svc),
                                 })
                             # Always write the audit so the record is complete and honest,
@@ -1368,7 +1417,7 @@ def _run_background(
                     })
                     completed_phases.add(label)
 
-                    if "checkpoint" in label and not resume:
+                    if "checkpoint" in label and resume_trigger != "sweep":
                         all_cps = workspace.list_case_checkpoints(case_id)
                         waiting = [c for c in all_cps if c.get("state") == "waiting"]
                         if waiting:

@@ -157,6 +157,7 @@ def build_packet(case_id: str, scenario: str | None = None) -> dict[str, Any]:
     partner_behaviours = (spec.partner_behaviours if spec else {}) or {}
     inject_map = (spec.inject_callback if spec else {}) or {}
     unnamed_contacts = set(spec.unnamed_contacts if spec else ())
+    defer_first_set = set(spec.defer_first if spec else ())
 
     referrals = []
     for service, ref_prefix, _grant, _identity, _purpose, _fields, _basis in SERVICES:
@@ -176,6 +177,8 @@ def build_packet(case_id: str, scenario: str | None = None) -> dict[str, Any]:
             referral["partner_behaviour"] = behaviour
         if inject_map.get(service):
             referral["inject_callback"] = True
+        if service in defer_first_set:
+            referral["first_contact_defer"] = True
         referrals.append(referral)
 
     dob = datetime(rng.randint(2012, 2019), rng.randint(1, 12), rng.randint(1, 28))

@@ -25,6 +25,11 @@ const HIDDEN_EVENTS = new Set([
   "stream_timeout",
   // The memory phase already reports that the notes were written.
   "memory_write",
+  // Which prompt a recalled note was pasted into is plumbing, not case work: it names
+  // an internal phase label and tells a caseworker nothing they can act on. The recall
+  // itself still shows, with the text of the notes, which is the part that carries the
+  // evidence that memory was read and used.
+  "memory_injected",
 ]);
 
 function genericIcon(ev: RunEvent): IconName {
@@ -360,9 +365,15 @@ function DormantBanner({ nextFollowUp }: { nextFollowUp?: string }) {
 
 function EventRow({ ev }: { ev: RunEvent }) {
   const view = describe(ev);
+  const now = useNow();
   const ts = formatEventTime(ev.timestamp);
   const previews =
     ev.event === "memory_recall" && Array.isArray(ev.previews) ? (ev.previews as string[]) : [];
+  // A deferral promises a specific return time. The backend sends it as a timestamp
+  // rather than baked into the sentence, so it renders in the reader's timezone.
+  const scheduled = formatScheduledAt(ev.scheduled_at, now);
+  const note =
+    view.note ?? (scheduled ? `${scheduled[0].toUpperCase()}${scheduled.slice(1)}.` : undefined);
 
   return (
     <li className={cx("flex items-start gap-3 rounded px-3", WEIGHT_ROW[view.weight])}>
@@ -379,9 +390,7 @@ function EventRow({ ev }: { ev: RunEvent }) {
           <p className={WEIGHT_TEXT[view.weight]}>{view.message}</p>
           {view.status && <StatusBadge status={view.status} />}
         </div>
-        {view.note && (
-          <p className="mt-1 text-[12px] leading-relaxed text-ink-soft">{view.note}</p>
-        )}
+        {note && <p className="mt-1 text-[12px] leading-relaxed text-ink-soft">{note}</p>}
         {previews.length > 0 && (
           <ul className="mt-1.5 space-y-0.5">
             {previews.slice(0, 3).map((p, idx) => (

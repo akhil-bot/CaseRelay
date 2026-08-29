@@ -194,20 +194,67 @@ class Workspace:
             if not case:
                 raise CaseNotFound(f"case {case_id} has not been ingested")
             if case["status"] in ("active", "monitoring"):
+                self._grant_proposed(case_id, case.get("supervisor_id") or supervisor_id)
                 return case
             assert_transition(case["status"], "active")
             case["status"] = "active"
             case["activated_at"] = _now().isoformat()
             case["supervisor_id"] = supervisor_id
-            for grant in self.grants.get(case_id, []):
-                grant["status"] = "granted"
-                grant["granted_by"] = supervisor_id
-                grant["revoked"] = False
+            self._grant_proposed(case_id, supervisor_id)
             assert_transition("active", "monitoring")
             case["status"] = "monitoring"
-            self.put_grants(case_id, self.grants.get(case_id, []))
             store.save_case(case_id, case)
             return case
+
+    def _grant_proposed(self, case_id: str, supervisor_id: str) -> list[str]:
+        """Flip every still-proposed grant on this case to granted. Caller holds the lock.
+
+        Also runs on the idempotent path of :meth:`activate`, so a second activation
+        repairs a case whose intake finished after the first one was recorded.
+        """
+        flipped = []
+        for grant in self.grants.get(case_id, []):
+            if grant.get("status") == "granted" and not grant.get("revoked"):
+                continue
+            grant["status"] = "granted"
+            grant["granted_by"] = supervisor_id
+            grant["revoked"] = False
+            flipped.append(str(grant.get("purpose") or grant.get("grant_id") or ""))
+        if flipped:
+            self.put_grants(case_id, self.grants.get(case_id, []))
+        return flipped
+
+    def upsert_grant(self, case_id: str, grant: dict[str, Any], *, canonical: bool) -> dict[str, Any]:
+        """Add or replace one grant, keyed by purpose, atomically against other writers.
+
+        A canonical grant proposed after the case was activated inherits that decision.
+        Intake writes its five grants one at a time and a supervisor can decide before the
+        last one lands; a grant arriving after that moment would otherwise stay `proposed`
+        for ever, because activate() is idempotent and never revisits it. The gateway then
+        denies that specialist at fan-out and its commitment can never be fulfilled.
+
+        Only the five canonical grants inherit the decision. An agent still cannot invent
+        an authority the supervisor never saw.
+        """
+        with self._lock_for(case_id):
+            self.load(case_id)
+            case = self.cases.get(case_id)
+            if not case:
+                raise CaseNotFound(f"case {case_id} has not been ingested")
+            if canonical and case.get("activated_at"):
+                grant = {
+                    **grant,
+                    "status": "granted",
+                    "granted_by": case.get("supervisor_id", ""),
+                    "revoked": False,
+                }
+            rows = [
+                g for g in self.grants.get(case_id, [])
+                if g.get("purpose") != grant.get("purpose")
+            ]
+            rows.append(grant)
+            self.put_grants(case_id, rows)
+            return grant
 
     def grant_for(self, case_id: str, identity: str, purpose: str) -> dict[str, Any] | None:
         with self._lock_for(case_id):

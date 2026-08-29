@@ -12,6 +12,7 @@ export type CommitmentStatus =
   | "scheduled"
   | "waitlisted"
   | "unresolved"
+  | "deferred"
   | "blocked"
   | "completed";
 

@@ -239,6 +239,10 @@ function LiveCaseDetail({ caseId }: { caseId: string }) {
   const closedCount = commitmentEntries.filter(([, v]) => TERMINAL_STATUSES.has(v)).length;
   const hasActiveRun = runs.some((r) => r.state === "running" || r.state === "queued");
   const isStreaming = runState.streaming || hasActiveRun;
+  // The activation gate is safe to act on only once the run has actually parked
+  // at awaiting_supervisor. Before that point the grants are still being proposed
+  // and activating early would miss whichever ones hadn't landed yet.
+  const gateReady = runs.some((r) => r.state === "awaiting_supervisor");
 
   const allCommitmentsClosed =
     commitmentEntries.length > 0 && closedCount === commitmentEntries.length;
@@ -329,6 +333,7 @@ function LiveCaseDetail({ caseId }: { caseId: string }) {
           caseId={caseId}
           childName={childName}
           approving={approving}
+          gateReady={gateReady}
           error={approveError}
           onApprove={(supervisorId) => handleActivate(supervisorId)}
         />
@@ -523,6 +528,7 @@ function SupervisorGate({
   childName,
   reason,
   approving,
+  gateReady = true,
   error,
   onApprove,
   onReject,
@@ -533,6 +539,12 @@ function SupervisorGate({
   approvalId?: string;
   reason?: string;
   approving: boolean;
+  /**
+   * For activation gates: true once the run has parked at awaiting_supervisor.
+   * Keeps the Approve button disabled — and explains why — while intake agents
+   * are still working. Escalation gates are always immediately actionable.
+   */
+  gateReady?: boolean;
   error: string | null;
   onApprove: (supervisorId: string) => void;
   onReject?: (supervisorId: string) => void;
@@ -591,13 +603,19 @@ function SupervisorGate({
             Reject
           </button>
         )}
+        {isActivation && !gateReady && (
+          <p className="flex items-center gap-1.5 text-[12px] text-ink-muted">
+            <Icon name="activity" size={13} className="shrink-0 animate-pulse" />
+            Agents are still working — this will unlock once intake finishes.
+          </p>
+        )}
         <button
           type="button"
           onClick={() => onApprove(supervisorId)}
-          disabled={approving}
+          disabled={approving || (isActivation && !gateReady)}
           className={cx(control.primary, "ml-auto")}
         >
-          <Icon name="check" size={15} />
+          <Icon name={isActivation && !gateReady ? "clock" : "check"} size={15} />
           {approving ? "Approving…" : isActivation ? "Approve & activate" : "Approve escalation"}
         </button>
       </div>

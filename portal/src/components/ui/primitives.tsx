@@ -332,6 +332,7 @@ const STATUS_META: Record<CommitmentStatus, { label: string; variant: Tone; icon
   scheduled: { label: "Scheduled", variant: "accent", icon: "calendar" },
   waitlisted: { label: "Waitlisted", variant: "warn", icon: "clock" },
   unresolved: { label: "Unresolved", variant: "warn", icon: "alert" },
+  deferred: { label: "More time asked", variant: "accent", icon: "clock" },
   blocked: { label: "Blocked", variant: "danger", icon: "alert" },
   completed: { label: "Completed", variant: "seal", icon: "checkCircle" },
 };

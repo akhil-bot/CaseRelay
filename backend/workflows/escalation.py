@@ -47,13 +47,30 @@ def _allowed_fields(case_id: str, service: str) -> list[str]:
 
 
 def pending_nudges(case_id: str) -> list[str]:
-    """Services whose deadline has passed undelivered and that have not been chased yet."""
+    """Services still owed that have not been chased yet.
+
+    A commitment qualifies when its deadline has passed, or when its own checkpoint has
+    already woken and it is still undelivered. The second clause matters because the two
+    clocks can disagree: a commitment's deadline is the real one on the referral, while
+    the checkpoint that wakes the fleet is compressed into the demo window. Without it a
+    commitment left open by a failed fan-out — a denied grant, an unreachable specialist —
+    is unreachable by every rung of the ladder whenever its referral deadline is still in
+    the future, so it is never chased, never escalated, and nobody is ever told.
+    """
     referrals = _referrals(case_id)
-    return [
-        row["type"]
-        for row in reconcile_commitments(case_id)
-        if row.get("overdue") and not (referrals.get(row["type"]) or {}).get("followup")
-    ]
+    woken = {
+        cp.get("commitment_type")
+        for cp in workspace.list_case_checkpoints(case_id)
+        if cp.get("current_step") == "awake" and cp.get("commitment_type")
+    }
+    pending: list[str] = []
+    for row in reconcile_commitments(case_id):
+        service = row["type"]
+        if (referrals.get(service) or {}).get("followup"):
+            continue
+        if row.get("overdue") or (service in woken and row.get("status") != "completed"):
+            pending.append(service)
+    return pending
 
 
 def unanswered(case_id: str) -> list[str]:
