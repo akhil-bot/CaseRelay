@@ -5,7 +5,20 @@ import { Logo } from "@/components/Logo";
 import { COPY } from "@/design/copy";
 import { auth, cx } from "@/design/tokens";
 
-export function AuthScreen({ children }: { children: ReactNode }) {
+/**
+ * The frame every sign-in form sits in. The claim beside it is the product's and
+ * does not change; the heading over the form does, because what you are signing
+ * in to differs by role.
+ */
+export function AuthScreen({
+  children,
+  title,
+  subtitle,
+}: {
+  children: ReactNode;
+  title?: string;
+  subtitle?: string;
+}) {
   const copy = COPY.signIn;
 
   return (
@@ -31,8 +44,8 @@ export function AuthScreen({ children }: { children: ReactNode }) {
 
         <main className="flex flex-1 items-center py-10">
           <div className={auth.form}>
-            <h2 className={auth.title}>{copy.title}</h2>
-            <p className={cx("mt-1.5", auth.subtitle)}>{copy.subtitle}</p>
+            <h2 className={auth.title}>{title ?? copy.title}</h2>
+            <p className={cx("mt-1.5", auth.subtitle)}>{subtitle ?? copy.subtitle}</p>
 
             <div className="mt-7">{children}</div>
           </div>

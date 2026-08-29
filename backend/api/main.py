@@ -221,6 +221,16 @@ def _resolve_deadline(due_in: str | None, scenario_name: str | None) -> datetime
     responses={403: {"description": "Identity denied"}, 404: {"description": "Not found"}},
 )
 def list_cases() -> list[dict]:
+    """Every case, with enough of each to list a caseload without opening it.
+
+    The stored path returns the whole case document; this projection names the
+    fields a caller can rely on either way. `volunteer_id`/`volunteer_name` are
+    among them because a supervisor's caseload is grouped by advocate, and
+    without them that grouping would need one read per case.
+
+    Still unscoped: there is no volunteer or supervisor filter, so every caller
+    gets every case and any narrowing happens client-side.
+    """
     from backend.state import store
 
     if store.enabled():
@@ -230,6 +240,9 @@ def list_cases() -> list[dict]:
             "case_id": cid,
             "child_name": c.get("child_name", ""),
             "status": c.get("status", ""),
+            "volunteer_id": c.get("volunteer_id", ""),
+            "volunteer_name": c.get("volunteer_name", ""),
+            "created_at": c.get("created_at", ""),
             "test_case": c.get("test_case", False),
         }
         for cid, c in workspace.cases.items()

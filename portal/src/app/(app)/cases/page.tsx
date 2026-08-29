@@ -2,84 +2,229 @@
 
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
-import { Suspense, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { Suspense, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Icon, type IconName } from "@/components/icons";
-import {
-  Avatar,
-  Badge,
-  Card,
-  EmptyState,
-  FlagBadge,
-  ProgressBar,
-  Rows,
-  cx,
-} from "@/components/ui/primitives";
-import { control, layout, row, surface, type as type_ } from "@/design/tokens";
+import { Avatar, Badge, Card, Dot, EmptyState, Loading, Rows, cx } from "@/components/ui/primitives";
+import { control, layout, row, surface, type Tone, type as type_ } from "@/design/tokens";
 import { listCases } from "@/lib/api";
-import { useDemo } from "@/lib/demo-store";
-import { PRIMARY_CASE_ID } from "@/lib/mock/cases";
 import { useViewer } from "@/lib/viewer";
-import type { CaseFlag, CaseSummary } from "@/lib/types";
 
-type Filter = { id: string; label: string; icon: IconName; flags: CaseFlag[] | null };
+/**
+ * A case as this list needs it.
+ *
+ * /v1/cases answers with an open record, and the two code paths behind it do not
+ * agree on the keys: the in-memory one carries four fields, the stored one the
+ * whole case document. So every field is read defensively and normalised once
+ * here, and the rest of the page sorts and filters against values it knows the
+ * shape of.
+ */
+interface CaseRecord {
+  id: string;
+  /** Empty until intake names the child. The row says so rather than showing a dash. */
+  name: string;
+  status: string;
+  /** Whose case it is. Empty on a case whose packet never named an advocate. */
+  advocateId: string;
+  advocateName: string;
+  openedAt: number | null;
+  /** The soonest referral deadline still ahead. Null once every one of them has passed. */
+  nextDue: number | null;
+  everyDatePassed: boolean;
+  /** Everything the search box matches against, lowercased once at parse time. */
+  haystack: string;
+}
 
-const FILTERS: Filter[] = [
-  { id: "all", label: "", icon: "cases", flags: null },
-  { id: "attention", label: "Needs attention", icon: "alert", flags: ["overdue", "blocked"] },
-  { id: "approval", label: "Waiting on a human", icon: "approvals", flags: ["approval_needed"] },
-  { id: "monitoring", label: "On track", icon: "check", flags: ["on_track"] },
-  { id: "intake", label: "Not yet activated", icon: "clock", flags: ["intake_pending"] },
-  { id: "closed", label: "Completed", icon: "checkCircle", flags: ["recently_completed"] },
+/** Sorts last, and never subtracts to NaN the way two Infinities would. */
+const LAST = Number.MAX_SAFE_INTEGER;
+
+/** A stable identity for "no cases yet", so the memos below do not rerun on every render. */
+const EMPTY: CaseRecord[] = [];
+
+const DAY = 86_400_000;
+
+const PAGE = 40;
+
+function text(value: unknown): string {
+  return typeof value === "string" ? value : "";
+}
+
+function fields(value: unknown): Record<string, unknown> {
+  return typeof value === "object" && value !== null ? (value as Record<string, unknown>) : {};
+}
+
+function instant(value: unknown): number | null {
+  const parsed = Date.parse(text(value));
+  return Number.isNaN(parsed) ? null : parsed;
+}
+
+function toRecord(raw: Record<string, unknown>, now: number): CaseRecord {
+  const packet = fields(raw.referral_packet);
+  const id = text(raw.case_id) || text(packet.case_id);
+  const name = text(raw.child_name) || text(fields(packet.child).name);
+  const status = text(raw.status) || "unknown";
+  const advocateId = text(raw.volunteer_id) || text(packet.volunteer_id);
+  const advocateName = text(raw.volunteer_name) || text(packet.volunteer_name);
+
+  const deadlines = (Array.isArray(packet.referrals) ? packet.referrals : [])
+    .map((entry) => instant(fields(entry).due_date))
+    .filter((value): value is number => value !== null);
+  const ahead = deadlines.filter((value) => value >= now);
+
+  return {
+    id,
+    name,
+    status,
+    advocateId,
+    advocateName,
+    openedAt: instant(raw.created_at),
+    nextDue: ahead.length > 0 ? Math.min(...ahead) : null,
+    everyDatePassed: deadlines.length > 0 && ahead.length === 0,
+    haystack: [id, name, status, advocateName, text(packet.scenario)]
+      .join(" ")
+      .toLowerCase(),
+  };
+}
+
+/**
+ * The advocate a case is grouped under.
+ *
+ * Keyed on the id where there is one, because two advocates could share a name;
+ * but the name is what the group is labelled with, so a case that carries a name
+ * and no id still lands in the right place.
+ */
+function advocateKey(item: CaseRecord): string {
+  return item.advocateId || item.advocateName || "";
+}
+
+const UNASSIGNED = "No advocate assigned";
+
+function advocateLabel(item: CaseRecord): string {
+  return item.advocateName || (item.advocateId ? item.advocateId : UNASSIGNED);
+}
+
+interface AdvocateGroup {
+  key: string;
+  label: string;
+  items: CaseRecord[];
+}
+
+/**
+ * Consecutive runs of one advocate's cases.
+ *
+ * A run rather than a bucket: the list is already ordered by advocate, so this
+ * only has to notice where one ends. That means a group can never contain a case
+ * the sort placed elsewhere, and paging can stay a slice of one flat list.
+ */
+function groupByAdvocate(items: CaseRecord[]): AdvocateGroup[] {
+  const groups: AdvocateGroup[] = [];
+  for (const item of items) {
+    const key = advocateKey(item);
+    const open = groups.at(-1);
+    if (open && open.key === key) open.items.push(item);
+    else groups.push({ key, label: advocateLabel(item), items: [item] });
+  }
+  return groups;
+}
+
+/**
+ * The four states a case can hold, from the control plane's own transition table.
+ *
+ * `quiet` is the difference between a badge and a dot: a case that is simply
+ * running is the norm across a caseload, and a badge every row carries is a
+ * badge that says nothing. Only the states that are not "running normally" —
+ * one waiting on a supervisor, one already finished — are worth the ink.
+ */
+const STATUS_META: Record<string, { label: string; variant: Tone; icon: IconName; quiet?: boolean }> =
+  {
+    draft: { label: "Awaiting activation", variant: "warn", icon: "clock" },
+    active: { label: "Starting up", variant: "brand", icon: "activity", quiet: true },
+    monitoring: { label: "CaseRelay is watching", variant: "brand", icon: "activity", quiet: true },
+    closed: { label: "Completed", variant: "seal", icon: "checkCircle" },
+  };
+
+function statusMeta(status: string) {
+  return (
+    STATUS_META[status] ?? {
+      label: status.replace(/_/g, " "),
+      variant: "neutral" as Tone,
+      icon: "activity" as IconName,
+      quiet: true,
+    }
+  );
+}
+
+interface CaseFilter {
+  id: string;
+  label: string;
+  icon: IconName;
+  match: (item: CaseRecord) => boolean;
+}
+
+const FILTERS: CaseFilter[] = [
+  { id: "all", label: "", icon: "cases", match: () => true },
+  {
+    id: "draft",
+    label: "Awaiting activation",
+    icon: "clock",
+    match: (item) => item.status === "draft",
+  },
+  {
+    id: "watching",
+    label: "CaseRelay is watching",
+    icon: "activity",
+    match: (item) => item.status === "active" || item.status === "monitoring",
+  },
+  {
+    id: "passed",
+    label: "Every date has passed",
+    icon: "alert",
+    match: (item) => item.everyDatePassed && item.status !== "closed",
+  },
+  {
+    id: "closed",
+    label: "Completed",
+    icon: "checkCircle",
+    match: (item) => item.status === "closed",
+  },
 ];
 
 const SORTS = [
   { id: "urgency", label: "Most urgent first" },
-  { id: "deadline", label: "Longest wait first" },
+  { id: "waiting", label: "Longest waiting first" },
+  { id: "recent", label: "Newest first" },
   { id: "alpha", label: "Name A–Z" },
 ] as const;
 
-const VIEWS = [
-  { id: "list", label: "List", icon: "list" as IconName },
-  { id: "grid", label: "Grid", icon: "grid" as IconName },
-] as const;
+type SortId = (typeof SORTS)[number]["id"];
 
-type ViewMode = (typeof VIEWS)[number]["id"];
-
-/** Layout choice is a personal habit, so it outlives the visit. */
-const VIEW_KEY = "caserelay.cases.view";
-
-const viewListeners = new Set<() => void>();
-
-function subscribeToView(listener: () => void) {
-  viewListeners.add(listener);
-  window.addEventListener("storage", listener);
-  return () => {
-    viewListeners.delete(listener);
-    window.removeEventListener("storage", listener);
-  };
-}
-
-function useStoredView(): [ViewMode, (next: ViewMode) => void] {
-  const view = useSyncExternalStore(
-    subscribeToView,
-    () => (window.localStorage.getItem(VIEW_KEY) === "grid" ? "grid" : "list"),
-    () => "list" as ViewMode,
-  );
-
-  function chooseView(next: ViewMode) {
-    window.localStorage.setItem(VIEW_KEY, next);
-    for (const listener of viewListeners) listener();
+function compare(sort: SortId, a: CaseRecord, b: CaseRecord) {
+  if (sort === "alpha") {
+    // An unnamed referral has nothing to alphabetise, so it goes to the end
+    // rather than sorting as an empty string at the top.
+    if (!a.name || !b.name) return Number(!a.name) - Number(!b.name) || a.id.localeCompare(b.id);
+    return a.name.localeCompare(b.name) || a.id.localeCompare(b.id);
   }
-
-  return [view, chooseView];
+  if (sort === "waiting") return (a.openedAt ?? LAST) - (b.openedAt ?? LAST);
+  if (sort === "recent") return (b.openedAt ?? 0) - (a.openedAt ?? 0);
+  if (a.everyDatePassed !== b.everyDatePassed) return Number(b.everyDatePassed) - Number(a.everyDatePassed);
+  return (a.nextDue ?? LAST) - (b.nextDue ?? LAST) || (a.openedAt ?? LAST) - (b.openedAt ?? LAST);
 }
 
-function urgencyScore(item: CaseSummary) {
-  let score = item.oldestGapDays;
-  if (item.flags.includes("approval_needed")) score += 40;
-  if (item.flags.includes("blocked")) score += 25;
-  if (item.flags.includes("recently_completed")) score -= 50;
-  return score;
+const DATE = new Intl.DateTimeFormat("en-GB", { day: "numeric", month: "short" });
+
+function openedLabel(at: number | null, now: number) {
+  if (at === null) return "—";
+  const days = Math.floor((now - at) / DAY);
+  if (days <= 0) return "Today";
+  if (days === 1) return "Yesterday";
+  return `${days} days ago`;
+}
+
+function dueLabel(at: number, now: number) {
+  const days = Math.ceil((at - now) / DAY);
+  if (days <= 0) return "today";
+  if (days === 1) return "tomorrow";
+  return `in ${days} days`;
 }
 
 export default function CasesPage() {
@@ -93,141 +238,179 @@ export default function CasesPage() {
 
 function CasesRoute() {
   const handoff = useSearchParams().get("q") ?? "";
-  return (
-    <div className={layout.stack}>
-      <LiveCasesSection />
-      <CasesView key={handoff} handoff={handoff} />
-    </div>
-  );
+  return <CaseList key={handoff} handoff={handoff} />;
 }
 
-// ---------------------------------------------------------------------------
-// Live cases from the control plane — shown above the mock caseload
-// ---------------------------------------------------------------------------
+type Load =
+  | { state: "loading" }
+  | { state: "error"; message: string }
+  // `now` is fixed at the moment the answer landed, so every relative date on
+  // the page is measured from the same instant and a re-render cannot shift one
+  // row's "3 days ago" out from under the row beside it.
+  | { state: "loaded"; cases: CaseRecord[]; now: number };
 
-function LiveCasesSection() {
-  const [liveCases, setLiveCases] = useState<Record<string, unknown>[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    listCases()
-      .then((cases) => {
-        setLiveCases(cases);
-        setLoading(false);
-      })
-      .catch((err: unknown) => {
-        setError(err instanceof Error ? err.message : String(err));
-        setLoading(false);
-      });
-  }, []);
-
-  if (loading || (liveCases.length === 0 && !error)) return null;
-
-  if (error) {
-    return (
-      <Card icon="activity" title="Live Cases">
-        <div className="flex items-start gap-3 rounded-control border border-danger/25 bg-danger/5 px-4 py-3">
-          <Icon name="alert" size={18} className="mt-0.5 shrink-0 text-danger" />
-          <p className={type_.small}>{error}</p>
-        </div>
-      </Card>
-    );
-  }
-
-  return (
-    <Card
-      icon="activity"
-      title="Live Cases"
-      subtitle={`${liveCases.length} case${liveCases.length === 1 ? "" : "s"} on the control plane`}
-      flush
-    >
-      <Rows>
-        {liveCases.map((c) => {
-          const id = String(c.case_id ?? "");
-          const name = String(c.child_name ?? id);
-          const status = String(c.status ?? "unknown");
-          return (
-            <li key={id}>
-              <Link
-                href={`/cases/${id}`}
-                className={cx(
-                  "flex items-center gap-3 border-l-2 border-l-accent",
-                  row.pad,
-                  row.hover,
-                )}
-              >
-                <Avatar name={name} size={36} variant="brand" />
-                <div className="min-w-0 flex-1">
-                  <div className="flex items-baseline gap-2">
-                    <span className="truncate text-[13.5px] font-semibold text-ink">{name}</span>
-                    <span className="shrink-0 font-mono text-[11px] text-ink-muted">{id}</span>
-                  </div>
-                  <p className={cx("mt-0.5 truncate", type_.small)}>
-                    {String(c.scenario ?? (c.referral_packet as Record<string, unknown> | undefined)?.scenario ?? "")} — {status}
-                  </p>
-                </div>
-                <Badge variant="accent" icon="activity">Live</Badge>
-                <Icon name="chevronRight" size={16} className="shrink-0 text-ink-muted" />
-              </Link>
-            </li>
-          );
-        })}
-      </Rows>
-    </Card>
-  );
-}
-
-function CasesView({ handoff }: { handoff: string }) {
-  const { cases } = useDemo();
-  const { copy } = useViewer();
+function CaseList({ handoff }: { handoff: string }) {
+  const { copy, role, profile } = useViewer();
+  // A supervisor does not read a caseload as a list of children; they read it as
+  // a list of the people they are responsible for. Nobody else has a team, so
+  // nobody else gets the grouping.
+  const grouped = role === "supervisor";
+  const [load, setLoad] = useState<Load>({ state: "loading" });
   const [query, setQuery] = useState(handoff);
   const [filter, setFilter] = useState("all");
-  const [sort, setSort] = useState<(typeof SORTS)[number]["id"]>("urgency");
-  const [view, chooseView] = useStoredView();
+  const [sort, setSort] = useState<SortId>("urgency");
+  const [visible, setVisible] = useState(PAGE);
+
+  useEffect(() => {
+    let live = true;
+    listCases()
+      .then((raw) => {
+        if (!live) return;
+        const now = Date.now();
+        setLoad({ state: "loaded", cases: raw.map((item) => toRecord(item, now)), now });
+      })
+      .catch((err: unknown) => {
+        if (!live) return;
+        setLoad({ state: "error", message: err instanceof Error ? err.message : String(err) });
+      });
+    return () => {
+      live = false;
+    };
+  }, []);
+
+  const loaded = load.state === "loaded" ? load.cases : EMPTY;
+
+  /**
+   * "My cases" has to mean mine.
+   *
+   * `GET /v1/cases` takes no volunteer filter and answers with the whole system,
+   * so an advocate's own list is narrowed here. A case that names no advocate at
+   * all is kept: it cannot be shown to belong to someone else, and dropping it
+   * would hide a case from the only person who might chase it.
+   */
+  const all = useMemo(() => {
+    const mine = profile.volunteerId;
+    if (!mine) return loaded;
+    return loaded.filter(
+      (item) =>
+        (!item.advocateId && !item.advocateName) ||
+        item.advocateId === mine ||
+        item.advocateName === profile.name,
+    );
+  }, [loaded, profile.volunteerId, profile.name]);
 
   const searched = useMemo(() => {
     const needle = query.trim().toLowerCase();
-    if (needle.length === 0) return cases;
-    return cases.filter((item) =>
-      [item.id, item.childAlias, item.county, item.headline, item.courtOrder]
-        .join(" ")
-        .toLowerCase()
-        .includes(needle),
-    );
-  }, [cases, query]);
+    if (needle.length === 0) return all;
+    return all.filter((item) => item.haystack.includes(needle));
+  }, [all, query]);
 
   const rows = useMemo(() => {
     const active = FILTERS.find((item) => item.id === filter);
-    const filtered = active?.flags
-      ? searched.filter((item) => item.flags.some((flag) => active.flags?.includes(flag)))
-      : searched;
-
-    return [...filtered].sort((a, b) => {
-      if (sort === "alpha") return a.childAlias.localeCompare(b.childAlias);
-      if (sort === "deadline") return b.oldestGapDays - a.oldestGapDays;
-      return urgencyScore(b) - urgencyScore(a);
+    const narrowed = active && active.id !== "all" ? searched.filter(active.match) : searched;
+    const sorted = [...narrowed].sort((a, b) => compare(sort, a, b));
+    if (!grouped) return sorted;
+    // Advocates alphabetically and — because sort is stable — the chosen order
+    // kept inside each one. Ordering the flat list here rather than bucketing at
+    // render time is what lets "show 40 more" keep paging one list.
+    return sorted.sort((a, b) => {
+      const left = advocateLabel(a);
+      const right = advocateLabel(b);
+      // A case nobody holds goes last. It is a gap to close, not an advocate.
+      if ((left === UNASSIGNED) !== (right === UNASSIGNED)) return left === UNASSIGNED ? 1 : -1;
+      return left.localeCompare(right);
     });
-  }, [searched, filter, sort]);
+  }, [searched, filter, sort, grouped]);
+
+  /**
+   * How large each advocate's group really is, so a header describes the group
+   * rather than only the rows paged in so far. `awaiting` is drawn out because it
+   * is the one number in the group the supervisor can actually act on.
+   */
+  const groupSizes = useMemo(() => {
+    const sizes = new Map<string, { total: number; awaiting: number }>();
+    if (!grouped) return sizes;
+    for (const item of rows) {
+      const key = advocateKey(item);
+      const entry = sizes.get(key) ?? { total: 0, awaiting: 0 };
+      entry.total += 1;
+      if (item.status === "draft") entry.awaiting += 1;
+      sizes.set(key, entry);
+    }
+    return sizes;
+  }, [rows, grouped]);
 
   /**
    * Counts follow the search rather than the whole caseload, so each entry in the
    * menu answers the question you actually have while typing — how many of these
-   * results are overdue — and the count on the closed menu is what you can see.
+   * results are still waiting on a supervisor.
    */
   const counts = useMemo(
     () =>
       Object.fromEntries(
         FILTERS.map((item) => [
           item.id,
-          item.flags
-            ? searched.filter((entry) => entry.flags.some((flag) => item.flags?.includes(flag)))
-                .length
-            : searched.length,
+          item.id === "all" ? searched.length : searched.filter(item.match).length,
         ]),
       ),
     [searched],
   );
+
+  // A narrower list is a different list, and the page you had reached in the old
+  // one means nothing in it.
+  function narrowing<T>(apply: (value: T) => void) {
+    return (value: T) => {
+      apply(value);
+      setVisible(PAGE);
+    };
+  }
+
+  if (load.state === "loading") {
+    return (
+      <Card
+        icon="cases"
+        title={copy.cases.listing.title}
+        fill
+        className={layout.fillHeight}
+        bodyClassName="flex flex-col justify-center"
+      >
+        <Loading icon="cases" title="Loading your caseload…" />
+      </Card>
+    );
+  }
+
+  if (load.state === "error") {
+    return (
+      <Card icon="alert" title={copy.cases.listing.title}>
+        <div className="flex items-start gap-3 rounded-control border border-danger/25 bg-danger/5 px-4 py-3">
+          <Icon name="alert" size={18} className="mt-0.5 shrink-0 text-danger" />
+          <div className="min-w-0">
+            <p className="text-[13px] font-medium text-danger">Couldn&apos;t load your caseload</p>
+            <p className={cx("mt-1", type_.small)}>{load.message}</p>
+          </div>
+        </div>
+      </Card>
+    );
+  }
+
+  if (all.length === 0) {
+    return (
+      <Card icon="cases" title={copy.cases.listing.title}>
+        <EmptyState icon="cases" title={copy.cases.none.title} hint={copy.cases.none.hint} />
+      </Card>
+    );
+  }
+
+  const shown = rows.slice(0, visible);
+  const narrowed = rows.length !== all.length;
+
+  const total = `${all.length} ${all.length === 1 ? "case" : "cases"}`;
+  const advocateCount = groupSizes.size;
+  const subtitle = narrowed
+    ? `${rows.length} of ${all.length} cases`
+    : grouped && advocateCount > 0
+      ? `${total} across ${advocateCount} ${advocateCount === 1 ? "advocate" : "advocates"}`
+      : total;
 
   const controls = (
     <div className="flex flex-wrap items-center gap-2">
@@ -239,7 +422,7 @@ function CasesView({ handoff }: { handoff: string }) {
         />
         <input
           value={query}
-          onChange={(event) => setQuery(event.target.value)}
+          onChange={(event) => narrowing(setQuery)(event.target.value)}
           placeholder={copy.cases.searchPlaceholder}
           className={control.input}
         />
@@ -250,7 +433,7 @@ function CasesView({ handoff }: { handoff: string }) {
         value={filter}
         counts={counts}
         allLabel={copy.cases.filterAll}
-        onChange={setFilter}
+        onChange={narrowing(setFilter)}
       />
 
       {/* Stripped of its native chrome so it reads as the same kind of control as
@@ -260,7 +443,7 @@ function CasesView({ handoff }: { handoff: string }) {
         <span className="sr-only">Sort</span>
         <select
           value={sort}
-          onChange={(event) => setSort(event.target.value as typeof sort)}
+          onChange={(event) => narrowing(setSort)(event.target.value as SortId)}
           className="appearance-none bg-transparent focus:outline-none"
         >
           {SORTS.map((option) => (
@@ -275,33 +458,6 @@ function CasesView({ handoff }: { handoff: string }) {
           className="pointer-events-none absolute top-1/2 right-2.5 -translate-y-1/2 opacity-70"
         />
       </label>
-
-      <div
-        className="flex items-center gap-0.5 rounded-full border border-line bg-surface-soft p-0.5"
-        role="group"
-        aria-label="Result layout"
-      >
-        {VIEWS.map((option) => (
-          <button
-            key={option.id}
-            type="button"
-            onClick={() => chooseView(option.id)}
-            aria-pressed={view === option.id}
-            title={`${option.label} view`}
-            className={cx(
-              "flex items-center gap-1.5 rounded-full px-2.5 py-1.5 text-[12px] font-medium transition-colors",
-              view === option.id
-                ? "bg-surface text-brand-deep shadow-card"
-                : "text-ink-muted hover:text-ink-soft",
-            )}
-          >
-            <Icon name={option.icon} size={14} />
-            {/* The words are the first thing to go: two shapes this familiar can
-                hold the choice on their own until the header has room again. */}
-            <span className="hidden 2xl:inline">{option.label}</span>
-          </button>
-        ))}
-      </div>
     </div>
   );
 
@@ -309,12 +465,11 @@ function CasesView({ handoff }: { handoff: string }) {
     <Card
       icon="cases"
       title={copy.cases.listing.title}
-      subtitle={copy.cases.listing.subtitle}
+      subtitle={subtitle}
       action={controls}
-      flush={rows.length > 0 && view === "list"}
+      flush={rows.length > 0}
       // The caseload is the page, so it takes the window: search, filters and the
-      // column names stay put at the top, the rows scroll under them, and six
-      // cases no longer leave half a screen of nothing underneath.
+      // column names stay put at the top, and the rows scroll under them.
       fill
       className={layout.fillHeight}
       // Nothing found: the notice sits in the middle of the space rather than at
@@ -323,20 +478,42 @@ function CasesView({ handoff }: { handoff: string }) {
     >
       {rows.length === 0 ? (
         <EmptyState icon="search" title={copy.cases.empty.title} hint={copy.cases.empty.hint} />
-      ) : view === "grid" ? (
-        <ul className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3 3xl:grid-cols-4">
-          {rows.map((item) => (
-            <CaseCard key={item.id} item={item} copy={copy} />
-          ))}
-        </ul>
       ) : (
         <>
           <ColumnHeader copy={copy} />
-          <Rows>
-            {rows.map((item) => (
-              <CaseRow key={item.id} item={item} copy={copy} />
-            ))}
-          </Rows>
+          {grouped ? (
+            groupByAdvocate(shown).map((group) => (
+              <div key={group.key || group.label}>
+                <AdvocateHeader label={group.label} size={groupSizes.get(group.key)} />
+                <Rows>
+                  {group.items.map((item) => (
+                    <CaseRow key={item.id} item={item} now={load.now} copy={copy} />
+                  ))}
+                </Rows>
+              </div>
+            ))
+          ) : (
+            <Rows>
+              {shown.map((item) => (
+                <CaseRow key={item.id} item={item} now={load.now} copy={copy} />
+              ))}
+            </Rows>
+          )}
+          {shown.length < rows.length && (
+            <div className="flex flex-wrap items-center justify-center gap-3 border-t border-line px-5 py-4">
+              <button
+                type="button"
+                onClick={() => setVisible((count) => count + PAGE)}
+                className={control.secondary}
+              >
+                Show {Math.min(PAGE, rows.length - shown.length)} more
+                <Icon name="chevronDown" size={14} />
+              </button>
+              <span className={type_.meta}>
+                Showing {shown.length} of {rows.length}
+              </span>
+            </div>
+          )}
         </>
       )}
     </Card>
@@ -344,15 +521,62 @@ function CasesView({ handoff }: { handoff: string }) {
 }
 
 /**
- * The list view's column track, shared by the header row and every case row so
- * the values line up down the page instead of each row restating its own field
- * names.
+ * Who the cases beneath it belong to.
  *
- * Below `lg` there is no grid: seven columns will not fit, so a row falls back
- * to stacking and every cell labels itself again.
+ * Counts describe the whole group, not the rows paged in so far, so the header
+ * does not appear to shrink as you scroll. "Waiting on you" is a badge rather
+ * than another count because it is the only figure here the supervisor can act
+ * on, and it should read differently from the ones they cannot.
+ */
+function AdvocateHeader({
+  label,
+  size,
+}: {
+  label: string;
+  size?: { total: number; awaiting: number };
+}) {
+  const unassigned = label === UNASSIGNED;
+
+  return (
+    <div className="flex items-center gap-3 border-b border-line bg-surface-soft/70 px-5 py-2.5">
+      {unassigned ? (
+        <span className="flex size-7 shrink-0 items-center justify-center rounded-full border border-dashed border-line-strong text-ink-muted">
+          <Icon name="user" size={14} />
+        </span>
+      ) : (
+        <Avatar name={label} size={28} variant="accent" />
+      )}
+      <span
+        className={cx(
+          "min-w-0 flex-1 truncate text-[12.5px] font-semibold",
+          unassigned ? "text-ink-muted italic" : "text-ink",
+        )}
+      >
+        {label}
+      </span>
+      {size && size.awaiting > 0 && (
+        <Badge variant="warn" icon="clock">
+          {size.awaiting} waiting on you
+        </Badge>
+      )}
+      {size && (
+        <span className={cx("shrink-0 tabular-nums", type_.meta)}>
+          {size.total} {size.total === 1 ? "case" : "cases"}
+        </span>
+      )}
+    </div>
+  );
+}
+
+/**
+ * The column track, shared by the header row and every case row so the values
+ * line up down the page instead of each row restating its own field names.
+ *
+ * Below `lg` there is no grid: the columns will not fit, so a row falls back to
+ * stacking and every cell labels itself again.
  */
 const COLUMNS =
-  "lg:grid lg:grid-cols-[minmax(0,2.5fr)_minmax(0,1.15fr)_132px_minmax(0,0.85fr)_minmax(0,1fr)_minmax(0,1fr)_16px] lg:items-center lg:gap-x-4";
+  "lg:grid lg:grid-cols-[minmax(0,2.4fr)_minmax(0,1.4fr)_minmax(0,1.1fr)_minmax(0,0.8fr)_16px] lg:items-center lg:gap-x-4";
 
 /** The field names, stated once above the list rather than inside every row. */
 function ColumnHeader({ copy }: { copy: ReturnType<typeof useViewer>["copy"] }) {
@@ -372,22 +596,134 @@ function ColumnHeader({ copy }: { copy: ReturnType<typeof useViewer>["copy"] }) 
       )}
       aria-hidden="true"
     >
-      {[columns.case, columns.status, columns.commitments, columns.deadline, columns.third, columns.fourth].map(
-        (label) => (
-          <span key={label} className={cx("truncate", type_.label)}>
-            {label}
-          </span>
-        ),
-      )}
+      {[columns.case, columns.status, columns.deadline, columns.opened].map((label) => (
+        <span key={label} className={cx("truncate", type_.label)}>
+          {label}
+        </span>
+      ))}
       <span />
     </div>
   );
 }
 
+function CaseRow({
+  item,
+  now,
+  copy,
+}: {
+  item: CaseRecord;
+  now: number;
+  copy: ReturnType<typeof useViewer>["copy"];
+}) {
+  const stalled = item.everyDatePassed && item.status !== "closed";
+
+  return (
+    <li>
+      <Link
+        href={`/cases/${item.id}`}
+        className={cx(
+          "block border-l-2",
+          row.pad,
+          row.hover,
+          COLUMNS,
+          stalled ? "border-l-danger" : "border-l-transparent",
+        )}
+      >
+        <div className="flex min-w-0 items-center gap-3">
+          {item.name ? (
+            <Avatar name={item.name} size={34} variant={stalled ? "danger" : "brand"} />
+          ) : (
+            // No initial to draw, so the placeholder is a shape rather than an
+            // empty circle with nothing in it.
+            <span className="flex size-[34px] shrink-0 items-center justify-center rounded-full border border-line-strong bg-surface-muted text-ink-muted">
+              <Icon name="user" size={16} />
+            </span>
+          )}
+          <div className="min-w-0">
+            <span
+              className={cx(
+                "block truncate text-[13.5px] font-semibold",
+                item.name ? "text-ink" : "text-ink-muted",
+              )}
+            >
+              {item.name || copy.cases.unnamed}
+            </span>
+            <span className={cx("block truncate", type_.monoSmall)}>{item.id}</span>
+          </div>
+        </div>
+
+        <div className="mt-3 flex flex-wrap items-center gap-1.5 lg:mt-0">
+          <CaseStatus status={item.status} />
+          {stalled && (
+            <Badge variant="danger" icon="alert">
+              Every date has passed
+            </Badge>
+          )}
+        </div>
+
+        {/* `lg:contents` dissolves this wrapper into the row's own grid, so the
+            two cells become columns there and a stacked block below it. */}
+        <div className="mt-3 grid grid-cols-2 gap-x-4 gap-y-3 border-t border-line pt-3 lg:contents">
+          <Cell label={copy.cases.columns.deadline}>
+            {item.nextDue === null ? (
+              <span className="text-ink-muted">—</span>
+            ) : (
+              <span className="tabular-nums">
+                {DATE.format(item.nextDue)}
+                <span className="text-ink-muted"> · {dueLabel(item.nextDue, now)}</span>
+              </span>
+            )}
+          </Cell>
+          <Cell label={copy.cases.columns.opened}>
+            <span className="tabular-nums">{openedLabel(item.openedAt, now)}</span>
+          </Cell>
+        </div>
+
+        <Icon name="chevronRight" size={16} className="hidden shrink-0 text-ink-muted lg:block" />
+      </Link>
+    </li>
+  );
+}
+
 /**
- * Six named slices of the caseload, one at a time. As chips they were a second
- * row of controls wide enough to push the list itself below the fold, and the
- * five you were not using outnumbered the one you were.
+ * Where the case stands. A case that is simply being watched is the ordinary
+ * condition of a caseload, so it reads as a dot and a phrase; the states that
+ * are waiting on someone or finished are the ones that get a badge.
+ */
+function CaseStatus({ status }: { status: string }) {
+  const meta = statusMeta(status);
+  if (!meta.quiet) {
+    return (
+      <Badge variant={meta.variant} icon={meta.icon}>
+        {meta.label}
+      </Badge>
+    );
+  }
+  return (
+    <span className={cx("flex min-w-0 items-center gap-2", type_.small)}>
+      <Dot variant={meta.variant} />
+      <span className="truncate">{meta.label}</span>
+    </span>
+  );
+}
+
+/**
+ * One value in the table. The label is the column header's job at `lg`; below
+ * that there is no header, so the cell carries it.
+ */
+function Cell({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <div className="min-w-0">
+      <p className={cx("lg:hidden", type_.label)}>{label}</p>
+      <div className="mt-1 min-w-0 truncate text-[12.5px] text-ink-soft lg:mt-0">{children}</div>
+    </div>
+  );
+}
+
+/**
+ * Named slices of the caseload, one at a time. As chips they were a second row
+ * of controls wide enough to push the list itself below the fold, and the four
+ * you were not using outnumbered the one you were.
  */
 function FilterMenu({
   value,
@@ -419,7 +755,7 @@ function FilterMenu({
     };
   }, [open]);
 
-  const label = (option: Filter) => (option.id === "all" ? allLabel : option.label);
+  const label = (option: CaseFilter) => (option.id === "all" ? allLabel : option.label);
   const active = FILTERS.find((option) => option.id === value) ?? FILTERS[0];
 
   return (
@@ -468,195 +804,6 @@ function FilterMenu({
           })}
         </div>
       )}
-    </div>
-  );
-}
-
-function CaseRow({
-  item,
-  copy,
-}: {
-  item: CaseSummary;
-  copy: ReturnType<typeof useViewer>["copy"];
-}) {
-  const isPrimary = item.id === PRIMARY_CASE_ID;
-  const closed = item.commitmentCount - item.openCommitments;
-  const urgent = item.flags.some((flag) => flag === "overdue" || flag === "blocked");
-
-  return (
-    <li>
-      <Link
-        href={`/cases/${item.id}`}
-        className={cx(
-          "block border-l-2",
-          row.pad,
-          COLUMNS,
-          urgent ? "border-l-danger" : isPrimary ? "border-l-brand" : "border-l-transparent",
-          isPrimary ? row.selected : row.hover,
-        )}
-      >
-        <div className="flex min-w-0 items-center gap-3">
-          <Avatar
-            name={item.childAlias}
-            size={36}
-            variant={urgent ? "danger" : isPrimary ? "brand" : "neutral"}
-          />
-          <div className="min-w-0">
-            <div className="flex min-w-0 items-baseline gap-2">
-              <span className="truncate text-[13.5px] font-semibold text-ink">
-                {item.childAlias}
-              </span>
-              <span className="shrink-0 font-mono text-[11px] text-ink-muted">{item.id}</span>
-            </div>
-            <p className={cx("mt-0.5 truncate", type_.small)}>{item.headline}</p>
-          </div>
-        </div>
-
-        <div className="mt-3 flex flex-wrap items-center gap-1.5 lg:mt-0">
-          {isPrimary && (
-            <Badge variant="brand" icon="sparkle">
-              Walkthrough case
-            </Badge>
-          )}
-          {item.flags.map((flag) => (
-            <FlagBadge key={flag} flag={flag} />
-          ))}
-        </div>
-
-        {/* `lg:contents` dissolves this wrapper into the row's own grid, so the
-            four cells become columns there and a stacked block below it. */}
-        <div className="mt-3 grid grid-cols-2 gap-x-4 gap-y-3 border-t border-line pt-3 sm:grid-cols-4 lg:contents">
-          <Cell label={copy.cases.columns.commitments}>
-            <span className="tabular-nums">
-              {closed} of {item.commitmentCount}
-            </span>
-            <ProgressBar
-              value={closed}
-              total={item.commitmentCount}
-              variant={urgent ? "warn" : "seal"}
-              hideValue
-              className="mt-1.5"
-            />
-          </Cell>
-          <Cell label={copy.cases.columns.deadline}>
-            <span className="tabular-nums">{item.nextDeadline}</span>
-          </Cell>
-          <Cell label={copy.cases.columns.third}>{item.courtOrder}</Cell>
-          <Cell label={copy.cases.columns.fourth}>{item.supervisor}</Cell>
-        </div>
-
-        <Icon
-          name="chevronRight"
-          size={16}
-          className="hidden shrink-0 text-ink-muted lg:block"
-        />
-      </Link>
-    </li>
-  );
-}
-
-/**
- * One value in the table. The label is the column header's job at `lg`; below
- * that there is no header, so the cell carries it.
- */
-function Cell({ label, children }: { label: string; children: React.ReactNode }) {
-  return (
-    <div className="min-w-0">
-      <p className={cx("lg:hidden", type_.label)}>{label}</p>
-      <div className="mt-1 min-w-0 truncate text-[12.5px] text-ink-soft lg:mt-0">{children}</div>
-    </div>
-  );
-}
-
-/** Grid view: the same case, reshaped so a wall of them stays scannable. */
-function CaseCard({
-  item,
-  copy,
-}: {
-  item: CaseSummary;
-  copy: ReturnType<typeof useViewer>["copy"];
-}) {
-  const isPrimary = item.id === PRIMARY_CASE_ID;
-  const closed = item.commitmentCount - item.openCommitments;
-  const urgent = item.flags.some((flag) => flag === "overdue" || flag === "blocked");
-
-  return (
-    <li>
-      <Link
-        href={`/cases/${item.id}`}
-        className={cx(
-          "flex h-full flex-col rounded-control border px-4 py-3.5 transition-colors",
-          isPrimary
-            ? "border-brand/30 bg-brand-soft/50 hover:bg-brand-soft"
-            : "border-line hover:bg-surface-soft",
-        )}
-      >
-        <div className="flex items-start gap-3">
-          <Avatar
-            name={item.childAlias}
-            size={38}
-            variant={urgent ? "danger" : isPrimary ? "brand" : "neutral"}
-          />
-          <div className="min-w-0 flex-1">
-            <span className="block truncate text-[13.5px] font-semibold text-ink">
-              {item.childAlias}
-            </span>
-            <span className="mt-0.5 block truncate font-mono text-[11px] text-ink-muted">
-              {item.id}
-            </span>
-          </div>
-          <Icon name="chevronRight" size={16} className="mt-1 shrink-0 text-ink-muted" />
-        </div>
-
-        <p className={cx("mt-2.5 line-clamp-2", type_.small)}>{item.headline}</p>
-
-        <div className="mt-2.5 flex flex-wrap gap-1.5">
-          {isPrimary && (
-            <Badge variant="brand" icon="sparkle">
-              Walkthrough case
-            </Badge>
-          )}
-          {item.flags.map((flag) => (
-            <FlagBadge key={flag} flag={flag} />
-          ))}
-        </div>
-
-        <div className="mt-auto pt-3.5">
-          <ProgressBar
-            value={closed}
-            total={item.commitmentCount}
-            variant={urgent ? "warn" : "seal"}
-          />
-          <div className="mt-3 grid grid-cols-2 gap-3 border-t border-line pt-3">
-            <Meta icon="check" label={copy.cases.columns.commitments}>
-              {closed} of {item.commitmentCount}
-            </Meta>
-            <Meta icon="calendar" label={copy.cases.columns.deadline}>
-              {item.nextDeadline}
-            </Meta>
-          </div>
-        </div>
-      </Link>
-    </li>
-  );
-}
-
-function Meta({
-  icon,
-  label,
-  children,
-}: {
-  icon: IconName;
-  label: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <div className="min-w-0">
-      <p className="flex items-center gap-1.5 text-[10.5px] font-medium tracking-[0.06em] text-ink-muted uppercase">
-        <Icon name={icon} size={12} />
-        {label}
-      </p>
-      <p className="mt-1 truncate text-[12.5px] text-ink-soft">{children}</p>
     </div>
   );
 }

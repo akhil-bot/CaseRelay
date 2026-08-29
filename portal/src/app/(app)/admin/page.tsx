@@ -27,6 +27,11 @@ export default function AdminPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
+  // Read before the create handler is declared, because that handler publishes
+  // into the registry: a case made by clicking here has to be referable by name
+  // in the chat afterwards, the same as one the chat made itself.
+  const { subscribe, pushCase } = useToolEvents();
+
   useEffect(() => {
     listScenarios()
       .then(setScenarios)
@@ -69,13 +74,21 @@ export default function AdminPage() {
         const result = await createCase(scenario.id, dueIn || undefined);
         setCreatedCase(result);
         setPhase("created");
+        // `start_outreach` resolves a case only through this registry, so
+        // without this the case exists on the control plane but the chat cannot
+        // name it — "run it" would answer that no case was created.
+        pushCase({
+          caseId: result.case_id,
+          scenario: scenario.id,
+          childName: scenario.child_name,
+        });
       } catch (err: unknown) {
         setError(err instanceof Error ? err.message : String(err));
       } finally {
         setCreating(false);
       }
     },
-    [dueIn],
+    [dueIn, pushCase],
   );
 
   const startEventStream = useCallback((runId: string) => {
@@ -146,7 +159,6 @@ export default function AdminPage() {
     [createdCase, startEventStream],
   );
 
-  const { subscribe } = useToolEvents();
   useEffect(() => subscribe(copilotCallbacks), [subscribe, copilotCallbacks]);
 
   const handleDelete = useCallback(async () => {

@@ -2,6 +2,7 @@
 
 import {
   CopilotChatAssistantMessage,
+  useRenderToolCall,
   type CopilotChatAssistantMessageProps,
   type CopilotChatToolCallsViewProps,
   type CopilotModalHeaderProps,
@@ -60,6 +61,21 @@ const STEP_COPY: Record<string, { doing: string; done: string }> = {
 };
 
 const STEP_FALLBACK = { doing: "Working on it", done: "Finished that step" };
+
+/**
+ * The steps that draw something of their own instead of reading as one line.
+ *
+ * The default is the line, not the widget. A step gets a card here only where
+ * the reply is not the point — a case waiting on a decision needs a button, and
+ * a report needs to become a file — and both would be worse as a paragraph
+ * asking the volunteer to type their answer back.
+ *
+ * Everything else stays in `StepLine`, which is why this is a set and not a
+ * switch: the panel's rule is still that a volunteer never sees a tool name, and
+ * a widget has to earn its way out of that. Names listed here are skipped by the
+ * step line, so a card is never captioned by a sentence saying the same thing.
+ */
+const WIDGET_TOOLS = new Set(["create_case", "case_report"]);
 
 /**
  * When each reply first appeared. The transport carries no timestamp, so the
@@ -151,10 +167,51 @@ function StepLine({ steps, messages }: { steps: ToolStep[]; messages: ChatMessag
   });
   const running = Array.from(settledByName.values()).some((done) => !done);
 
+  if (phrases.length === 0) return null;
+
   return (
     <p className={cx(type_.meta, "mb-1 leading-snug", running && "motion-safe:animate-pulse")}>
       {Array.from(new Set(phrases)).join(" · ")}
     </p>
+  );
+}
+
+/**
+ * The widgets belonging to one reply.
+ *
+ * This slot is taken over rather than left to the SDK, which renders every tool
+ * call it has a renderer for. Filtering to `WIDGET_TOOLS` keeps that from
+ * becoming a second, louder version of the step line the moment a renderer is
+ * registered for something ordinary.
+ *
+ * `useRenderToolCall` is the SDK's own dispatcher, so a widget is still declared
+ * next to the tool that raises it, in `CopilotProvider`. The tool message is
+ * looked up by id and passed along because that is what carries the result — the
+ * card cannot be drawn from the call's arguments alone.
+ */
+function WidgetToolCalls({ message, messages }: CopilotChatToolCallsViewProps) {
+  const renderToolCall = useRenderToolCall();
+
+  const widgets = (message.toolCalls ?? []).filter((call) =>
+    WIDGET_TOOLS.has(call.function.name),
+  );
+  if (widgets.length === 0) return <></>;
+
+  const results = messages ?? [];
+
+  return (
+    <>
+      {widgets.map((call) => (
+        <div key={call.id}>
+          {renderToolCall({
+            toolCall: call,
+            toolMessage: results.find(
+              (m) => m.role === "tool" && m.toolCallId === call.id,
+            ) as Parameters<typeof renderToolCall>[0]["toolMessage"],
+          })}
+        </div>
+      ))}
+    </>
   );
 }
 
@@ -189,7 +246,9 @@ function ReplyTime({ id }: { id: string }) {
  *
  * `toolCallsView` is taken over rather than filled: the SDK renders one element
  * per call and puts them under the prose, where the mechanism would read as part
- * of the answer. One line, above the answer, is what this panel wants.
+ * of the answer. One line, above the answer, is what this panel wants — except
+ * for the few steps in `WIDGET_TOOLS`, which do draw, and which the SDK's slot
+ * places under the prose exactly where a card belongs.
  *
  * The toolbar is cut back to copy alone. Thumbs-up/down posts feedback nowhere,
  * read-aloud needs a voice backend, regenerate re-bills a run, and the inspector
@@ -204,6 +263,11 @@ function AssistantMessageView({
   const thread = messages ?? [];
   const steps = message.toolCalls ?? [];
   if (!hasText(message) && steps.length === 0) return null;
+
+  // A widget says what it did by existing, so the step line covers only the
+  // steps that have no other representation. Both can still appear on one reply:
+  // resolving a name is a line, setting the case up is a card.
+  const quiet = steps.filter((step) => !WIDGET_TOOLS.has(step.function.name));
 
   const leads = opensReply(
     thread.filter((m) => !UNDRAWN_ROLES.has(m.role)),
@@ -221,7 +285,7 @@ function AssistantMessageView({
   return (
     <div className={cx(gap)}>
       {leads && <ReplyTime id={message.id} />}
-      {steps.length > 0 && <StepLine steps={steps} messages={thread} />}
+      {quiet.length > 0 && <StepLine steps={quiet} messages={thread} />}
 
       <CopilotChatAssistantMessage
         {...props}
@@ -232,7 +296,7 @@ function AssistantMessageView({
         readAloudButton={Hidden}
         regenerateButton={Hidden}
         inspectorButton={Hidden}
-        toolCallsView={Hidden}
+        toolCallsView={WidgetToolCalls}
         className={cx("min-w-0", className)}
       />
     </div>

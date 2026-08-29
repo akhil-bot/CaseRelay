@@ -1,17 +1,12 @@
 import { ACTIVITY } from "@/lib/mock/activity";
-import { APPROVALS } from "@/lib/mock/approvals";
 import { BASE_COMMITMENTS, CASES, PRIMARY_CASE_ID } from "@/lib/mock/cases";
-import { CAPABILITY_PROOFS, POLICY_DECISIONS } from "@/lib/mock/policy";
 import { DEMO_STEPS } from "@/lib/mock/steps";
 import type {
   ActivityEvent,
-  ApprovalRequest,
-  CapabilityProof,
   CaseFlag,
   CaseSummary,
   Commitment,
   CommitmentStatus,
-  PolicyDecision,
 } from "@/lib/types";
 
 type Patch = Partial<Pick<Commitment, "status" | "detail" | "lastUpdate" | "daysOverdue">> & {
@@ -130,7 +125,7 @@ const COMMITMENT_PATCHES: Record<number, Record<string, Patch>> = {
   6: {
     "CM-03": {
       status: "blocked",
-      detail: "Escalation drafted to the district enrollment office. Waiting on supervisor approval AP-8802.",
+      detail: "Escalation drafted to the district enrollment office. Waiting on approval before it can be sent.",
       lastUpdate: "Day 17 · 09:04",
       daysOverdue: 17,
     },
@@ -195,63 +190,23 @@ export function deriveActivity(step: number): ActivityEvent[] {
   return ACTIVITY.filter((event) => event.step <= step);
 }
 
-export function derivePolicyDecisions(step: number): PolicyDecision[] {
-  return POLICY_DECISIONS.filter((decision) => decision.step <= step);
-}
-
-export type ProvenCapability = CapabilityProof & { proven: boolean };
-
-export function deriveCapabilityProofs(step: number): ProvenCapability[] {
-  return CAPABILITY_PROOFS.map((proof) => ({
-    ...proof,
-    proven: proof.provenAtStep <= step,
-  }));
-}
-
-export function derivePendingApprovals(
-  step: number,
-  decided: Record<string, "approved" | "declined">,
-): ApprovalRequest[] {
-  return APPROVALS.filter((approval) => {
-    if (approval.availableFromStep > step) return false;
-    if (decided[approval.id]) return false;
-    if (approval.autoResolvedAtStep !== undefined && step >= approval.autoResolvedAtStep) return false;
-    return true;
-  });
-}
-
-export function deriveApprovalOutcome(
-  approval: ApprovalRequest,
-  step: number,
-  decided: Record<string, "approved" | "declined">,
-): "pending" | "approved" | "declined" | "not_yet_raised" {
-  if (approval.availableFromStep > step) return "not_yet_raised";
-  if (decided[approval.id]) return decided[approval.id];
-  if (approval.autoResolvedAtStep !== undefined && step >= approval.autoResolvedAtStep) {
-    return "approved";
-  }
-  return "pending";
-}
-
 /**
  * The scenario clock only drives CR-1042. Every other case is a static synthetic
  * record, so the list is rebuilt with the live case folded back into it.
+ *
+ * Nothing here flags a case as awaiting approval. What is held for a person is
+ * read from the control plane rather than from the walkthrough — see
+ * src/lib/live-approvals.tsx.
  */
-export function deriveCases(
-  step: number,
-  commitments: Commitment[],
-  pendingApprovals: ApprovalRequest[],
-): CaseSummary[] {
+export function deriveCases(step: number, commitments: Commitment[]): CaseSummary[] {
   const open = commitments.filter((item) => OPEN_STATUSES.includes(item.status));
   const education = commitments.find((item) => item.id === "CM-03");
   const overdueDays = education?.daysOverdue ?? 0;
-  const needsApproval = pendingApprovals.some((item) => item.caseId === PRIMARY_CASE_ID);
 
   const flags: CaseFlag[] = [];
   if (step === 0) flags.push("intake_pending");
   if (overdueDays > 0) flags.push("overdue");
   if (education?.status === "blocked") flags.push("blocked");
-  if (needsApproval) flags.push("approval_needed");
   if (flags.length === 0) flags.push("on_track");
 
   const headline =

@@ -280,7 +280,7 @@ export const ACTIVITY: ActivityEvent[] = [
     actor: "Dana Whitfield (supervisor)",
     summary: "Escalation approved and sent",
     detail:
-      "Approval digest AP-8802 bound to the exact disclosed-field set. Sent to the district enrollment office.",
+      "The approval was bound to the exact disclosed-field set. Sent to the district enrollment office.",
     spanMs: 0,
     outcome: "allow",
   },

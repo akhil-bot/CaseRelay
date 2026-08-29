@@ -5,7 +5,7 @@ import {
   useAgent,
   useCopilotChatConfiguration,
 } from "@copilotkit/react-core/v2";
-import { useCallback, useEffect } from "react";
+import { useCallback, useEffect, useState } from "react";
 import type { ButtonHTMLAttributes } from "react";
 import { Icon } from "@/components/icons";
 import { cx, row, type as type_ } from "@/design/tokens";
@@ -19,21 +19,35 @@ import { useConversations } from "@/lib/copilot/conversations";
  * `setActiveThreadId` on the chat configuration, both non-explicit so the
  * welcome screen returns and no server replay is attempted. What it does not
  * own is the transcript, so `ConversationBridge` files each one as it happens
- * and puts it back when a thread is reopened.
+ * and puts it back when a thread is reopened — whether the volunteer picked it
+ * from the switcher or simply came back to a portal they had left open.
  */
 
 /**
- * Shuttles transcripts between the agent and the session store. Renders
+ * Shuttles transcripts between the agent and the conversation store. Renders
  * nothing, and is mounted as a leaf so the per-token re-render that drives the
  * capture stops here instead of reaching the panel.
  */
 export function ConversationBridge() {
-  const threadId = useCopilotChatConfiguration()?.threadId;
+  const configuration = useCopilotChatConfiguration();
+  const threadId = configuration?.threadId;
   const { agent } = useAgent({
     agentId: CASERELAY_AGENT_ID,
     updates: [UseAgentUpdate.OnMessagesChanged],
   });
-  const { remember, recall } = useConversations();
+  const { remember, recall, pendingRestoreId, claimRestore } = useConversations();
+
+  // Pick up where the volunteer left off. The SDK mints a fresh thread on every
+  // load, so continuing one is a switch to it: same non-explicit path a row in
+  // the switcher takes, which the refill below then answers. Claimed first so a
+  // volunteer who starts typing before the store is read is not interrupted by
+  // a switch, and so this only ever happens once.
+  useEffect(() => {
+    if (!pendingRestoreId || !configuration) return;
+    claimRestore();
+    if (pendingRestoreId === threadId || agent.messages.length > 0) return;
+    configuration.setActiveThreadId(pendingRestoreId, { explicit: false });
+  }, [pendingRestoreId, claimRestore, configuration, threadId, agent]);
 
   // Refill a reopened thread. `CopilotChat` empties the agent whenever the
   // thread id changes, and the replay that would normally refill it exists
@@ -153,18 +167,58 @@ function timeAgo(timestamp: number): string {
  * containing block, so the list covers everything below the 64px header while
  * leaving the header's own controls reachable.
  */
+/**
+ * Two-step delete-everything. Its own component so the confirmation unmounts
+ * with the panel: reopening the switcher should not find it halfway armed.
+ */
+function DeleteAllButton({ onConfirm }: { onConfirm: () => void }) {
+  const [isConfirming, setConfirming] = useState(false);
+
+  return (
+    <button
+      type="button"
+      onClick={() => {
+        if (!isConfirming) {
+          setConfirming(true);
+          return;
+        }
+        setConfirming(false);
+        onConfirm();
+      }}
+      className={cx(
+        "mt-2 text-[11.5px] font-medium transition-colors",
+        isConfirming ? "text-danger" : "text-ink-muted hover:text-danger",
+      )}
+    >
+      {isConfirming ? "Delete every conversation?" : "Delete all"}
+    </button>
+  );
+}
+
 export function ConversationHistoryPanel() {
-  const { conversations, isOpen, setOpen } = useConversations();
+  const { conversations, isOpen, setOpen, forget, forgetAll } = useConversations();
   const configuration = useCopilotChatConfiguration();
   const endRunInFlight = useEndRunInFlight();
   const activeId = configuration?.threadId;
 
   if (!isOpen) return null;
 
+  /**
+   * Deleting the conversation on screen leaves the panel showing a transcript
+   * with nothing behind it, so the chat is cleared to a new thread first.
+   */
+  const remove = async (id: string) => {
+    if (id === activeId) {
+      await endRunInFlight();
+      configuration?.startNewThread();
+    }
+    forget(id);
+  };
+
   return (
     <div className="animate-rise absolute inset-x-0 top-16 bottom-0 z-20 flex flex-col bg-surface">
       <div className="flex items-baseline justify-between px-4 pt-4 pb-2">
-        <span className={type_.label}>This session</span>
+        <span className={type_.label}>Earlier conversations</span>
         <span className={type_.meta}>{conversations.length || "None"} kept</span>
       </div>
 
@@ -179,7 +233,7 @@ export function ConversationHistoryPanel() {
             const isActive = conversation.id === activeId;
 
             return (
-              <li key={conversation.id}>
+              <li key={conversation.id} className="group relative">
                 <button
                   type="button"
                   aria-current={isActive || undefined}
@@ -192,7 +246,7 @@ export function ConversationHistoryPanel() {
                     configuration?.setActiveThreadId(conversation.id, { explicit: false });
                   }}
                   className={cx(
-                    "block w-full rounded-control px-2.5 py-2.5 text-left",
+                    "block w-full rounded-control py-2.5 pr-10 pl-2.5 text-left",
                     isActive ? row.selected : row.hover,
                   )}
                 >
@@ -211,16 +265,45 @@ export function ConversationHistoryPanel() {
                     {timeAgo(conversation.updatedAt)}
                   </span>
                 </button>
+
+                <button
+                  type="button"
+                  aria-label={`Delete conversation: ${conversation.title}`}
+                  title="Delete"
+                  onClick={() => void remove(conversation.id)}
+                  className={cx(
+                    "absolute top-1/2 right-1.5 inline-flex size-7 -translate-y-1/2 items-center",
+                    "justify-center rounded-control text-ink-muted opacity-0 transition",
+                    "hover:bg-danger-soft hover:text-danger focus-visible:opacity-100",
+                    "group-hover:opacity-100",
+                  )}
+                >
+                  <Icon name="trash" size={15} />
+                </button>
               </li>
             );
           })}
         </ul>
       )}
 
-      <p className="border-t border-line px-4 py-3 text-[11.5px] leading-relaxed text-ink-muted">
-        Conversations are held for this browser tab only. Closing or reloading the portal clears
-        them, and nothing here is written to the case record.
-      </p>
+      <div className="border-t border-line px-4 py-3">
+        <p className="text-[11.5px] leading-relaxed text-ink-muted">
+          Conversations are kept in this browser only — never in the case record — so the last one
+          reopens when you come back. Delete any of them here.
+        </p>
+
+        {conversations.length > 0 && (
+          <DeleteAllButton
+            onConfirm={() =>
+              void (async () => {
+                await endRunInFlight();
+                configuration?.startNewThread();
+                forgetAll();
+              })()
+            }
+          />
+        )}
+      </div>
     </div>
   );
 }

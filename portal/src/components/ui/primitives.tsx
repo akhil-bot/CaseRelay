@@ -277,6 +277,55 @@ export function EmptyState({
   );
 }
 
+/**
+ * Waiting on the control plane.
+ *
+ * Centres itself in whatever space it is given rather than sitting at the top of
+ * it, so a screen that is nothing but this does not read as a short strip above
+ * a field of grey. For a whole page, pair it with `Card`'s `fill`,
+ * `layout.fillHeight` and a body that justifies its content to the centre.
+ *
+ * The mark at the middle is the page's own icon, so the wait belongs visibly to
+ * *this* screen instead of being a wheel that could be spinning for anything.
+ */
+export function Loading({
+  icon = "sparkle",
+  title,
+  hint = "Reading from the control plane.",
+}: {
+  icon?: IconName;
+  title: string;
+  /** Set to null where the title already says everything worth saying. */
+  hint?: string | null;
+}) {
+  return (
+    <div
+      role="status"
+      aria-live="polite"
+      className="flex flex-col items-center justify-center gap-5 px-6 py-12 text-center"
+    >
+      <span className="relative flex size-16 items-center justify-center">
+        {/* Two rings leaving the centre, the second half a cycle behind. */}
+        <span className="animate-halo absolute inset-0 rounded-full bg-brand/15" />
+        <span
+          className="animate-halo absolute inset-0 rounded-full bg-brand/15"
+          style={{ animationDelay: "1.1s" }}
+        />
+        {/* The one part that actually turns, so there is a plain sign of work. */}
+        <span className="animate-track absolute inset-1 rounded-full border-2 border-brand/15 border-t-brand" />
+        <span className="animate-breathe relative flex size-9 items-center justify-center rounded-full bg-brand-soft text-brand">
+          <Icon name={icon} size={18} />
+        </span>
+      </span>
+
+      <span className="block">
+        <span className={cx("block", type_.bodyStrong)}>{title}</span>
+        {hint && <span className={cx("mt-1 block", type_.meta)}>{hint}</span>}
+      </span>
+    </div>
+  );
+}
+
 export function Note({ children, icon = "lock" }: { children: ReactNode; icon?: IconName }) {
   return (
     <p className={cx(surface.inset, "flex items-start gap-2.5 px-4 py-3", type_.meta)}>
@@ -292,6 +341,56 @@ export function SectionLabel({ children, icon }: { children: ReactNode; icon?: I
       {icon && <Icon name={icon} size={13} />}
       {children}
     </p>
+  );
+}
+
+/**
+ * A standing on/off choice — a preference, not an action, so it settles in
+ * place rather than leading anywhere. The whole row is the control: the label
+ * and the hint that explains the consequence are as clickable as the track.
+ */
+export function Switch({
+  checked,
+  onChange,
+  label,
+  hint,
+  role = "switch",
+}: {
+  checked: boolean;
+  onChange: (next: boolean) => void;
+  label: ReactNode;
+  /** What turning it off actually costs, where that is not obvious from the label. */
+  hint?: ReactNode;
+  /** `menuitemcheckbox` inside a menu, which owns the roles of what it contains. */
+  role?: "switch" | "menuitemcheckbox";
+}) {
+  return (
+    <button
+      type="button"
+      role={role}
+      aria-checked={checked}
+      onClick={() => onChange(!checked)}
+      className="flex w-full items-start gap-3 rounded-control px-2.5 py-2 text-left transition-colors hover:bg-surface-soft"
+    >
+      <span className="min-w-0 flex-1">
+        <span className="block text-[13px] text-ink">{label}</span>
+        {hint && <span className={cx("mt-0.5 block leading-snug", type_.meta)}>{hint}</span>}
+      </span>
+      <span
+        aria-hidden="true"
+        className={cx(
+          "relative mt-0.5 block h-[18px] w-8 shrink-0 rounded-full border transition-colors",
+          checked ? "border-brand bg-brand" : "border-line-strong bg-surface-muted",
+        )}
+      >
+        <span
+          className={cx(
+            "absolute top-[2px] size-[12px] rounded-full bg-surface transition-[left]",
+            checked ? "left-[16px]" : "left-[2px]",
+          )}
+        />
+      </span>
+    </button>
   );
 }
 
@@ -349,7 +448,6 @@ export function StatusBadge({ status }: { status: CommitmentStatus }) {
 const FLAG_META: Record<CaseFlag, { label: string; variant: Tone; icon: IconName }> = {
   overdue: { label: "Overdue", variant: "danger", icon: "alert" },
   blocked: { label: "Blocked", variant: "warn", icon: "lock" },
-  approval_needed: { label: "Needs you", variant: "accent", icon: "approvals" },
   on_track: { label: "On track", variant: "brand", icon: "check" },
   recently_completed: { label: "Completed", variant: "seal", icon: "checkCircle" },
   intake_pending: { label: "Awaiting activation", variant: "neutral", icon: "clock" },

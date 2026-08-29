@@ -56,7 +56,10 @@ export type IconName =
   | "list"
   | "grid"
   | "plus"
-  | "history";
+  | "history"
+  | "trash"
+  | "download"
+  | "printer";
 
 const PATHS: Record<IconName, React.ReactNode> = {
   home: (
@@ -327,6 +330,28 @@ const PATHS: Record<IconName, React.ReactNode> = {
       <path d="M3.6 12a8.4 8.4 0 1 0 2.7-6.2" />
       <path d="M3.5 4.9v3.5H7" />
       <path d="M12 8.3V12l2.8 1.7" />
+    </>
+  ),
+  trash: (
+    <>
+      <path d="M4.8 6.8h14.4" />
+      <path d="M9.4 6.8V5.2a1 1 0 0 1 1-1h3.2a1 1 0 0 1 1 1v1.6" />
+      <path d="M6.6 6.8 7.4 19a1 1 0 0 0 1 .9h7.2a1 1 0 0 0 1-.9l.8-12.2" />
+      <path d="M10.5 10.2v6M13.5 10.2v6" />
+    </>
+  ),
+  download: (
+    <>
+      <path d="M12 4.2v10.1" />
+      <path d="m8.2 10.6 3.8 3.7 3.8-3.7" />
+      <path d="M4.8 16.4v1.8a1.6 1.6 0 0 0 1.6 1.6h11.2a1.6 1.6 0 0 0 1.6-1.6v-1.8" />
+    </>
+  ),
+  printer: (
+    <>
+      <path d="M7.2 8.6V4.9a.8.8 0 0 1 .8-.8h8a.8.8 0 0 1 .8.8v3.7" />
+      <path d="M7.2 17.2H5.6A1.6 1.6 0 0 1 4 15.6v-5.4a1.6 1.6 0 0 1 1.6-1.6h12.8a1.6 1.6 0 0 1 1.6 1.6v5.4a1.6 1.6 0 0 1-1.6 1.6h-1.6" />
+      <path d="M7.2 14.3h9.6v4.8a.8.8 0 0 1-.8.8H8a.8.8 0 0 1-.8-.8z" />
     </>
   ),
 };

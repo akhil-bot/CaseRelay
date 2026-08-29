@@ -15,6 +15,7 @@ def seed_cr1042_skeleton() -> dict:
             "child_name": packet["child"]["name"],
             "status": "draft",
             "volunteer_id": packet["volunteer_id"],
+            "volunteer_name": packet.get("volunteer_name", ""),
             "supervisor_id": packet["supervisor_id"],
             "created_at": now,
             "activated_at": None,

@@ -1,236 +1,99 @@
 "use client";
 
-import Link from "next/link";
 import { Icon } from "@/components/icons";
-import {
-  Avatar,
-  Badge,
-  Card,
-  EmptyState,
-  Group,
-  Rows,
-  cx,
-} from "@/components/ui/primitives";
-import { ColumnHeader, TableCell } from "@/components/ui/table";
-import { purposeLabel } from "@/design/copy";
-import { layout, row, type as type_ } from "@/design/tokens";
-import { useDemo } from "@/lib/demo-store";
-import { deriveApprovalOutcome } from "@/lib/derive";
-import { APPROVALS } from "@/lib/mock/approvals";
+import { SupervisorGate } from "@/components/live/SupervisorGate";
+import { Card, EmptyState, cx } from "@/components/ui/primitives";
+import { layout, type as type_ } from "@/design/tokens";
+import { useLiveApprovals } from "@/lib/live-approvals";
 import { useViewer } from "@/lib/viewer";
-import type { ApprovalRequest } from "@/lib/types";
 
+/**
+ * Everything on the control plane that has stopped and is waiting on a person.
+ *
+ * There is nothing scripted on this screen. What it shows is what the backend
+ * is actually holding, so an empty queue here means the agents are genuinely
+ * unblocked rather than that a walkthrough has not reached the right step.
+ */
 export default function ApprovalsPage() {
-  const { step, decisions } = useDemo();
-  const { copy } = useViewer();
+  const { copy, profile, role } = useViewer();
+  const { gates, decidingKey, decideError, decide } = useLiveApprovals();
 
-  const rows = APPROVALS.map((approval) => ({
-    approval,
-    outcome: deriveApprovalOutcome(approval, step, decisions),
-  })).filter((row) => row.outcome !== "not_yet_raised");
+  // The queue belongs to the supervisor. It is not in anyone else's sidebar, but
+  // a link or an old bookmark can still land here, and a blank screen would read
+  // as "nothing is waiting" rather than "this is not yours".
+  if (role !== "supervisor") {
+    return (
+      <Card
+        icon="approvals"
+        title={copy.approvals.gates.title}
+        fill
+        className={layout.fillHeight}
+        bodyClassName="flex flex-col justify-center"
+      >
+        <EmptyState
+          icon="users"
+          title="Your supervisor decides these"
+          hint="A case that cannot start, or one a guardrail has stopped, waits on your program supervisor. You will see the gate on the case itself, and the case will move on as soon as they decide."
+        />
+      </Card>
+    );
+  }
 
-  const pending = rows.filter((row) => row.outcome === "pending");
-  const settled = rows.filter((row) => row.outcome !== "pending");
-  const empty = copy.approvals.empty(step >= 6);
+  // An empty queue is the ordinary state of this screen, not a momentary gap, so
+  // it takes the window rather than sitting as a short strip above a field of
+  // grey. The notice centres in that space instead of clinging to the top of it.
+  if (gates.length === 0) {
+    return (
+      <Card
+        icon="approvals"
+        title={copy.approvals.gates.title}
+        fill
+        className={layout.fillHeight}
+        bodyClassName="flex flex-col justify-center"
+      >
+        <EmptyState
+          icon="checkCircle"
+          title={copy.approvals.empty.title}
+          hint={copy.approvals.empty.hint}
+        />
+      </Card>
+    );
+  }
 
   return (
     <div className={layout.stack}>
-      <Card
-        icon="approvals"
-        title={copy.approvals.queue.title}
-        subtitle={copy.approvals.queue.subtitle}
-        action={
-          pending.length > 0 ? (
-            <Badge variant="accent" icon="clock">
-              {pending.length === 1 ? "1 waiting on you" : `${pending.length} waiting on you`}
-            </Badge>
-          ) : undefined
-        }
-        flush={pending.length > 0}
-      >
-        {pending.length === 0 ? (
-          <EmptyState icon="checkCircle" title={empty.title} hint={empty.hint} />
-        ) : (
-          <>
-            <ColumnHeader labels={QUEUE_LABELS(copy)} track={COLUMNS} />
-            <Rows>
-              {pending.map(({ approval }) => (
-                <ApprovalRow key={approval.id} approval={approval} />
-              ))}
-            </Rows>
-          </>
-        )}
-      </Card>
+      <div className="flex min-w-0 items-start gap-3">
+        <span className="mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-control bg-warn-soft text-warn">
+          <Icon name="lock" size={17} />
+        </span>
+        <div className="min-w-0">
+          <h2 className={type_.sectionTitle}>{copy.approvals.gates.title}</h2>
+          <p className={cx("mt-1", layout.measure, type_.small)}>{copy.approvals.gates.subtitle}</p>
+        </div>
+      </div>
 
-      {step >= 5 && (
-        <Card
-          icon="lock"
-          title={copy.approvals.context.title}
-          subtitle={copy.approvals.context.subtitle}
-        >
-          <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_280px]">
-              <div>
-                <Badge variant="danger" icon="shield">
-                  Request refused
-                </Badge>
-                <p className={cx("mt-2.5", layout.measure, type_.body)}>
-                  The school office replied asking CaseRelay to send Maya&apos;s immunisation records
-                  and a summary of her court hearing before they would answer. CaseRelay refused. It
-                  is not allowed to share either of those with a school, and it did not ask you to
-                  overrule that.
-                </p>
-                <p className={cx("mt-2.5", layout.measure, type_.body)}>
-                  It then asked the same enrollment question again, wording it correctly. The school
-                  still has not replied, which is why it is now asking you to send a follow-up.
-                </p>
-              </div>
-              <Group variant="danger" icon="close" label="What was refused">
-                <ul className="space-y-2">
-                  {["Her immunisation records", "What happened at her hearing"].map((item) => (
-                    <li key={item} className="flex items-start gap-2 text-[12.5px] text-ink-soft">
-                      <Icon name="close" size={14} className="mt-0.5 shrink-0 text-danger" />
-                      {item}
-                    </li>
-                  ))}
-                </ul>
-                <p className={cx("mt-3", type_.meta)}>
-                  Asking again did not risk sending the same message twice — CaseRelay tracks that
-                  for you.
-                </p>
-              </Group>
-            </div>
-        </Card>
-      )}
-
-      {settled.length > 0 && (
-        <Card
-          icon="audit"
-          title={copy.approvals.history.title}
-          subtitle={copy.approvals.history.subtitle || undefined}
-          flush
-        >
-          <Rows>
-            {settled.map(({ approval, outcome }) => (
-              // Still a link: a decision you have already taken is the thing you
-              // most want to be able to go back and check.
-              <li key={approval.id}>
-                <Link
-                  href={`/approvals/${approval.id}`}
-                  className={cx("block", row.pad, row.hover)}
-                >
-                  <div className="flex flex-wrap items-center gap-2">
-                    <span className="text-[13px] text-ink">{approval.action}</span>
-                    <Badge
-                      variant={outcome === "approved" ? "seal" : "danger"}
-                      icon={outcome === "approved" ? "checkCircle" : "close"}
-                      className="ml-auto"
-                    >
-                      {outcome === "approved" ? "You approved this" : "You said no"}
-                    </Badge>
-                    <Icon name="chevronRight" size={15} className="shrink-0 text-ink-muted" />
-                  </div>
-                  <p className={cx("mt-1.5", type_.meta)}>
-                    {`${approval.childAlias} · asked you on ${approval.createdAt} · shared ${approval.projection.disclosed.length} details, held back ${approval.projection.withheld.length}`}
-                  </p>
-                </Link>
-              </li>
-            ))}
-          </Rows>
-        </Card>
-      )}
-
+      {gates.map((gate) => (
+        <SupervisorGate
+          key={gate.key}
+          kind={gate.kind}
+          childName={gate.childName}
+          reason={gate.reason}
+          caseId={gate.caseId}
+          advocateName={gate.advocateName}
+          commitmentCount={gate.commitmentCount}
+          grantCount={gate.grantCount}
+          organisations={gate.organisations}
+          openedAt={gate.openedAt}
+          actionType={gate.actionType}
+          decidingAs={profile.name}
+          busy={decidingKey === gate.key}
+          error={decideError?.key === gate.key ? decideError.message : null}
+          onApprove={() => void decide(gate, "approve", profile.id)}
+          onReject={
+            gate.kind === "escalation" ? () => void decide(gate, "reject", profile.id) : undefined
+          }
+        />
+      ))}
     </div>
   );
 }
-
-/**
- * The queue's column track, shared with its header so values line up. Below
- * `lg` there is no grid: a row stacks and each cell states its own field name.
- */
-const COLUMNS =
-  "lg:grid lg:grid-cols-[minmax(0,2.4fr)_minmax(0,1fr)_112px_minmax(0,1.35fr)_minmax(0,1.1fr)_116px_16px] lg:items-center lg:gap-x-4";
-
-const QUEUE_LABELS = (copy: ReturnType<typeof useViewer>["copy"]) => {
-  const { columns } = copy.approvals;
-  return [
-    columns.subject,
-    columns.status,
-    columns.shares,
-    columns.recipient,
-    columns.purpose,
-    columns.raised,
-  ];
-};
-
-/**
- * One held action, as a row.
- *
- * The decision is not taken from here. Approving sends a real message to another
- * organization on a child's behalf, so it needs the drafted wording and the
- * disclosed field set on screen first — which is a page, not a table cell.
- */
-function ApprovalRow({ approval }: { approval: ApprovalRequest }) {
-  const { copy } = useViewer();
-  const elevated = approval.urgency === "elevated";
-
-  return (
-    <li>
-      <Link
-        href={`/approvals/${approval.id}`}
-        className={cx(
-          "block border-l-2",
-          row.pad,
-          COLUMNS,
-          row.hover,
-          elevated ? "border-l-accent" : "border-l-transparent",
-        )}
-      >
-        <div className="flex min-w-0 items-center gap-3">
-          <Avatar name={approval.childAlias} size={36} variant={elevated ? "warn" : "accent"} />
-          <div className="min-w-0">
-            <div className="flex min-w-0 items-baseline gap-2">
-              <span className="truncate text-[13.5px] font-semibold text-ink">
-                {approval.childAlias}
-              </span>
-              <span className="shrink-0 font-mono text-[11px] text-ink-muted">
-                {approval.caseId}
-              </span>
-            </div>
-            <p className={cx("mt-0.5 truncate", type_.small)}>{approval.action}</p>
-          </div>
-        </div>
-
-        <div className="mt-3 flex flex-wrap items-center gap-1.5 lg:mt-0">
-          <Badge variant="accent" icon="user">
-            Needs you
-          </Badge>
-          {elevated && (
-            <Badge variant="warn" icon="alert">
-              Overdue
-            </Badge>
-          )}
-        </div>
-
-        <div className="mt-3 grid grid-cols-2 gap-x-4 gap-y-3 border-t border-line pt-3 sm:grid-cols-4 lg:contents">
-          <TableCell label={copy.approvals.columns.shares}>
-            <span className="tabular-nums">
-              <span className="text-brand-deep">{approval.projection.disclosed.length}</span>
-              <span className="text-ink-muted"> / </span>
-              <span className="text-danger">{approval.projection.withheld.length}</span>
-            </span>
-          </TableCell>
-          <TableCell label={copy.approvals.columns.recipient}>{approval.recipient}</TableCell>
-          <TableCell label={copy.approvals.columns.purpose}>
-            {purposeLabel(approval.purpose)}
-          </TableCell>
-          <TableCell label={copy.approvals.columns.raised}>
-            <span className="tabular-nums">{approval.createdAt}</span>
-          </TableCell>
-        </div>
-
-        <Icon name="chevronRight" size={16} className="hidden shrink-0 text-ink-muted lg:block" />
-      </Link>
-    </li>
-  );
-}
-

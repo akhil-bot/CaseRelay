@@ -1,43 +1,62 @@
 "use client";
 
 import { useEffect, useMemo, useRef } from "react";
-import { useRouter, usePathname } from "next/navigation";
 import { CopilotChatConfigurationProvider, CopilotKit } from "@copilotkit/react-core/v2";
 import type { ReactFrontendTool } from "@copilotkit/react-core/v2";
 import type { ReactNode } from "react";
 import { z } from "zod";
-import { createCase, listScenarios, submitRun } from "@/lib/api";
+import {
+  CaseReviewWidget,
+  ReportWidget,
+  type WidgetProps,
+} from "@/components/copilot/chat-widgets";
+import { ReportPrintRoot } from "@/components/copilot/ReportDocument";
+import { createCase, listScenarios } from "@/lib/api";
 import { COPILOT_RUNTIME_URL, isRuntimeAvailable } from "@/lib/copilot/config";
 import { ConversationsProvider } from "@/lib/copilot/conversations";
+import { useBeginOutreach } from "@/lib/copilot/outreach";
+import { buildReport, reportToMarkdown } from "@/lib/copilot/report";
+import { ReportStoreProvider, useReportStore } from "@/lib/copilot/report-store";
 import { ToolEventsProvider, useToolEvents } from "@/lib/copilot/tool-events";
 
-export function CopilotProvider({ children }: { children: ReactNode }) {
-  if (!isRuntimeAvailable) return <>{children}</>;
+/** A bare case id, as opposed to a child's name or a pronoun. */
+const CASE_ID = /^[a-z]{2,4}-\d+$/i;
 
+export function CopilotProvider({ children }: { children: ReactNode }) {
+  // The registry and the report store are plain client state, so both are
+  // mounted whether or not the runtime is configured. Pages read the registry to
+  // hear about cases the chat created; with no runtime nothing ever publishes,
+  // which is the correct empty answer rather than grounds for the hook to throw.
+  //
+  // `ReportPrintRoot` sits here, beside `children`, because a provider renders no
+  // element of its own: that makes the printable document a direct child of
+  // `<body>`, which is what the `@media print` rule in globals.css selects on.
   return (
     <ToolEventsProvider>
-      <CopilotProviderInner>{children}</CopilotProviderInner>
+      <ReportStoreProvider>
+        {isRuntimeAvailable ? <CopilotProviderInner>{children}</CopilotProviderInner> : children}
+        <ReportPrintRoot />
+      </ReportStoreProvider>
     </ToolEventsProvider>
   );
 }
 
 function CopilotProviderInner({ children }: { children: ReactNode }) {
   const { findCase, pushCase, scenarioCacheRef, subscribersRef } = useToolEvents();
+  const { put: putReport } = useReportStore();
+  const beginOutreach = useBeginOutreach();
 
+  // Every one of these is read through a ref so the frontendTools memo can keep
+  // a zero-length dependency array — CopilotKit requires a stable array, and
+  // rebuilding it re-registers the tools on every navigation.
   const findCaseRef = useRef(findCase);
   const pushCaseRef = useRef(pushCase);
+  const putReportRef = useRef(putReport);
+  const beginOutreachRef = useRef(beginOutreach);
   useEffect(() => { findCaseRef.current = findCase; }, [findCase]);
   useEffect(() => { pushCaseRef.current = pushCase; }, [pushCase]);
-
-  // Stable refs for router and pathname so the frontendTools memo keeps a
-  // zero-length dependency array (required to avoid the "must be a stable
-  // array" warning from CopilotKit and the React Strict Mode double-mount issue).
-  const router = useRouter();
-  const pathname = usePathname();
-  const routerRef = useRef(router);
-  const pathnameRef = useRef(pathname);
-  useEffect(() => { routerRef.current = router; }, [router]);
-  useEffect(() => { pathnameRef.current = pathname; }, [pathname]);
+  useEffect(() => { putReportRef.current = putReport; }, [putReport]);
+  useEffect(() => { beginOutreachRef.current = beginOutreach; }, [beginOutreach]);
 
   const frontendTools = useMemo(
     () => [
@@ -98,6 +117,12 @@ function CopilotProviderInner({ children }: { children: ReactNode }) {
             return `Error creating case: ${err instanceof Error ? err.message : String(err)}`;
           }
         },
+        // The case is set up but nothing has been sent, and what happens next is
+        // a person's call — so the reply is a card with the decision on it
+        // rather than a paragraph asking them to type "start outreach" back.
+        render: ({ status, result }: WidgetProps) => (
+          <CaseReviewWidget status={status} result={result} />
+        ),
       },
       {
         name: "start_outreach",
@@ -116,30 +141,63 @@ function CopilotProviderInner({ children }: { children: ReactNode }) {
             if (!entry) {
               return "No case found in this session. Create a case first.";
             }
-            const ref = await submitRun(entry.caseId);
-            for (const cb of subscribersRef.current) cb.onRunStarted(ref, entry.caseId);
-
-            // Navigate to the case live view after a short pause so the AI's
-            // acknowledgment line has a moment to start streaming before the
-            // route changes. Only navigate if we're not already there.
-            const targetPath = `/cases/${entry.caseId}`;
-            if (pathnameRef.current !== targetPath) {
-              setTimeout(() => {
-                routerRef.current.push(targetPath);
-              }, 1500);
-            }
+            // The same act as pressing the button on the case card — one run,
+            // one set of subscribers notified, one navigation.
+            const started = await beginOutreachRef.current(entry.caseId);
 
             return JSON.stringify({
-              run_id: ref.run_id,
-              case_id: entry.caseId,
+              run_id: started.runId,
+              case_id: started.caseId,
               child_name: entry.childName,
-              state: ref.state,
-              live_view: targetPath,
+              live_view: started.livePath,
             });
           } catch (err) {
             return `Couldn't start outreach: ${err instanceof Error ? err.message : String(err)}`;
           }
         },
+      },
+      {
+        name: "case_report",
+        description:
+          'Assemble a CASA court report for a case from its stored record and its audit log. The case_ref can be a case_id, a child name, or a pronoun like "it" referring to the most recently created case. Use this when the volunteer asks for a report, a summary, a write-up, or "what happened on this case".\n\nThe returned `report_markdown` is the finished report. Reply with that markdown exactly as given and nothing else — do not summarise it, reorder it, retitle it, or add observations of your own. It is assembled from recorded case state, and anything you add would not be.\n\nThe report deliberately leaves several sections blank — impressions of the child, the child\'s wishes, recommendations, and others marked "To be completed by the CASA volunteer". These are the volunteer\'s judgement to write and CaseRelay holds no record of them. Never fill them in, never suggest wording for them, and never apologise for them being empty. Leave them exactly as they are.\n\nA card offering the file as a download is shown automatically beneath your reply, so do not offer to send or generate a file yourself.',
+        parameters: z.object({
+          case_ref: z
+            .string()
+            .describe(
+              'A case_id, child name, or pronoun ("it", "the case") naming the case to report on.',
+            ),
+        }),
+        handler: async ({ case_ref }: { case_ref: string }) => {
+          const hint = case_ref.trim();
+          try {
+            // A bare case id is taken at its word. Anything else goes through the
+            // registry, which resolves names but falls back to the most recent
+            // case for an unfamiliar hint — helpful for "it", wrong for a case id
+            // belonging to a case this session did not create.
+            const caseId = CASE_ID.test(hint)
+              ? hint
+              : (findCaseRef.current(hint)?.caseId ?? hint);
+
+            const report = await buildReport(caseId);
+            // Held for the card, which needs the record rather than the prose:
+            // the download has to be the case's own state even if the model
+            // paraphrases the markdown on its way through.
+            putReportRef.current(report);
+
+            return JSON.stringify({
+              case_id: report.caseId,
+              child_name: report.childName,
+              report_markdown: reportToMarkdown(report),
+            });
+          } catch (err) {
+            return `Couldn't build a report for ${hint || "that case"}: ${
+              err instanceof Error ? err.message : String(err)
+            }`;
+          }
+        },
+        render: ({ status, result }: WidgetProps) => (
+          <ReportWidget status={status} result={result} />
+        ),
       },
     ],
     // eslint-disable-next-line react-hooks/exhaustive-deps

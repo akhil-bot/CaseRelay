@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useState } from "react";
 import { Icon, type IconName } from "@/components/icons";
 import { KIND_META } from "@/lib/activity-meta";
 import {
@@ -10,6 +11,7 @@ import {
   DomainIcon,
   EmptyState,
   FlagBadge,
+  Mono,
   ProgressBar,
   Rows,
   StatusBadge,
@@ -17,51 +19,33 @@ import {
 } from "@/components/ui/primitives";
 import { control, layout, row, surface, tone, type as type_, type Tone } from "@/design/tokens";
 import { useDemo } from "@/lib/demo-store";
+import { useLiveApprovals } from "@/lib/live-approvals";
 import { PRIMARY_CASE_ID } from "@/lib/mock/cases";
+import type { CaseSummary, Commitment } from "@/lib/types";
 import { useViewer } from "@/lib/viewer";
 
 export default function OverviewPage() {
-  const { cases, commitments, activity, pendingApprovals, meta, capabilities } = useDemo();
-  const { copy } = useViewer();
+  const { cases, commitments, activity } = useDemo();
+  const { gates } = useLiveApprovals();
+  const { copy, role } = useViewer();
+
+  // The gates are the supervisor's to clear. For anyone else the same number is
+  // still worth knowing — those cases are stopped — but "waiting on you" would
+  // be asking them for something they cannot give.
+  const waitingOnMe = role === "supervisor";
 
   const attention = cases.filter((item) =>
     item.flags.some((flag) => flag === "overdue" || flag === "blocked"),
   );
   const unowned = commitments.filter((item) => (item.daysOverdue ?? 0) > 0);
   const openCommitments = commitments.filter((item) => item.status !== "completed");
-  const closed = commitments.length - openCommitments.length;
   const recent = [...activity].reverse().slice(0, 5);
 
-  const summaryText =
-    pendingApprovals.length > 0
-      ? `${pendingApprovals.length} message${pendingApprovals.length === 1 ? "" : "s"} need your approval, and ${unowned.length === 0 ? "no step is" : `${unowned.length} step${unowned.length === 1 ? " is" : "s are"}`} still waiting for someone to take responsibility.`
-      : unowned.length > 0
-        ? `${unowned.length} step${unowned.length === 1 ? "" : "s"} still have nobody responsible for them.`
-        : "Every step on your cases has someone responsible for it.";
-
   return (
-    <div className={layout.stack}>
-      <section className={cx(surface.card, "px-5 py-5")}>
-        <div className="flex flex-wrap items-start gap-4">
-          <div className="min-w-0 flex-1">
-            <p className={cx(layout.measure, "text-[15px] leading-relaxed text-ink")}>
-              {summaryText}
-            </p>
-          </div>
-          <Link href="/cases" className={control.primary}>
-            See my cases
-            <Icon name="arrowRight" size={15} />
-          </Link>
-        </div>
-
-        <div className="mt-4 flex flex-wrap items-center gap-3 border-t border-line pt-4">
-          <Badge variant="brand" icon="clock">
-            {meta.dayLabel}
-          </Badge>
-          <p className={cx("min-w-0 flex-1", layout.measure, type_.small)}>{meta.narration}</p>
-        </div>
-      </section>
-
+    // A flex column with a floor of the whole window, so the caseload at the
+    // foot of the page can take whatever is left rather than stopping where its
+    // rows happen to stop and leaving the screen half empty.
+    <div className={cx("flex flex-col gap-5", layout.fillHeightMin)}>
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <Stat
           icon="alert"
@@ -73,9 +57,13 @@ export default function OverviewPage() {
         <Stat
           icon="approvals"
           variant="accent"
-          label={copy.overview.stats.waiting}
-          value={pendingApprovals.length}
-          note={copy.overview.statNotes.waiting}
+          label={waitingOnMe ? copy.overview.stats.waiting : "Waiting on your supervisor"}
+          value={gates.length}
+          note={
+            waitingOnMe
+              ? copy.overview.statNotes.waiting
+              : "Cases stopped until your supervisor decides"
+          }
         />
         <Stat
           icon="cases"
@@ -99,8 +87,9 @@ export default function OverviewPage() {
           title={copy.overview.attention.title}
           subtitle={copy.overview.attention.subtitle}
           action={
-            <Link href="/cases" className={control.secondary}>
-              All cases
+            <Link href="/cases" className={control.primary}>
+              See my cases
+              <Icon name="arrowRight" size={15} />
             </Link>
           }
           flush={attention.length > 0}
@@ -175,71 +164,287 @@ export default function OverviewPage() {
       </div>
 
       <Card
-        icon="shield"
-        title="What CaseRelay has proven"
-        subtitle="Capabilities demonstrated at the current point in the scenario, with the evidence."
-      >
-        <ul className="grid gap-x-6 gap-y-5 sm:grid-cols-2 2xl:grid-cols-3">
-          {capabilities.map((capability) => (
-            <li key={capability.key} className="min-w-0">
-              <div className="flex flex-wrap items-center gap-2">
-                <span className="text-[12.5px] font-medium text-ink">{capability.label}</span>
-                <Badge
-                  variant={capability.proven ? "seal" : "neutral"}
-                  icon={capability.proven ? "checkCircle" : "clock"}
-                  className="ml-auto"
-                >
-                  {capability.proven ? "Proven" : `Step ${capability.provenAtStep + 1}`}
-                </Badge>
-              </div>
-              <p className={cx("mt-1.5", type_.meta)}>{capability.evidence}</p>
-            </li>
-          ))}
-        </ul>
-      </Card>
-
-      <Card
         icon="cases"
         title={copy.overview.commitments.title}
         subtitle={copy.overview.commitments.subtitle}
         action={
-          <Link href={`/cases/${PRIMARY_CASE_ID}`} className={control.secondary}>
-            Open case
+          <Link href="/cases" className={control.secondary}>
+            All cases
             <Icon name="arrowRight" size={14} />
           </Link>
         }
+        flush
+        // Takes the rest of the window: the header and column names hold still
+        // and the rows scroll under them.
+        fill
+        className="flex-1"
       >
-        <div className="mb-4 flex flex-wrap items-center gap-4">
-          <span className="min-w-[180px] max-w-[420px] flex-1">
-            <ProgressBar value={closed} total={commitments.length} variant="seal" />
-          </span>
-          <span className={type_.meta}>
-            {closed} of {commitments.length} done
-          </span>
-        </div>
-
-        <ul className="grid gap-x-6 gap-y-5 sm:grid-cols-2 xl:grid-cols-3 3xl:grid-cols-4">
-          {commitments.map((commitment) => (
-            <li key={commitment.id} className="flex items-start gap-3">
-              <DomainIcon domain={commitment.domain} size={32} />
-              <span className="min-w-0 flex-1">
-                <span className="block truncate text-[12.5px] font-medium text-ink">
-                  {commitment.title}
-                </span>
-                <span className="mt-1 flex flex-wrap items-center gap-1.5">
-                  <StatusBadge status={commitment.status} />
-                  {(commitment.daysOverdue ?? 0) > 0 && (
-                    <Badge variant="danger" icon="clock">
-                      {commitment.daysOverdue} days waiting
-                    </Badge>
-                  )}
-                </span>
-              </span>
-            </li>
-          ))}
-        </ul>
+        <table className="w-full border-collapse text-left">
+          <thead>
+            {/* Sticky on the cells rather than the row — a sticky <tr> is not
+                honoured everywhere, and the tint is what keeps rows from
+                showing through as they pass beneath. */}
+            <tr className="border-b border-line">
+              <th
+                scope="col"
+                className={cx("sticky top-0 z-10 bg-surface-soft px-5 py-2.5", type_.label)}
+              >
+                {copy.cases.columns.case}
+              </th>
+              <th
+                scope="col"
+                className={cx(
+                  "sticky top-0 z-10 hidden bg-surface-soft px-3 py-2.5 sm:table-cell",
+                  type_.label,
+                )}
+              >
+                {copy.cases.columns.status}
+              </th>
+              <th
+                scope="col"
+                className={cx(
+                  "sticky top-0 z-10 hidden bg-surface-soft px-3 py-2.5 md:table-cell",
+                  type_.label,
+                )}
+              >
+                {copy.cases.columns.deadline}
+              </th>
+              <th
+                scope="col"
+                className={cx(
+                  "sticky top-0 z-10 bg-surface-soft px-5 py-2.5 text-right",
+                  type_.label,
+                )}
+              >
+                {copy.cases.columns.commitments}
+              </th>
+            </tr>
+          </thead>
+          <tbody className={row.divide}>
+            {cases.map((item) => (
+              <CaseRow
+                key={item.id}
+                item={item}
+                steps={item.id === PRIMARY_CASE_ID ? commitments : []}
+              />
+            ))}
+          </tbody>
+        </table>
       </Card>
     </div>
+  );
+}
+
+/**
+ * A case, as a row that opens onto its progress and its steps. The row itself
+ * is the control rather than a button inside the first cell, so the whole width
+ * responds and the columns still line up against their headers.
+ *
+ * Only the flagship case carries step-level mock data, so `steps` is empty for
+ * the rest and the panel says where that detail lives instead of rendering an
+ * empty table.
+ */
+function CaseRow({ item, steps }: { item: CaseSummary; steps: Commitment[] }) {
+  const [open, setOpen] = useState(false);
+  const done = item.commitmentCount - item.openCommitments;
+
+  return (
+    <>
+      <tr
+        role="button"
+        tabIndex={0}
+        aria-expanded={open}
+        onClick={() => setOpen((value) => !value)}
+        onKeyDown={(event) => {
+          if (event.key === "Enter" || event.key === " ") {
+            event.preventDefault();
+            setOpen((value) => !value);
+          }
+        }}
+        className={cx("cursor-pointer", row.hover)}
+      >
+        <td className="px-5 py-3">
+          <span className="flex items-center gap-2.5">
+            <Icon
+              name={open ? "chevronDown" : "chevronRight"}
+              size={14}
+              className="shrink-0 text-ink-muted"
+            />
+            <Avatar name={item.childAlias} size={30} />
+            <span className="min-w-0">
+              <span className="block truncate text-[12.5px] font-medium text-ink">
+                {item.childAlias}
+              </span>
+              <Mono className="text-[11px]">{item.id}</Mono>
+            </span>
+          </span>
+        </td>
+        <td className="hidden px-3 py-3 sm:table-cell">
+          <span className="flex flex-wrap items-center gap-1.5">
+            {item.flags.map((flag) => (
+              <FlagBadge key={flag} flag={flag} />
+            ))}
+          </span>
+        </td>
+        <td className={cx("hidden px-3 py-3 md:table-cell", type_.small)}>{item.nextDeadline}</td>
+        <td className={cx("px-5 py-3 text-right whitespace-nowrap", type_.meta)}>
+          {done} of {item.commitmentCount}
+        </td>
+      </tr>
+
+      {open && (
+        <tr>
+          <td colSpan={4} className="p-0">
+            <div className="animate-rise border-t border-line bg-surface-soft px-5 py-3.5">
+              <p className={type_.small}>{item.headline}</p>
+
+              <div className="mt-3 flex flex-wrap items-center gap-3">
+                <span className="min-w-[160px] max-w-[320px] flex-1">
+                  <ProgressBar value={done} total={item.commitmentCount} variant="seal" />
+                </span>
+                <span className={type_.meta}>
+                  {done} of {item.commitmentCount} done
+                </span>
+              </div>
+
+              <div className="mt-2.5 flex flex-wrap items-center gap-x-4 gap-y-1.5 text-[11.5px] text-ink-muted">
+                <span className="flex items-center gap-1.5">
+                  <Icon name="user" size={13} />
+                  {item.volunteer}
+                </span>
+                <span className="flex items-center gap-1.5">
+                  <Icon name="users" size={13} />
+                  {item.supervisor}
+                </span>
+                <span className="flex items-center gap-1.5">
+                  <Icon name="clock" size={13} />
+                  {item.nextDeadline}
+                </span>
+                <span className="flex items-center gap-1.5">
+                  <Icon name="document" size={13} />
+                  <Mono className="text-[11px]">{item.courtOrder}</Mono>
+                </span>
+              </div>
+
+              {steps.length > 0 ? (
+                <div className="mt-3 overflow-hidden rounded-control border border-line bg-surface">
+                  <table className="w-full border-collapse text-left">
+                    <tbody className={row.divide}>
+                      {steps.map((commitment) => (
+                        <CommitmentRow key={commitment.id} commitment={commitment} />
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              ) : (
+                <p className={cx("mt-3", type_.meta)}>
+                  Step-by-step detail for this case opens on the case screen.
+                </p>
+              )}
+
+              <Link
+                href={`/cases/${item.id}`}
+                className={cx(control.secondary, "mt-3")}
+                onClick={(event) => event.stopPropagation()}
+              >
+                Open case
+                <Icon name="arrowRight" size={14} />
+              </Link>
+            </div>
+          </td>
+        </tr>
+      )}
+    </>
+  );
+}
+
+/**
+ * One step within a case, as a row that opens onto its evidence and owner.
+ */
+function CommitmentRow({ commitment }: { commitment: Commitment }) {
+  const [open, setOpen] = useState(false);
+  const waiting = commitment.daysOverdue ?? 0;
+
+  return (
+    <>
+      <tr
+        role="button"
+        tabIndex={0}
+        aria-expanded={open}
+        onClick={() => setOpen((value) => !value)}
+        onKeyDown={(event) => {
+          if (event.key === "Enter" || event.key === " ") {
+            event.preventDefault();
+            setOpen((value) => !value);
+          }
+        }}
+        className={cx("cursor-pointer", row.hover)}
+      >
+        <td className="px-5 py-3">
+          <span className="flex items-center gap-2.5">
+            <Icon
+              name={open ? "chevronDown" : "chevronRight"}
+              size={14}
+              className="shrink-0 text-ink-muted"
+            />
+            <DomainIcon domain={commitment.domain} size={28} />
+            <span className="min-w-0 text-[12.5px] font-medium text-ink">{commitment.title}</span>
+          </span>
+        </td>
+        <td className={cx("hidden px-3 py-3 sm:table-cell", type_.small)}>{commitment.ownerOrg}</td>
+        <td className="px-5 py-3 text-right">
+          <span className="inline-flex flex-wrap items-center justify-end gap-1.5">
+            <StatusBadge status={commitment.status} />
+            {waiting > 0 && (
+              <Badge variant="danger" icon="clock">
+                {waiting} days waiting
+              </Badge>
+            )}
+          </span>
+        </td>
+      </tr>
+
+      {open && (
+        <tr>
+          <td colSpan={3} className="p-0">
+            <div className="animate-rise border-t border-line bg-surface-soft px-5 py-3.5">
+              <p className={type_.small}>{commitment.detail}</p>
+              <div className="mt-2.5 flex flex-wrap items-center gap-x-4 gap-y-1.5 text-[11.5px] text-ink-muted">
+                <span className="flex items-center gap-1.5 sm:hidden">
+                  <Icon name="cases" size={13} />
+                  {commitment.ownerOrg}
+                </span>
+                <span className="flex items-center gap-1.5">
+                  <Icon name="identity" size={13} />
+                  <Mono className="text-[11px]">{commitment.ownerAgentId}</Mono>
+                </span>
+                <span className="flex items-center gap-1.5">
+                  <Icon name="clock" size={13} />
+                  Due day {commitment.dueDay}
+                </span>
+                <span className="flex items-center gap-1.5">
+                  <Icon name="activity" size={13} />
+                  {commitment.lastUpdate}
+                </span>
+              </div>
+              {commitment.evidence.length > 0 && (
+                <ul className="mt-2.5 flex flex-wrap gap-1.5">
+                  {commitment.evidence.map((ref) => (
+                    <li key={ref.id}>
+                      <span className="inline-flex items-center gap-1.5 rounded-control border border-line bg-surface px-2 py-1 text-[11px] text-ink-soft">
+                        <Icon name="document" size={12} className="text-ink-muted" />
+                        {ref.label}
+                        <Mono className="text-[10.5px]">{ref.id}</Mono>
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          </td>
+        </tr>
+      )}
+    </>
   );
 }
 

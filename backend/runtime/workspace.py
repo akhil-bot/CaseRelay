@@ -123,6 +123,9 @@ class Workspace:
             "dob": packet.get("child", {}).get("dob", packet.get("dob", "")),
             "status": "draft",
             "volunteer_id": packet.get("volunteer_id", ""),
+            # Denormalised off the packet so listing a caseload by advocate does
+            # not mean opening every case to find out whose it is.
+            "volunteer_name": packet.get("volunteer_name", ""),
             "supervisor_id": packet.get("supervisor_id", ""),
             "created_at": _now().isoformat(),
             "activated_at": None,

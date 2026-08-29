@@ -93,7 +93,6 @@ CONTACTS: dict[str, dict[str, str | None]] = {
     "family_services": {"name": "Maria Lopez", "role": "Caseworker"},
 }
 
-VOLUNTEER_NAME = "Elena Vasquez"
 SUPERVISOR_NAME = "Dana Whitfield"
 
 FOSTER_FAMILY = {"household_name": "Nguyen", "caregiver_name": "Linh Nguyen"}
@@ -133,6 +132,31 @@ def new_case_id() -> str:
 def _suffix(case_id: str) -> str:
     digits = "".join(ch for ch in case_id if ch.isdigit())
     return digits or "0000"
+
+
+def advocate_for(case_id: str) -> tuple[str, str]:
+    """Which advocate holds this case, as (id, name).
+
+    A supervisor's question is not "how many cases are there" but "who on my team
+    is behind", and a caseload that all belongs to one person cannot answer it.
+
+    Derived from the case id rather than drawn at random, so a reseed hands a case
+    back to the same advocate and a supervisor's grouped caseload does not
+    reshuffle underneath them between runs. The roster is fixture data — see
+    backend/state/fixtures.py::advocates for why it is not a constant here.
+    """
+    from backend.state.fixtures import advocates, referral_packet
+
+    # The scripted demo case's facts come from its own fixture, and both the docs
+    # and the portal name its advocate. Deriving a different one here would leave
+    # two answers in the store for the same case.
+    scripted = referral_packet()
+    if case_id == scripted.get("case_id"):
+        return scripted["volunteer_id"], scripted["volunteer_name"]
+
+    roster = advocates()
+    row = roster[int(_suffix(case_id)) % len(roster)]
+    return row["volunteer_id"], row["volunteer_name"]
 
 
 def build_packet(case_id: str, scenario: str | None = None) -> dict[str, Any]:
@@ -181,6 +205,8 @@ def build_packet(case_id: str, scenario: str | None = None) -> dict[str, Any]:
             referral["first_contact_defer"] = True
         referrals.append(referral)
 
+    volunteer_id, volunteer_name = advocate_for(case_id)
+
     dob = datetime(rng.randint(2012, 2019), rng.randint(1, 12), rng.randint(1, 28))
 
     # Use the scenario's canonical child name if available.
@@ -196,8 +222,8 @@ def build_packet(case_id: str, scenario: str | None = None) -> dict[str, Any]:
             "name": child_name,
             "dob": dob.date().isoformat(),
         },
-        "volunteer_id": "caserelay-system",
-        "volunteer_name": VOLUNTEER_NAME,
+        "volunteer_id": volunteer_id,
+        "volunteer_name": volunteer_name,
         "supervisor_id": "supervisor-001",
         "supervisor_name": SUPERVISOR_NAME,
         "retention_policy": "standard_7y",

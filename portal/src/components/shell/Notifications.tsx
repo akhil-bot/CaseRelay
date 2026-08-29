@@ -6,9 +6,13 @@ import { Icon, type IconName } from "@/components/icons";
 import { Badge } from "@/components/ui/primitives";
 import { cx, surface, type as type_, type Tone } from "@/design/tokens";
 import { useDemo } from "@/lib/demo-store";
+import { useLiveApprovals } from "@/lib/live-approvals";
+import { useViewer } from "@/lib/viewer";
 
 export function Notifications() {
-  const { pendingApprovals, commitments, activity, step } = useDemo();
+  const { commitments, activity, step } = useDemo();
+  const { gates } = useLiveApprovals();
+  const { role } = useViewer();
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
 
@@ -32,13 +36,23 @@ export function Notifications() {
     body: string;
     href: string;
   }[] = [
-    ...pendingApprovals.map((approval) => ({
-      id: approval.id,
+    // Only the supervisor is being asked for something. For anyone else the
+    // gate is still news — their case has stopped — but it names who is holding
+    // it, and points at the case rather than a queue they cannot act on.
+    ...gates.map((gate) => ({
+      id: gate.key,
       icon: "approvals" as IconName,
       variant: "accent" as Tone,
-      title: "A message needs your approval",
-      body: approval.action,
-      href: "/approvals",
+      title:
+        role === "supervisor"
+          ? gate.kind === "activation"
+            ? `${gate.childName}'s case cannot start until you approve it`
+            : `${gate.childName}'s case is paused until you decide`
+          : gate.kind === "activation"
+            ? `${gate.childName}'s case cannot start until your supervisor approves it`
+            : `${gate.childName}'s case is paused until your supervisor decides`,
+      body: gate.reason ?? gate.caseId,
+      href: role === "supervisor" ? "/approvals" : `/cases/${gate.caseId}`,
     })),
     ...overdue.map((commitment) => ({
       id: commitment.id,

@@ -27,7 +27,6 @@ export type CaseState =
 export type CaseFlag =
   | "overdue"
   | "blocked"
-  | "approval_needed"
   | "on_track"
   | "recently_completed"
   | "intake_pending";
@@ -48,23 +47,6 @@ export type CapabilityKey =
   | "gateway"
   | "model_armor"
   | "observability";
-
-export interface AgentCard {
-  id: string;
-  name: string;
-  owner: string;
-  ownerKind: "casa" | "partner" | "compliance";
-  identity: string;
-  version: string;
-  purpose: string;
-  tools: string[];
-  dataScopes: string[];
-  deniedScopes: string[];
-  endpoint: string;
-  health: Health;
-  registeredOn: string;
-  domain?: Domain;
-}
 
 export interface EvidenceRef {
   id: string;
@@ -138,46 +120,6 @@ export interface ActivityEvent {
 export interface FieldProjection {
   disclosed: string[];
   withheld: { field: string; reason: string; ruleId: string }[];
-}
-
-export interface PolicyDecision {
-  id: string;
-  step: number;
-  at: string;
-  outcome: PolicyOutcome;
-  subject: string;
-  ruleIds: string[];
-  explanation: string;
-  projection?: FieldProjection;
-  retryInstruction?: string;
-}
-
-export interface ApprovalRequest {
-  id: string;
-  caseId: string;
-  childAlias: string;
-  createdAt: string;
-  requestedBy: string;
-  action: string;
-  recipient: string;
-  recipientRole: string;
-  purpose: string;
-  urgency: "standard" | "elevated";
-  policyBasis: string[];
-  draft: string;
-  evidence: EvidenceRef[];
-  projection: FieldProjection;
-  availableFromStep: number;
-  autoResolvedAtStep?: number;
-}
-
-export interface CapabilityProof {
-  key: CapabilityKey;
-  label: string;
-  managedProduct: string;
-  status: "callable" | "proof_only" | "fallback";
-  evidence: string;
-  provenAtStep: number;
 }
 
 export interface DemoStep {

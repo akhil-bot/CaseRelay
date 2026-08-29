@@ -216,6 +216,7 @@ const AUDIT_META: Record<string, AuditView> = {
     variant: "warn",
   },
   workflow_wake: { label: "Checked back on the case", icon: "sleep", variant: "accent" },
+  commitment_deferred: { label: "Step moved to a later date", icon: "clock", variant: "neutral" },
 };
 
 export function auditView(eventType: string): AuditView {

@@ -1,4 +1,5 @@
 import type { IconName } from "@/components/icons";
+import type { Role } from "@/design/personas";
 /**
  * All persona-dependent wording lives here, next to the design tokens, so the two
  * products stay coherent. The advocate voice avoids trace IDs, rule numbers, span
@@ -43,7 +44,6 @@ interface PersonaCopy {
     cases: PageHeading;
     caseDetail: PageHeading;
     approvals: PageHeading;
-    approvalDetail: PageHeading;
     registry: PageHeading;
     audit: PageHeading;
     admin: PageHeading;
@@ -58,18 +58,22 @@ interface PersonaCopy {
     attentionEmpty: { title: string; hint: string };
   };
   cases: {
-    listing: PageHeading;
+    /** No subtitle: the line under the title is the live result count, not copy. */
+    listing: { title: string };
     searchPlaceholder: string;
     filterAll: string;
+    /** Stands in for the child's name on a referral that has not named one yet. */
+    unnamed: string;
     empty: { title: string; hint: string };
+    /** No cases at all, as against none matching the search — a different problem. */
+    none: { title: string; hint: string };
     /** Column headings for the list view, in the order they are laid out. */
     columns: {
       case: string;
       status: string;
       commitments: string;
       deadline: string;
-      third: string;
-      fourth: string;
+      opened: string;
     };
   };
   caseDetail: {
@@ -81,28 +85,23 @@ interface PersonaCopy {
     handoff: PageHeading;
     evidenceLabel: string;
   };
+  /**
+   * The gates that stop a case where it stands — activating one, or releasing
+   * something that was quarantined. Read from the control plane, so an empty
+   * screen here means the agents are genuinely unblocked.
+   */
   approvals: {
-    queue: PageHeading;
-    empty: (advanced: boolean) => { title: string; hint: string };
-    context: PageHeading;
-    history: PageHeading;
-    /** Column headings for the queue, in the order they are laid out. */
-    columns: {
-      subject: string;
-      status: string;
-      shares: string;
-      recipient: string;
-      purpose: string;
-      raised: string;
-    };
-    disclosedLabel: string;
-    withheldLabel: string;
-    approveLabel: string;
-    declineLabel: string;
-    actingAs: string;
+    gates: PageHeading;
+    empty: { title: string; hint: string };
   };
+  /** Group headings are the role's own — see NAV_BY_ROLE in design/personas.ts. */
   sidebar: {
-    sectionLabel: string;
+    /**
+     * The standing note in the sidebar footer. It is addressed to the volunteer
+     * rather than describing the product, because it is the one piece of copy a
+     * person sees on every screen and it should be worth reading twice.
+     */
+    footerTitle: string;
     footerNote: string;
   };
   /**
@@ -165,11 +164,7 @@ const advocate: PersonaCopy = {
     },
     approvals: {
       title: "Needs my approval",
-      subtitle: "Nothing is sent to another organization until you have read it and said yes.",
-    },
-    approvalDetail: {
-      title: "Before this is sent",
-      subtitle: "The exact message, exactly what it shares, and what it is based on.",
+      subtitle: "A case stops here until you have read what is waiting and decided.",
     },
     registry: {
       title: "Agent registry",
@@ -198,8 +193,8 @@ const advocate: PersonaCopy = {
       subtitle: "CaseRelay kept checking while you were away.",
     },
     commitments: {
-      title: "Maya's next steps",
-      subtitle: "The five things her court order asks someone to do.",
+      title: "Your caseload, step by step",
+      subtitle: "Open a child to see how far their court-ordered steps have got.",
     },
     stats: {
       owner: "Steps with no owner",
@@ -209,7 +204,7 @@ const advocate: PersonaCopy = {
     },
     statNotes: {
       owner: "Nobody has claimed these",
-      waiting: "Messages you have not approved",
+      waiting: "Cases that cannot move without you",
       open: "Across Maya's case",
       steps: "Since the case opened",
     },
@@ -219,20 +214,21 @@ const advocate: PersonaCopy = {
     },
   },
   cases: {
-    listing: {
-      title: "Your caseload",
-      subtitle: "Sorted so the children waiting longest come first.",
-    },
-    searchPlaceholder: "Search by child, case number, or county",
+    listing: { title: "Your caseload" },
+    searchPlaceholder: "Search by child, case number, or status",
     filterAll: "All my cases",
+    unnamed: "No child named yet",
     empty: { title: "No case matches that search.", hint: "Try a different name or case number." },
+    none: {
+      title: "You have no cases yet.",
+      hint: "A case appears here as soon as a referral is opened for you.",
+    },
     columns: {
       case: "Child",
       status: "Status",
       commitments: "Steps done",
       deadline: "Next due date",
-      third: "Court order",
-      fourth: "Your supervisor",
+      opened: "Opened",
     },
   },
   caseDetail: {
@@ -255,38 +251,20 @@ const advocate: PersonaCopy = {
     evidenceLabel: "Proof",
   },
   approvals: {
-    queue: {
-      title: "Waiting for your yes",
-      subtitle: "Read the message, check exactly what it shares, then decide.",
+    gates: {
+      title: "Paused until you decide",
+      subtitle:
+        "These cases have stopped where they are. Nobody is contacted and nothing is shared while they wait.",
     },
-    empty: (advanced) => ({
+    empty: {
       title: "Nothing is waiting on you.",
-      hint: advanced
-        ? "The overdue school message was approved and sent."
-        : "When CaseRelay wants to contact another organization, it will ask you here first.",
-    }),
-    context: {
-      title: "Why this message is needed",
-      subtitle: "The school's last reply asked for information it is not allowed to have.",
+      hint: "When a case cannot go any further without you, it will stop here and say so.",
     },
-    history: { title: "What you have already decided", subtitle: "" },
-    columns: {
-      subject: "Child",
-      status: "Status",
-      shares: "Shares",
-      recipient: "Goes to",
-      purpose: "Why",
-      raised: "Asked you",
-    },
-    disclosedLabel: "This message will share",
-    withheldLabel: "This message will not share",
-    approveLabel: "Approve and send",
-    declineLabel: "Do not send",
-    actingAs: "You are approving as",
   },
   sidebar: {
-    sectionLabel: "My work",
-    footerNote: "No real child, family, or school record is used anywhere in this demonstration.",
+    footerTitle: "Why you're here",
+    footerNote:
+      "A child in care can meet dozens of professionals in a year. You are the one who stays. CaseRelay chases the handoffs so your hours go to them, not to the paperwork.",
   },
   guidelines: {
     label: "What CaseRelay is for",
@@ -327,14 +305,14 @@ const advocate: PersonaCopy = {
           ],
         },
         {
-          title: "Approve a message before it is sent",
+          title: "Decide on a case that has stopped",
           icon: "approvals",
           href: "/approvals",
           steps: [
-            "Open “Needs my approval” and read the message itself — use “Read the message first” to see the exact wording.",
-            "Check the two lists beside it: what the message will share, and what it will not.",
-            "Look at “What this is based on” if you want to see the document a claim came from.",
-            "Choose “Approve and send” or “Do not send”. If you do nothing, nothing is sent.",
+            "Open “Needs my approval”. Everything listed there is a case that cannot go any further without you.",
+            "Read what the card says will happen if you approve — either starting outreach on a new case, or releasing something that was held back.",
+            "Open the case itself if you want the fuller picture. Each card links straight to it.",
+            "Approve or reject. If you do nothing, nothing happens and the case stays where it is.",
           ],
         },
         {
@@ -390,6 +368,61 @@ const advocate: PersonaCopy = {
 };
 
 export const COPY: PersonaCopy = advocate;
+
+/**
+ * Where a role needs different words for a screen it shares.
+ *
+ * COPY is written in the advocate's first person — "Your caseload", "All my
+ * cases" — which is right for the person whose cases they are and wrong for the
+ * supervisor reading their team's. Only the lines that actually change are here.
+ *
+ * Two levels deep and no further, on purpose: a general deep merge would make it
+ * impossible to see from here what a role has and has not overridden. Wording
+ * that changes with something other than the role — the Today page's "waiting on
+ * you", which turns on who can act — stays a condition at its own call site.
+ */
+export const ROLE_COPY: Partial<
+  Record<
+    Role,
+    {
+      pages?: Partial<PersonaCopy["pages"]>;
+      cases?: Partial<PersonaCopy["cases"]>;
+    }
+  >
+> = {
+  supervisor: {
+    pages: {
+      overview: {
+        title: "Today",
+        subtitle: "What has stopped, and which of your advocates is waiting on you.",
+      },
+      cases: {
+        title: "Team caseload",
+        subtitle: "Every child your advocates carry, grouped by who is responsible.",
+      },
+    },
+    cases: {
+      listing: { title: "Team caseload" },
+      searchPlaceholder: "Search by child, advocate, case number, or status",
+      filterAll: "All cases",
+      none: {
+        title: "Your advocates have no cases yet.",
+        hint: "A case appears here as soon as a referral is opened for one of them.",
+      },
+    },
+  },
+};
+
+/** COPY as this role reads it. Shared wording where a role said nothing. */
+export function copyFor(role: Role): PersonaCopy {
+  const override = ROLE_COPY[role];
+  if (!override) return COPY;
+  return {
+    ...COPY,
+    pages: { ...COPY.pages, ...override.pages },
+    cases: { ...COPY.cases, ...override.cases },
+  };
+}
 
 /** Field paths, translated to the words a person would say out loud. */
 const FIELD_LABELS: Record<string, string> = {

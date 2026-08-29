@@ -99,8 +99,94 @@ export async function deleteCase(caseId: string): Promise<{ detail: string }> {
   return request(`/v1/cases/${caseId}`, { method: "DELETE" });
 }
 
-export async function listCases(): Promise<Record<string, unknown>[]> {
+/**
+ * A case as /v1/cases lists it.
+ *
+ * Two code paths answer this endpoint and they do not return the same thing: the
+ * stored one hands back the whole case document, the in-memory one a projection.
+ * The fields below are the ones both promise, so everything past them is read
+ * through the index signature and normalised by the caller.
+ *
+ * `volunteer_name` is denormalised onto the case by the backend, which is what
+ * lets a supervisor's caseload be grouped by advocate without one read per case.
+ */
+export interface CaseListItem {
+  case_id?: string;
+  child_name?: string;
+  status?: string;
+  volunteer_id?: string;
+  volunteer_name?: string;
+  created_at?: string;
+  test_case?: boolean;
+  [key: string]: unknown;
+}
+
+/** Unscoped: there is no volunteer or supervisor filter, so this is every case. */
+export async function listCases(): Promise<CaseListItem[]> {
   return request("/v1/cases");
+}
+
+// ─── Registry ────────────────────────────────────────────────────────────────
+
+/**
+ * One agent card, exactly as the registry serves it. Every card carries all ten
+ * keys — the fleet's discovery depends on that, so none of them are optional.
+ */
+export interface AgentCardRecord {
+  agent_id: string;
+  display_name: string;
+  owner_org: string;
+  version: string;
+  purpose: string;
+  tools: string[];
+  allowed_data_scopes: string[];
+  denied_data_scopes: string[];
+  identity: string;
+  health_status: string;
+}
+
+/** The same cards the orchestrator discovers against, not a copy of them. */
+export async function listRegistry(): Promise<AgentCardRecord[]> {
+  return request("/v1/registry");
+}
+
+// ─── Audit ───────────────────────────────────────────────────────────────────
+
+/**
+ * One recorded audit event.
+ *
+ * Only `event_id`, `trace_id` and `timestamp` are written on every path
+ * (backend/runtime/workspace.py::append_audit). Everything below them depends
+ * on which agent wrote the event, so it is all optional — a denial carries no
+ * disclosed fields, a scheduler wake carries no verdict, and so on.
+ *
+ * There is deliberately no duration here: the backend records none, and a
+ * timing the UI invented would be worse than no timing at all.
+ */
+export interface AuditEvent {
+  event_id: string;
+  trace_id: string;
+  /** ISO-8601, UTC. */
+  timestamp: string;
+  event_type: string;
+  agent_identity?: string;
+  /** allow, deny, quarantine, answered, no_response, supervisor_notified, deferred. */
+  verdict?: string;
+  explanation?: string;
+  purpose?: string;
+  commitment_type?: string;
+  disclosed_fields?: string[];
+  withheld_fields?: string[];
+  legal_basis?: string | null;
+  expected_principal?: string;
+  denied_field?: string;
+  triggered_by?: string;
+  workflow_ids?: string[];
+}
+
+/** Audit is per case; there is no endpoint that spans them. */
+export async function listCaseAudit(caseId: string): Promise<AuditEvent[]> {
+  return request(`/v1/cases/${caseId}/audit`);
 }
 
 export interface LiveCaseDetail {

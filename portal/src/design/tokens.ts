@@ -249,6 +249,13 @@ export const layout = {
    * crushing the region into a couple of rows.
    */
   fillHeight: "h-[calc(100dvh-104px)]",
+  /**
+   * The same measure as `fillHeight`, but as a floor on a page rather than a
+   * fixed height on one region. For a page whose *last* region should reach the
+   * bottom of the screen while everything above it keeps its natural height:
+   * make the page a flex column with this, then give that region `flex-1`.
+   */
+  fillHeightMin: "min-h-[calc(100dvh-104px)]",
   /** Paragraph width cap, so prose stays readable on a 2560px display. */
   measure: "max-w-[78ch]",
   sidebarWidth: "w-[248px]",

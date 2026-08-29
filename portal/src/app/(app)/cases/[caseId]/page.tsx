@@ -6,6 +6,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Icon } from "@/components/icons";
 import { LiveActivityFeed } from "@/components/live/LiveActivityFeed";
 import { NeedsAttention } from "@/components/live/NeedsAttention";
+import { SupervisorGate } from "@/components/live/SupervisorGate";
 import {
   Avatar,
   Badge,
@@ -16,6 +17,7 @@ import {
   Field,
   FlagBadge,
   Group,
+  Loading,
   Mono,
   ProgressBar,
   Rows,
@@ -23,10 +25,12 @@ import {
   cx,
 } from "@/components/ui/primitives";
 import { fieldLabel, purposeLabel } from "@/design/copy";
+import { PERSONAS } from "@/design/personas";
 import { control, layout, row, surface, tone, type as type_ } from "@/design/tokens";
 import { auditView, formatEventTime } from "@/lib/case-events";
 import { useDemo } from "@/lib/demo-store";
-import { submitRun, activateCase, decideApproval, listPendingApprovals, type CaseRunSummary, type RunEvent, type PendingApproval } from "@/lib/api";
+import { submitRun, type CaseRunSummary, type RunEvent } from "@/lib/api";
+import { useLiveApprovals, type Gate } from "@/lib/live-approvals";
 import { useLiveCase, useLiveRunEvents } from "@/lib/live-case";
 import { AUTHORITY_GRANT, CASES, PRIMARY_CASE_ID } from "@/lib/mock/cases";
 import { EDUCATION_PROJECTION } from "@/lib/mock/policy";
@@ -68,17 +72,16 @@ const eventKey = (e: RunEvent) => `${e.run_id}-${e.event}-${e.phase ?? ""}-${e.t
 
 function LiveCaseDetail({ caseId }: { caseId: string }) {
   const [liveCase, refreshCase] = useLiveCase(caseId);
+  const { profile, role } = useViewer();
+  // The gate is the supervisor's to decide. It still shows here for anyone else,
+  // because a case that has stopped is exactly what the person working it needs
+  // to know, but it names who is holding it rather than offering the buttons.
+  const canDecide = role === "supervisor";
+  const { gates, decidingKey, decideError, decide, refresh: refreshGates } = useLiveApprovals();
 
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [startedRunId, setStartedRunId] = useState<string | null>(null);
-  const [approving, setApproving] = useState(false);
-  const [approveError, setApproveError] = useState<string | null>(null);
-  const [pendingApprovals, setPendingApprovals] = useState<PendingApproval[]>([]);
-  // null = user has not touched this yet; derive from whether all work is done.
-  // non-null = user made an explicit choice; honour it for the rest of the session.
-  const [commitmentsOverride, setCommitmentsOverride] = useState<boolean | null>(null);
-  const [auditOpen, setAuditOpen] = useState(false);
 
   const runs = liveCase.status === "loaded" ? liveCase.runs : NO_RUNS;
   const caseEvents = liveCase.status === "loaded" ? liveCase.events : NO_EVENTS;
@@ -96,9 +99,14 @@ function LiveCaseDetail({ caseId }: { caseId: string }) {
 
   useEffect(() => {
     // A round of outreach that has just finished has changed the commitments
-    // underneath the page. Read them now rather than at the next poll.
-    if (!runState.streaming && runState.terminalState) refreshCase();
-  }, [runState.streaming, runState.terminalState, refreshCase]);
+    // underneath the page. Read them now rather than at the next poll — and
+    // with them any gate the round just raised, which is the moment a
+    // quarantined reply turns into something waiting on a person.
+    if (!runState.streaming && runState.terminalState) {
+      refreshCase();
+      refreshGates();
+    }
+  }, [runState.streaming, runState.terminalState, refreshCase, refreshGates]);
 
   // The recorded history covers every run; the stream covers the one being
   // watched, and gets there first. Both together, oldest first, no duplicates.
@@ -130,54 +138,26 @@ function LiveCaseDetail({ caseId }: { caseId: string }) {
     }
   };
 
-  useEffect(() => {
-    if (liveCase.status !== "loaded") return;
-    const caseStatus = String(liveCase.data.case.status ?? "");
-    const hasCommitments = Object.keys(liveCase.data.commitments).length > 0;
-    if (caseStatus === "draft" && hasCommitments) return;
-    listPendingApprovals()
-      .then((items) => setPendingApprovals(items.filter((a) => a.case_id === caseId)))
-      .catch((err) => {
-        console.warn("[CaseRelay] Failed to fetch pending approvals:", err);
-      });
-  }, [liveCase, caseId]);
-
-  const handleActivate = async (supervisorId: string) => {
-    setApproving(true);
-    setApproveError(null);
-    try {
-      await activateCase(caseId, supervisorId);
-      refreshCase();
-    } catch (err: unknown) {
-      setApproveError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setApproving(false);
-    }
-  };
-
-  const handleDecideApproval = async (approvalId: string, decision: "approve" | "reject", decidedBy: string) => {
-    setApproving(true);
-    setApproveError(null);
-    try {
-      await decideApproval(approvalId, decision, decidedBy);
-      setPendingApprovals((prev) => prev.filter((a) => String(a.approval_id) !== approvalId));
-      refreshCase();
-    } catch (err: unknown) {
-      setApproveError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setApproving(false);
-    }
+  // Deciding goes through the shared poll so the queue and the sidebar badge
+  // drop the gate at the same moment this page does; the case itself is reread
+  // afterwards, because approving is what lets it move again.
+  const handleGate = async (gate: Gate, decision: "approve" | "reject") => {
+    await decide(gate, decision, profile.id);
+    refreshCase();
   };
 
   if (liveCase.status === "loading") {
     return (
-      <div className={layout.stack}>
+      <div className={cx("flex flex-col gap-5", layout.fillHeightMin)}>
         <Breadcrumb label={caseId} />
-        <Card icon="cases" title={caseId}>
-          <div className="flex items-center gap-3 py-8">
-            <span className="inline-block size-4 animate-spin rounded-full border-2 border-brand border-t-transparent" />
-            <span className={type_.body}>Loading case details…</span>
-          </div>
+        <Card
+          icon="cases"
+          title={caseId}
+          fill
+          className="flex-1"
+          bodyClassName="flex flex-col justify-center"
+        >
+          <Loading icon="cases" title="Opening the case…" />
         </Card>
       </div>
     );
@@ -239,18 +219,36 @@ function LiveCaseDetail({ caseId }: { caseId: string }) {
   const closedCount = commitmentEntries.filter(([, v]) => TERMINAL_STATUSES.has(v)).length;
   const hasActiveRun = runs.some((r) => r.state === "running" || r.state === "queued");
   const isStreaming = runState.streaming || hasActiveRun;
-  // The activation gate is safe to act on only once the run has actually parked
-  // at awaiting_supervisor. Before that point the grants are still being proposed
-  // and activating early would miss whichever ones hadn't landed yet.
-  const gateReady = runs.some((r) => r.state === "awaiting_supervisor");
 
   const allCommitmentsClosed =
     commitmentEntries.length > 0 && closedCount === commitmentEntries.length;
 
-  // Collapsed when all done (the header already says "All done." and 100%),
-  // expanded while any work is still open. A click flips the override and keeps
-  // it regardless of subsequent commitment-state changes.
-  const commitmentsOpen = commitmentsOverride ?? !allCommitmentsClosed;
+  // Activation is worked out here rather than read off the shared poll: this
+  // page already knows the case is in draft with its commitments extracted, and
+  // a case opened moments after it was created should not wait for the next
+  // poll to admit it needs approving. The key is the one the poll would build,
+  // so deciding here clears the queue's copy of the same gate.
+  const activationGate: Gate | null =
+    status === "draft" && commitmentEntries.length > 0
+      ? { key: `activation:${caseId}`, kind: "activation", caseId, childName }
+      : null;
+
+  const caseGates: Gate[] = [
+    ...(activationGate ? [activationGate] : []),
+    ...gates.filter((gate) => gate.caseId === caseId && gate.kind === "escalation"),
+  ];
+
+  // The feed is the tall thing on the page. What is still owed, and the evidence
+  // behind it, are both short — so they stack in a column beside the feed rather
+  // than each claiming a full-width band and pushing the case apart.
+  //
+  // Any of the three can be absent: a case with no runs yet, a case whose
+  // commitments have not been extracted, a case that has recorded nothing. The
+  // column disappears with its contents and the feed takes the full width.
+  const showFeed = isStreaming || runs.length > 0 || mergedEvents.length > 0;
+  const showCommitments = commitmentEntries.length > 0;
+  const showAudit = data.timeline.length > 0;
+  const showAside = showCommitments || showAudit;
 
   return (
     <div className={layout.stack}>
@@ -275,7 +273,7 @@ function LiveCaseDetail({ caseId }: { caseId: string }) {
             variant={status === "closed" ? "brand" : status === "monitoring" ? "brand" : "neutral"}
             icon={status === "closed" ? "checkCircle" : "activity"}
           >
-            {caseStatusLabel(status)}
+            {caseStatusLabel(status, canDecide)}
           </Badge>
         </div>
 
@@ -287,7 +285,7 @@ function LiveCaseDetail({ caseId }: { caseId: string }) {
             {scenario || "—"}
           </Field>
           <Field label="Status">
-            {caseStatusLabel(status)}
+            {caseStatusLabel(status, canDecide)}
           </Field>
           <Field label="Commitments">
             {closedCount} of {commitmentEntries.length} closed
@@ -327,141 +325,121 @@ function LiveCaseDetail({ caseId }: { caseId: string }) {
       </section>
 
       {/* ── Approval gates — must not be missed ───────────────────────── */}
-      {status === "draft" && commitmentEntries.length > 0 && (
+      {caseGates.map((gate) => (
         <SupervisorGate
-          gateType="activation"
-          caseId={caseId}
-          childName={childName}
-          approving={approving}
-          gateReady={gateReady}
-          error={approveError}
-          onApprove={(supervisorId) => handleActivate(supervisorId)}
-        />
-      )}
-
-      {pendingApprovals.length > 0 && pendingApprovals.map((a) => (
-        <SupervisorGate
-          key={String(a.approval_id)}
-          gateType="escalation"
-          caseId={caseId}
-          childName={childName}
-          approvalId={String(a.approval_id)}
-          reason={a.reason}
-          approving={approving}
-          error={approveError}
-          onApprove={(decidedBy) => handleDecideApproval(String(a.approval_id), "approve", decidedBy)}
-          onReject={(decidedBy) => handleDecideApproval(String(a.approval_id), "reject", decidedBy)}
+          key={gate.key}
+          kind={gate.kind}
+          childName={gate.childName}
+          reason={gate.reason}
+          advocateName={gate.advocateName}
+          actionType={gate.actionType}
+          readOnly={!canDecide}
+          decidingAs={canDecide ? profile.name : PERSONAS.supervisor.name}
+          busy={decidingKey === gate.key}
+          error={decideError?.key === gate.key ? decideError.message : null}
+          onApprove={() => void handleGate(gate, "approve")}
+          onReject={
+            gate.kind === "escalation" ? () => void handleGate(gate, "reject") : undefined
+          }
         />
       ))}
 
-      {/* ── Live activity feed — the primary view ─────────────────────── */}
-      {(isStreaming || runs.length > 0 || mergedEvents.length > 0) && (
-        <LiveActivityFeed run={feedRun} />
+      {/* ── What happened, beside what is still owed ──────────────────── */}
+      {(showFeed || showAside) && (
+        <div
+          className={cx(
+            "grid items-start gap-4",
+            showFeed &&
+              showAside &&
+              "xl:grid-cols-[minmax(0,1fr)_minmax(0,360px)] 3xl:grid-cols-[minmax(0,1fr)_minmax(0,420px)]",
+          )}
+        >
+          {showFeed && <LiveActivityFeed run={feedRun} />}
+
+          {/* Both cards are the same shape — icon, title, a count or a measure on
+              the right, then rows to the edges — so the column reads as one
+              piece beside the feed rather than two unrelated widgets. Neither
+              hides behind a toggle: what is owed and what was recorded are the
+              two things the case is answerable for. */}
+          {showAside && (
+            <div className="grid gap-4">
+              {showCommitments && (
+                <Card
+                  icon="cases"
+                  title="Commitments"
+                  subtitle={
+                    allCommitmentsClosed
+                      ? "All done."
+                      : `${closedCount} of ${commitmentEntries.length} closed`
+                  }
+                  action={
+                    // The subtitle already counts them, so the bar drops its
+                    // percentage and spends the whole width on the measure
+                    // rather than on a number stated twice.
+                    <div className="w-20">
+                      <ProgressBar
+                        value={closedCount}
+                        total={commitmentEntries.length}
+                        variant="seal"
+                        hideValue
+                      />
+                    </div>
+                  }
+                  flush
+                >
+                  <div className="max-h-[420px] overflow-y-auto">
+                    <Rows as="ol">
+                      {commitmentEntries.map(([type, commitmentStatus]) => (
+                        <li key={type} className={cx("border-l-2", row.pad,
+                          commitmentStatus === "completed" ? "border-l-seal"
+                            : commitmentStatus === "blocked" ? "border-l-danger"
+                            : "border-l-transparent",
+                        )}>
+                          <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+                            <DomainIcon domain={type as Domain} size={32} />
+                            <span className="min-w-0 flex-1 text-[13.5px] font-medium text-ink">
+                              {DOMAIN_META[type as Domain]?.label ?? type.replace(/_/g, " ")}
+                            </span>
+                            <StatusBadge status={commitmentStatus as CommitmentStatus} />
+                          </div>
+                        </li>
+                      ))}
+                    </Rows>
+                  </div>
+                </Card>
+              )}
+
+              {showAudit && (
+                <Card
+                  icon="audit"
+                  title="Audit trail"
+                  // Short enough to hold one line at this column width, so this
+                  // header stands the same height as the one above it.
+                  subtitle="What was shared and refused."
+                  action={
+                    <span className={type_.meta}>
+                      {data.timeline.length} {data.timeline.length === 1 ? "entry" : "entries"}
+                    </span>
+                  }
+                  flush
+                >
+                  <div className="max-h-[420px] overflow-y-auto">
+                    <Rows>
+                      {data.timeline.map((entry, i) => (
+                        <AuditRow key={i} entry={entry} />
+                      ))}
+                    </Rows>
+                  </div>
+                </Card>
+              )}
+            </div>
+          )}
+        </div>
       )}
 
       {/* ── Contextual blockers — secondary to the feed ───────────────── */}
       <NeedsAttention commitments={commitmentStates} events={mergedEvents} />
 
-      {/* ── Commitments — collapsible, expanded by default ────────────── */}
-      {commitmentEntries.length > 0 && (
-        <Card
-          icon="cases"
-          title="Commitments"
-          subtitle={
-            allCommitmentsClosed
-              ? "All done."
-              : `${closedCount} of ${commitmentEntries.length} closed`
-          }
-          action={
-            <div className="flex items-center gap-3">
-              <div className="w-32">
-                <ProgressBar value={closedCount} total={commitmentEntries.length} variant="seal" />
-              </div>
-              <button
-                type="button"
-                onClick={() => setCommitmentsOverride((v) => !(v ?? !allCommitmentsClosed))}
-                aria-expanded={commitmentsOpen}
-                aria-label={commitmentsOpen ? "Collapse commitments" : "Expand commitments"}
-                className={cx(control.ghost, "px-2 py-1.5")}
-              >
-                <Icon name={commitmentsOpen ? "chevronDown" : "chevronRight"} size={15} />
-              </button>
-            </div>
-          }
-          flush
-        >
-          {commitmentsOpen && (
-            <Rows as="ol">
-              {commitmentEntries.map(([type, commitmentStatus]) => (
-                <li key={type} className={cx("border-l-2", row.pad,
-                  commitmentStatus === "completed" ? "border-l-seal"
-                    : commitmentStatus === "blocked" ? "border-l-danger"
-                    : "border-l-transparent",
-                )}>
-                  <div className="flex items-center gap-3">
-                    <DomainIcon domain={type as Domain} size={32} />
-                    <div className="min-w-0 flex-1">
-                      <span className="text-[13.5px] font-medium text-ink">
-                        {DOMAIN_META[type as Domain]?.label ?? type.replace(/_/g, " ")}
-                      </span>
-                    </div>
-                    <StatusBadge status={commitmentStatus as CommitmentStatus} />
-                  </div>
-                </li>
-              ))}
-            </Rows>
-          )}
-          {!commitmentsOpen && allCommitmentsClosed && (
-            <p className="flex items-center gap-2 px-5 py-3 text-[12.5px] text-ink-muted">
-              <Icon name="checkCircle" size={14} className="shrink-0 text-seal" />
-              {commitmentEntries.length} of {commitmentEntries.length} commitments fulfilled.
-            </p>
-          )}
-          {!commitmentsOpen && !allCommitmentsClosed && (
-            <p className="flex items-center gap-2 px-5 py-3 text-[12.5px] text-ink-muted">
-              <Icon name="list" size={14} className="shrink-0" />
-              {closedCount} of {commitmentEntries.length} closed — expand to see each step.
-            </p>
-          )}
-        </Card>
-      )}
-
-      {/* ── Audit trail — evidence on demand, not in the main scroll ──── */}
-      {data.timeline.length > 0 && (
-        <div className={cx(surface.card, "overflow-hidden")}>
-          <button
-            type="button"
-            onClick={() => setAuditOpen((v) => !v)}
-            aria-expanded={auditOpen}
-            className={cx(
-              "flex w-full items-center gap-3 px-5 py-4 text-left transition-colors hover:bg-surface-soft",
-              auditOpen && "border-b border-line",
-            )}
-          >
-            <span className="flex size-8 shrink-0 items-center justify-center rounded-control bg-brand-soft text-brand">
-              <Icon name="audit" size={17} />
-            </span>
-            <div className="min-w-0 flex-1">
-              <h2 className={cx(type_.sectionTitle)}>Audit trail</h2>
-              <p className={cx("mt-1", type_.small)}>
-                {data.timeline.length} entries — what was shared, what was refused, and when.
-              </p>
-            </div>
-            <Icon
-              name={auditOpen ? "chevronDown" : "chevronRight"}
-              size={16}
-              className="shrink-0 text-ink-muted"
-            />
-          </button>
-          {auditOpen && (
-            <Rows>
-              {data.timeline.map((entry, i) => (
-                <AuditRow key={i} entry={entry} />
-              ))}
-            </Rows>
-          )}
-        </div>
-      )}
     </div>
   );
 }
@@ -514,114 +492,14 @@ function Breadcrumb({ label }: { label: string }) {
   );
 }
 
-function caseStatusLabel(status: string): string {
+function caseStatusLabel(status: string, canDecide: boolean): string {
   if (status === "monitoring") return "CaseRelay is watching";
   if (status === "attention_required") return "Needs attention";
   if (status === "intake_review") return "Pending intake";
-  if (status === "approval_required") return "Waiting on you";
+  if (status === "approval_required")
+    return canDecide ? "Waiting on you" : "Waiting on your supervisor";
   if (status === "completed" || status === "closed") return "Completed";
   return status.replace(/_/g, " ");
-}
-
-function SupervisorGate({
-  gateType,
-  childName,
-  reason,
-  approving,
-  gateReady = true,
-  error,
-  onApprove,
-  onReject,
-}: {
-  gateType: "activation" | "escalation";
-  caseId: string;
-  childName: string;
-  approvalId?: string;
-  reason?: string;
-  approving: boolean;
-  /**
-   * For activation gates: true once the run has parked at awaiting_supervisor.
-   * Keeps the Approve button disabled — and explains why — while intake agents
-   * are still working. Escalation gates are always immediately actionable.
-   */
-  gateReady?: boolean;
-  error: string | null;
-  onApprove: (supervisorId: string) => void;
-  onReject?: (supervisorId: string) => void;
-}) {
-  const { profile } = useViewer();
-  const supervisorId = profile?.id ?? profile?.name ?? "portal-operator";
-
-  const isActivation = gateType === "activation";
-  const title = isActivation
-    ? `Waiting on you — approve activation for ${childName}`
-    : `Waiting on you — approve escalation for ${childName}`;
-  const body = isActivation
-    ? "CaseRelay has extracted commitments and proposed grants. Nothing will happen until you decide — no service will be contacted and no data will be shared."
-    : reason ?? "A reply was quarantined. The case is paused and will not proceed until you make a decision.";
-  const consequence = isActivation
-    ? "Approving grants each specialist access to their scoped fields and begins outreach to all services on this case."
-    : "Approving releases the quarantined action. Rejecting discards it and records your decision.";
-
-  return (
-    <section
-      className={cx(
-        surface.card,
-        "overflow-hidden border-2 border-warn/50",
-        // Faint warm tint so the card reads as different from a normal card at a glance
-        "bg-warn-soft/20",
-      )}
-    >
-      {/* Coloured top stripe — instantly distinguishes this from any other card */}
-      <div className="h-1 w-full bg-warn/40" />
-
-      <div className="flex flex-wrap items-start gap-3 px-5 pt-5 pb-4">
-        {/* Pulsing icon ring to catch the eye when the card first appears */}
-        <span className="relative mt-0.5 flex size-9 shrink-0 items-center justify-center rounded-full bg-warn/20">
-          <span className="absolute inset-0 animate-ping rounded-full bg-warn/20" />
-          <Icon name="lock" size={18} className="relative text-warn" />
-        </span>
-        <div className="min-w-0 flex-1">
-          <p className="text-[15px] font-semibold text-ink">{title}</p>
-          <p className={cx("mt-1.5", type_.body)}>{body}</p>
-          <p className="mt-2 text-[12px] text-ink-soft">{consequence}</p>
-          <p className="mt-3 flex items-center gap-1.5 text-[12px] text-ink-muted">
-            <Icon name="users" size={13} className="shrink-0" />
-            Deciding as <span className="font-medium text-ink">{supervisorId}</span>
-          </p>
-        </div>
-      </div>
-      <div className={cx("flex flex-wrap items-center gap-3 border-t px-5 py-4", "border-warn/30 bg-warn-soft/50")}>
-        {onReject && (
-          <button
-            type="button"
-            onClick={() => onReject(supervisorId)}
-            disabled={approving}
-            className={control.secondary}
-          >
-            <Icon name="close" size={15} />
-            Reject
-          </button>
-        )}
-        {isActivation && !gateReady && (
-          <p className="flex items-center gap-1.5 text-[12px] text-ink-muted">
-            <Icon name="activity" size={13} className="shrink-0 animate-pulse" />
-            Agents are still working — this will unlock once intake finishes.
-          </p>
-        )}
-        <button
-          type="button"
-          onClick={() => onApprove(supervisorId)}
-          disabled={approving || (isActivation && !gateReady)}
-          className={cx(control.primary, "ml-auto")}
-        >
-          <Icon name={isActivation && !gateReady ? "clock" : "check"} size={15} />
-          {approving ? "Approving…" : isActivation ? "Approve & activate" : "Approve escalation"}
-        </button>
-      </div>
-      {error && <p className="mb-3 px-5 text-[12px] text-danger">{error}</p>}
-    </section>
-  );
 }
 
 // ═══════════════════════════════════════════════════════════════════════════

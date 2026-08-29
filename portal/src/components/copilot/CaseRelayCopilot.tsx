@@ -16,6 +16,7 @@ import { cx } from "@/design/tokens";
 import { CASERELAY_AGENT_ID, isRuntimeAvailable } from "@/lib/copilot/config";
 import { useToolEvents } from "@/lib/copilot/tool-events";
 import { useDemo } from "@/lib/demo-store";
+import { useLiveApprovals } from "@/lib/live-approvals";
 import { useViewer } from "@/lib/viewer";
 
 /**
@@ -76,7 +77,8 @@ function UnconfiguredChat() {
 function ConnectedChat() {
   const pathname = usePathname() ?? "/";
   const { profile } = useViewer();
-  const { cases, pendingApprovals, meta } = useDemo();
+  const { cases, meta } = useDemo();
+  const { gates } = useLiveApprovals();
   const { caseEntries } = useToolEvents();
 
   const overdue = cases.filter((item) => item.flags.includes("overdue")).length;
@@ -96,7 +98,7 @@ function ConnectedChat() {
 
   useAgentContext({
     description: "Caseload summary",
-    value: `${cases.length} cases: ${overdue} overdue, ${blocked} blocked, ${pendingApprovals.length} awaiting human approval.`,
+    value: `${cases.length} cases: ${overdue} overdue, ${blocked} blocked, ${gates.length} awaiting human approval.`,
   });
 
   useAgentContext({

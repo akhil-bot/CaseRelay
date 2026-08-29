@@ -10,18 +10,15 @@ import {
   type ReactNode,
 } from "react";
 import { DEMO_STEPS, LAST_STEP } from "@/lib/mock/steps";
-import {
-  deriveActivity,
-  deriveCapabilityProofs,
-  deriveCases,
-  deriveCommitments,
-  derivePendingApprovals,
-  derivePolicyDecisions,
-  stepMeta,
-} from "@/lib/derive";
+import { deriveActivity, deriveCases, deriveCommitments, stepMeta } from "@/lib/derive";
 
-export type ApprovalDecision = "approved" | "declined";
-
+/**
+ * The scripted walkthrough: a synthetic case advanced by a step counter.
+ *
+ * Approvals are deliberately not part of it. What is waiting on a person comes
+ * from the control plane, so that one screen tells the truth whatever step the
+ * walkthrough happens to be on — see src/lib/live-approvals.tsx.
+ */
 interface DemoContextValue {
   step: number;
   setStep: (step: number) => void;
@@ -30,15 +27,10 @@ interface DemoContextValue {
   reset: () => void;
   autoplay: boolean;
   toggleAutoplay: () => void;
-  decisions: Record<string, ApprovalDecision>;
-  decide: (approvalId: string, decision: ApprovalDecision) => void;
   meta: ReturnType<typeof stepMeta>;
   cases: ReturnType<typeof deriveCases>;
   commitments: ReturnType<typeof deriveCommitments>;
   activity: ReturnType<typeof deriveActivity>;
-  policyDecisions: ReturnType<typeof derivePolicyDecisions>;
-  capabilities: ReturnType<typeof deriveCapabilityProofs>;
-  pendingApprovals: ReturnType<typeof derivePendingApprovals>;
   totalSteps: number;
 }
 
@@ -47,7 +39,6 @@ const DemoContext = createContext<DemoContextValue | null>(null);
 export function DemoProvider({ children }: { children: ReactNode }) {
   const [step, setStepRaw] = useState(0);
   const [autoplay, setAutoplay] = useState(false);
-  const [decisions, setDecisions] = useState<Record<string, ApprovalDecision>>({});
 
   const setStep = useCallback((value: number) => {
     setStepRaw(Math.min(Math.max(value, 0), LAST_STEP));
@@ -58,15 +49,7 @@ export function DemoProvider({ children }: { children: ReactNode }) {
 
   const reset = useCallback(() => {
     setStepRaw(0);
-    setDecisions({});
     setAutoplay(false);
-  }, []);
-
-  const decide = useCallback((approvalId: string, decision: ApprovalDecision) => {
-    setDecisions((current) => ({ ...current, [approvalId]: decision }));
-    if (approvalId === "AP-8802" && decision === "approved") {
-      setStepRaw((s) => Math.max(s, 7));
-    }
   }, []);
 
   const toggleAutoplay = useCallback(() => setAutoplay((value) => !value), []);
@@ -83,7 +66,6 @@ export function DemoProvider({ children }: { children: ReactNode }) {
 
   const value = useMemo<DemoContextValue>(() => {
     const commitments = deriveCommitments(step);
-    const pendingApprovals = derivePendingApprovals(step, decisions);
     return {
       step,
       setStep,
@@ -92,18 +74,13 @@ export function DemoProvider({ children }: { children: ReactNode }) {
       reset,
       autoplay: playing,
       toggleAutoplay,
-      decisions,
-      decide,
       meta: stepMeta(step),
-      cases: deriveCases(step, commitments, pendingApprovals),
+      cases: deriveCases(step, commitments),
       commitments,
       activity: deriveActivity(step),
-      policyDecisions: derivePolicyDecisions(step),
-      capabilities: deriveCapabilityProofs(step),
-      pendingApprovals,
       totalSteps: DEMO_STEPS.length,
     };
-  }, [step, setStep, next, prev, reset, playing, toggleAutoplay, decisions, decide]);
+  }, [step, setStep, next, prev, reset, playing, toggleAutoplay]);
 
   return <DemoContext.Provider value={value}>{children}</DemoContext.Provider>;
 }

@@ -96,6 +96,23 @@ body {
 }
 
 /*
+ * The sidebar carries every role's navigation and shows the one signed in. The
+ * role is written to <html> by an inline script before the first paint
+ * (src/lib/role.ts), so hiding the rest here rather than filtering in React is
+ * what keeps the nav from painting an advocate's four items and swapping them
+ * for an admin's on every load.
+ */
+[data-role] [data-role-group] {
+  display: none;
+}
+
+[data-role="advocate"] [data-role-group="advocate"],
+[data-role="supervisor"] [data-role-group="supervisor"],
+[data-role="admin"] [data-role-group="admin"] {
+  display: block;
+}
+
+/*
  * ── CopilotKit theme bridge ──────────────────────────────────────────────────
  * CopilotKit ships its own Tailwind build scoped to [data-copilotkit], themed
  * through two layers: a shadcn-style semantic set (--primary, --muted, --border)
@@ -255,6 +272,56 @@ html [data-copilotkit] .copilotKitAssistantMessage :where(.space-y-4 > :not(:las
   margin-block-end: 0.5rem;
 }
 
+/*
+ * Tables in a 492px panel.
+ *
+ * `prose` sizes a table for an article column, so a four-column one — which is
+ * what a case report's decision log is — pushes past the panel and takes the
+ * whole thread's horizontal scroll with it. The wrapper is given the overflow so
+ * the scroll belongs to the table alone, and the type drops to the size the rest
+ * of the product uses for dense rows.
+ *
+ * `max-content` rather than `100%`: a table told to fit would wrap every cell to
+ * one word per line, which is less readable than a short sideways scroll.
+ */
+html [data-copilotkit] .copilotKitAssistantMessage :where(table) {
+  display: block;
+  width: 100%;
+  overflow-x: auto;
+  font-size: 12px;
+  line-height: 1.45;
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-line-strong) transparent;
+}
+
+html [data-copilotkit] .copilotKitAssistantMessage :where(table) > :is(thead, tbody) {
+  display: table;
+  width: max-content;
+  min-width: 100%;
+}
+
+html [data-copilotkit] .copilotKitAssistantMessage :where(th, td) {
+  padding-block: 0.25rem;
+  padding-inline-end: 0.75rem;
+  white-space: nowrap;
+}
+
+/* A report opens with an h1 and sections under it, which at prose defaults
+   arrive at heading sizes meant for a page rather than a side panel. */
+html [data-copilotkit] .copilotKitAssistantMessage :where(h1) {
+  font-size: 15px;
+  margin-block: 0.25rem 0.5rem;
+}
+
+html [data-copilotkit] .copilotKitAssistantMessage :where(h2, h3) {
+  font-size: 13px;
+  margin-block: 0.75rem 0.35rem;
+}
+
+html [data-copilotkit] .copilotKitAssistantMessage :where(hr) {
+  margin-block: 0.75rem;
+}
+
 .thin-scroll {
   scrollbar-width: thin;
   scrollbar-color: var(--color-line-strong) transparent;
@@ -363,6 +430,57 @@ html [data-copilotkit] .copilotKitAssistantMessage :where(.space-y-4 > :not(:las
   animation: auth-fill-done 260ms ease-out forwards;
 }
 
+/*
+ * Waiting on the control plane.
+ *
+ * A reading being taken rather than a wheel being spun: two rings leave the
+ * centre and fade, one behind the other, while the mark in the middle breathes
+ * and a single arc turns. The stagger between the rings is what stops the whole
+ * thing reading as one pulsing blob.
+ */
+@keyframes loader-halo {
+  0% {
+    opacity: 0.55;
+    transform: scale(0.5);
+  }
+  70%,
+  100% {
+    opacity: 0;
+    transform: scale(1.65);
+  }
+}
+
+.animate-halo {
+  animation: loader-halo 2.2s cubic-bezier(0.22, 0.61, 0.36, 1) infinite;
+}
+
+@keyframes loader-breathe {
+  0%,
+  100% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.07);
+  }
+}
+
+.animate-breathe {
+  animation: loader-breathe 2.2s ease-in-out infinite;
+}
+
+@keyframes loader-track {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.animate-track {
+  animation: loader-track 1.5s linear infinite;
+}
+
 @keyframes pop-in {
   from {
     opacity: 0;
@@ -384,6 +502,9 @@ html [data-copilotkit] .copilotKitAssistantMessage :where(.space-y-4 > :not(:las
   .animate-pulse-dot,
   .headline-fade,
   .animate-pop,
+  .animate-halo,
+  .animate-breathe,
+  .animate-track,
   .auth-fill,
   .auth-fill-done {
     animation: none;
@@ -392,5 +513,251 @@ html [data-copilotkit] .copilotKitAssistantMessage :where(.space-y-4 > :not(:las
   .auth-fill,
   .auth-fill-done {
     transform: scaleX(1);
+  }
+}
+
+/*
+ * ── Printable case report ────────────────────────────────────────────────────
+ * "Save as PDF" is the browser's own print pipeline, which is why there is no
+ * PDF library in this project: the output is real text a reader can select and
+ * search, the layout is the browser's, and nothing about a case leaves the
+ * machine to produce it.
+ *
+ * The document is always mounted (see ReportDocument.tsx) and hidden here, so
+ * printing is a state change rather than a popup a blocker can refuse. In print
+ * media the page inverts: every sibling of the report is removed from the flow
+ * and the report becomes the only thing on the sheet.
+ *
+ * Styled in plain CSS against element selectors rather than with the design
+ * tokens. The product's palette is built for a screen, and tinted surfaces,
+ * sub-pixel hairlines and colour-as-meaning all fail on paper — so paper gets
+ * its own small design, and it cannot drift when the screen palette changes.
+ */
+#caserelay-print-root {
+  display: none;
+}
+
+@media print {
+  /* Anything the shell fixed to the viewport would otherwise print on page one:
+     the chat launcher, the sidebar, toasts. */
+  body > *:not(#caserelay-print-root) {
+    display: none !important;
+  }
+
+  #caserelay-print-root {
+    display: block;
+  }
+
+  @page {
+    margin: 18mm 16mm;
+  }
+
+  html,
+  body {
+    background: #fff;
+    color: #000;
+  }
+
+  .print-doc {
+    font-family: ui-sans-serif, system-ui, sans-serif;
+    font-size: 10.5pt;
+    line-height: 1.5;
+    color: #000;
+  }
+
+  .print-doc h1 {
+    font-size: 17pt;
+    font-weight: 600;
+    letter-spacing: -0.01em;
+    margin: 0 0 10pt;
+  }
+
+  .print-doc h2 {
+    font-size: 11pt;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.07em;
+    margin: 0 0 6pt;
+    padding-bottom: 3pt;
+    border-bottom: 0.5pt solid #000;
+  }
+
+  /* A court report is read as numbered findings, so the numbered heading is the
+     one a reader scans for and it stands heavier than the part letter above it. */
+  .print-doc h3 {
+    font-size: 10.5pt;
+    font-weight: 600;
+    margin: 0 0 4pt;
+  }
+
+  .print-doc h4 {
+    font-size: 10pt;
+    font-weight: 600;
+    margin: 0 0 4pt;
+  }
+
+  /* Sections are the unit a reader scans, so they are kept off page breaks
+     wherever they are short enough to fit whole. */
+  .print-doc section {
+    margin-top: 16pt;
+    break-inside: avoid;
+  }
+
+  /* "A. CASA activities" and "B. Findings" divide the report rather than holding
+     content, so they sit tight against the first section beneath them. */
+  .print-doc .print-part {
+    margin-top: 22pt;
+    margin-bottom: -8pt;
+  }
+
+  .print-doc p {
+    margin: 0 0 6pt;
+  }
+
+  .print-doc ul {
+    margin: 0;
+    padding-left: 14pt;
+  }
+
+  .print-doc li {
+    margin-bottom: 2pt;
+  }
+
+  /* The header facts run as a wrapped row of label-over-value pairs, which fits
+     six of them on one line of a portrait page without a table. */
+  .print-doc .print-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4pt 20pt;
+    margin: 0 0 4pt;
+    padding-bottom: 10pt;
+    border-bottom: 1pt solid #000;
+  }
+
+  .print-doc .print-meta dt {
+    font-size: 7.5pt;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: #555;
+  }
+
+  .print-doc .print-meta dd {
+    margin: 1pt 0 0;
+    font-size: 10pt;
+    font-weight: 500;
+  }
+
+  .print-doc table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 9.5pt;
+  }
+
+  .print-doc th {
+    text-align: left;
+    font-size: 7.5pt;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: #555;
+    padding: 0 6pt 3pt 0;
+    border-bottom: 0.5pt solid #999;
+  }
+
+  .print-doc td {
+    padding: 3pt 6pt 3pt 0;
+    border-bottom: 0.5pt solid #ddd;
+    vertical-align: top;
+  }
+
+  /* A long log is the one section allowed to break, but never mid-row, and the
+     header repeats so page three is still readable on its own. */
+  .print-doc thead {
+    display: table-header-group;
+  }
+
+  .print-doc tr {
+    break-inside: avoid;
+  }
+
+  /* ── The parts only the volunteer can write ────────────────────────────────
+     A court report asks for judgements CaseRelay does not hold. Printing them
+     as ruled blanks rather than omitting them is the honest option and the
+     useful one: the likeliest thing to happen to a printed draft is that it is
+     completed by hand on the way to a hearing. */
+  .print-doc .print-blank {
+    padding-left: 8pt;
+    border-left: 1.5pt solid #ccc;
+  }
+
+  .print-doc .print-hint {
+    font-size: 9pt;
+    font-style: italic;
+    color: #555;
+    margin: 0 0 2pt;
+  }
+
+  .print-doc .print-owed {
+    font-size: 7.5pt;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: #777;
+    margin: 0 0 8pt;
+  }
+
+  .print-doc .print-rule {
+    border-bottom: 0.5pt solid #bbb;
+    height: 15pt;
+  }
+
+  .print-doc .print-signatures {
+    margin-top: 24pt;
+  }
+
+  .print-doc .print-signature {
+    margin-top: 14pt;
+  }
+
+  .print-doc .print-sign-role {
+    font-size: 9.5pt;
+    font-weight: 600;
+    margin: 0 0 12pt;
+  }
+
+  /* The rule is the line signed on, so the caption sits under it rather than
+     beside it and the two boxes split the width the way a form does. */
+  .print-doc .print-sign-lines {
+    display: flex;
+    gap: 24pt;
+  }
+
+  .print-doc .print-sign-lines span {
+    flex: 1;
+    border-top: 0.5pt solid #000;
+    padding-top: 2pt;
+    font-size: 7.5pt;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: #555;
+  }
+
+  .print-doc .print-sign-date {
+    flex: 0 0 90pt;
+  }
+
+  /* The accountability record is not part of the filing, so it starts its own
+     page and says what it is before it starts listing grants. */
+  .print-doc .print-appendix {
+    break-before: page;
+    margin-top: 0;
+  }
+
+  .print-doc footer {
+    margin-top: 18pt;
+    padding-top: 6pt;
+    border-top: 0.5pt solid #999;
+    font-size: 8pt;
+    font-style: italic;
+    color: #555;
   }
 }
