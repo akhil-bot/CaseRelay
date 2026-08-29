@@ -17,12 +17,14 @@ Each card shows: child name, what the scenario exercises, expected outcome.
 
 `POST /v1/cases` body:
 ```json
-{ "scenario": "<id>", "due_in": "<optional duration e.g. 45s>" }
+{ "scenario": "<id>", "due_in": "<optional duration e.g. 10s>" }
 ```
 
 Deadline control offers:
 - The scenario's real horizon (e.g. `"17d"`)
-- A compressed deadline for demo (e.g. `"45s"` — fires without faking the clock)
+- A compressed deadline for demo (`"10s"` — fires without faking the clock)
+
+Default the demo field to `10s` and do not offer a longer compressed value. `due_in` is the window the five per-commitment checkpoints are spread across, at `now + due_in × (i+1)/5`, and the wake phase only promotes a checkpoint that is already past due — so above roughly `10s` nothing wakes and the run ends `partial_failure` short of the quarantine and follow-up phases.
 
 Response includes `case_id` and `due_at`. Display `due_at` next to the case so the pending wake is visible before it fires.
 

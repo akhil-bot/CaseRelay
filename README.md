@@ -6,6 +6,8 @@ CaseRelay is a governed multi-agent fleet that helps CASA/GAL programs detect st
 
 Built for the [All Things Agentic Hackathon](https://allthingsagentichackathon.devpost.com/) using Google ADK, Vertex AI Gemini, and the Gemini Enterprise Agent Platform (GEAP).
 
+**Writeup:** [docs/hackathon-blog.md](docs/hackathon-blog.md) — source of truth for the contest blog. DEV.to: publish from this file (URL TBD).
+
 ---
 
 ## The Problem
@@ -44,24 +46,24 @@ CASA Volunteer / Supervisor
         │                              Pub/Sub Events
         │                                       │
         ▼                                       ▼
-  Continuity Orchestrator ◄────────── Agent Registry
+  Continuity Orchestrator              Agent Registry (all 8 published)
         │      │
         │      ├──────────────────────► Agent Platform Sessions
         │      │                        "caserelay-run-sessions"
         │      │                        (one session per phase invocation)
         │      └──────────────────────► Memory Bank (per-case recall)
         ▼
-  Agent Gateway  ──► Education Agent ──┐
-                 ──► Health Agent     ──┤    All 8 agents on Vertex AI
-                 ──► Legal Agent      ──┼──► Agent Engine (reasoning engines)
-                 ──► Shelter Agent    ──┤    with platform-managed Agent Identity
-                 ──► Family Services  ──┘
-                          │
-                    Model Armor ──► Safeguarding Verifier
-                                          │
-                                 Human Approval Queue
-                                          │
-                                 Firestore / Audit Log
+  ┌──► Education Agent  ──┐
+  ├──► Health Agent     ──┤
+  ├──► Legal Agent      ──┼── Agent Engine (reasoning engines)
+  ├──► Shelter Agent    ──┤   with platform-managed Agent Identity
+  ├──► Family Services  ──┤
+  └──► Safeguarding Verifier ──► Model Armor
+              │ engine egress           │
+        Agent Gateway            Human Approval Queue
+        (caserelay-egress)              │
+        outbound to LLMs,       Firestore / Audit Log
+        partner MCP, Firestore
 ```
 
 **Technology stack:**
@@ -74,7 +76,7 @@ CASA Volunteer / Supervisor
 | Agent conversations | GEAP Agent Platform Sessions on two dedicated Agent Engines (`caserelay-chat-sessions`, `caserelay-run-sessions`) |
 | State | Firestore (named database `caserelay` — see decision note below) |
 | Wire protocol | AG-UI for both the operator chat endpoint and the run event stream |
-| Observability | Cloud Logging, Cloud Trace (ADK spans with `gen_ai.*` attributes via `otel_to_cloud`; control-plane spans via `CloudTraceSpanExporter`) |
+| Observability | Cloud Logging, Cloud Trace (Google-generated spans for MCP tool calls and Model Armor guardrail evaluations via Agent Gateway; ADK engine telemetry enabled) |
 | Security | GEAP Agent Identity (platform-managed, mTLS + DPoP), Model Armor (Cloud DLP-backed SDP with custom dictionary detectors), Safeguarding Verifier |
 
 ---
@@ -101,7 +103,7 @@ Eight agents deployed as Vertex AI reasoning engines, each with a platform-manag
 **Case CR-1042 — Maya's stalled school enrollment**
 
 1. Supervisor activates monitoring after verifying court authority.
-2. Orchestrator discovers partner agents through the Registry and delegates scoped tasks.
+2. Orchestrator delegates scoped tasks to five partner agents, reaching each over authenticated A2A.
 3. Legal completes. Healthcare schedules. Education goes 17 days without a verified owner.
 4. A Pub/Sub push event (driven by Cloud Scheduler every minute) wakes the dormant workflow — no user prompt, no open browser.
 5. The Education Agent requests only enrollment-status fields through the Gateway.
@@ -110,19 +112,22 @@ Eight agents deployed as Vertex AI reasoning engines, each with a platform-manag
 8. Only then may the scoped follow-up go out. The district is chased once within the same authority grant that covered the original request.
 9. The district answers, naming the enrollment coordinator who has taken the referral on. That name is written back onto the referral, the commitment closes, and Maya's timeline updates. Had nobody answered, the supervisor would have been told instead.
 
+**Maya is not the only scenario.** [docs/scenario-showcase.md](docs/scenario-showcase.md) covers the rest — a provider that goes silent and ends up in front of a named supervisor, a school that asks for medical records while answering a question about enrollment, a partner reply that cannot be parsed — each verified end to end against the deployed control plane, with the captured Firestore, Cloud Logging, Agent Gateway and Cloud Trace evidence, and with the scenarios that do *not* hold up listed alongside the ones that do.
+
 ---
 
 ## GEAP Capabilities Demonstrated
 
-- **Agent Registry** — versioned A2A cards and live discovery for all eight agents, auto-registered by `agents-cli deploy`
+- **Agent Registry** — 24 registered services: eight A2A agent endpoints, one MCP partner server, and fifteen infrastructure dependencies (Firestore, Model Armor, Vertex AI, Telemetry, Cloud Logging), auto-registered and updated by `agents-cli deploy`; Agent Gateway request logs reference the registered entry for each call (`agentRegistryResource`). The registry is a live catalogue, not a runtime routing layer — agents find each other through environment variables, not registry lookups
 - **Agent Runtime** — eight reasoning engines in `us-central1` with checkpoint, sleep, and deadline-triggered resume via Pub/Sub push + Cloud Scheduler (one-minute sweep, dead-letter after 5 attempts, codified in `infra/bootstrap.sh`)
-- **Memory Bank** — GEAP Memory Bank (instance `8631858420611284992`) via ADK's `VertexAiMemoryBankService`; sessions extracted once per wake via synchronous `memories.generate`; scoped per case (`case_id` → ADK `user_id`); three custom memory topics: `partner_contacts`, `institutional_shortcuts`, `unblocking_strategies`
+- **Memory Bank** — GEAP Memory Bank (instance `8631858420611284992`) via ADK's `VertexAiMemoryBankService`; sessions extracted once per wake via synchronous `memories.generate`; recalled memories searched on resume and, when non-empty, injected into orchestrator prompts for the wake, nudge and follow-up phases (`_MEMORY_DECISION_PHASES` in `backend/api/main.py`), with a `memory_injected` audit event recording which memories entered which phase; observed end-to-end on run `de73dabce1d4` (case `CR-0828195744`), where one recalled memory was injected into `5-wake` and `8-followup`; the recalled content so far is general process observations rather than operationally specific intelligence (named contacts, institutional shortcuts), because the compressed end-to-end script re-executes orchestrator phases that the specialists already handled, producing process-level rather than partner-interaction detail; scoped per case (`case_id` → ADK `user_id`); three custom memory topics: `partner_contacts`, `institutional_shortcuts`, `unblocking_strategies`; cross-session consolidation is live (six memories have evolved across sessions with revision history)
 - **Agent Platform Sessions** — two dedicated Agent Engines via ADK's `VertexAiSessionService`. `caserelay-chat-sessions` holds the operator chat transcript, keyed on the AG-UI thread id so a returning conversation resolves in one read. `caserelay-run-sessions` holds every orchestrator agent turn, one session per phase invocation rather than one per run, because the fan-out dispatches five phases at once and Google documents row-level locking only for `DatabaseSessionService`. A deployed control plane refuses to start without both rather than falling back to in-memory sessions that look identical until the instance recycles. A throttled append is retried with jittered backoff and, if it still will not land, kept in memory and logged rather than failing the case
 - **Agent Identity** — platform-managed identity per agent (`--agent-identity`); SPIFFE-style principals (`principal://agents.global.org-…`); caller principal verified at the gateway; cross-scope denial demonstrated
-- **Agent Gateway** — caller-authenticated, deny-by-default, purpose-bound field projection
+- **Agent Gateway** — all eight engines bound to `caserelay-egress`; outbound traffic TLS-intercepted; MCP method deny policy enforcing; Model Armor extension (`caserelay-ma-authz-ext`) fail-closed against the same `caserelay-screen` template the verifier calls; gateway request logs show method, policy evaluation and TLS interception per call
 - **Model Armor** — cross-scope-request quarantine via `modelarmor.googleapis.com` template `caserelay-screen` with SDP Advanced Config referencing a Cloud DLP inspect template (`caserelay-cross-scope`) using custom dictionary detectors + hotword proximity rule; fails closed
-- **Agent Observability** — Cloud Trace enabled on fleet (`otel_to_cloud=True`, `GOOGLE_CLOUD_AGENT_ENGINE_ENABLE_TELEMETRY=true`) with ADK spans (`invoke_agent`, `call_llm`, `execute_tool`) carrying `gen_ai.*` attributes and token counts. Limitation: control-plane and engine traces do not share a trace id (Agent Runtime starts a fresh trace context)
+- **Agent Observability** — Cloud Trace carries Google-generated spans for every MCP tool call and Model Armor guardrail evaluation that traverses the Agent Gateway, rendered as five-span waterfalls: the MCP `tools/call` root, an `apply_guardrail` span with `gen_ai.security.policy.name: caserelay-screen` and `gen_ai.security.decision.type`, and request/response path breakdown (308 traced requests observed). Agent Gateway request logs separately record method, policy evaluation, TLS interception status and the `agentRegistryResource` for each call. Limitation: ADK Agent Runtime does not export its own execution spans (agent phases, LLM calls, in-agent tool use), so end-to-end tracing of agent reasoning is not achieved
 - **AG-UI on the wire** — both event surfaces speak the protocol: the operator chat endpoint (`/agui`, via `ag_ui_adk`) and the run event stream. `run_started`, `run_completed`, `run_failed`, `phase_started` and `phase_complete` travel as `RUN_STARTED`, `RUN_FINISHED`, `RUN_ERROR`, `STEP_STARTED` and `STEP_FINISHED` — a run is a run and a phase is a step. Everything with no true counterpart, such as a missed deadline or a quarantined reply, travels as `CUSTOM` naming itself with the whole internal event alongside, so the feed keeps every distinction it draws in red and amber. The live SSE stream and the recorded replay use the same envelopes, so the portal decodes a replayed history and a live one through one decoder
+- **Gemma session narratives** — `backend/narration/gemma.py` calls Gemma 4 (`gemma-4-26b-a4b-it-maas` on Vertex AI) at the end of each run to generate a 2–4 sentence natural-language summary from the structured run events; the summary is stored on the run record (`gemma_summary`) and logged at INFO. Deployed and observed on the serving revision — three summaries generated across runs `4732b1f2c9d8`, `de73dabce1d4` and `e8f76a62c196`. The model choice is deliberate: short-text generation from structured data does not need a frontier model, and Gemma avoids burning Gemini quota on a mechanical rewrite
 
 ### Notable engineering decisions
 
@@ -189,12 +194,14 @@ uvicorn backend.api.main:app --port 8000
 ```bash
 # In a second shell — creates the flagship case and runs the fleet against it
 CASE=$(curl -s -X POST localhost:8000/v1/cases -H 'content-type: application/json' \
-  -d '{"scenario":"maya","due_in":"45s"}' \
+  -d '{"scenario":"maya","due_in":"10s"}' \
   | python3 -c 'import sys,json; print(json.load(sys.stdin)["case_id"])')
 RUN=$(curl -s -X POST "localhost:8000/v1/cases/$CASE/runs" \
   | python3 -c 'import sys,json; print(json.load(sys.stdin)["run_id"])')
 curl -N "localhost:8000/v1/runs/$RUN/events"
 ```
+
+Keep `due_in` at `10s`. `schedule_wake` spreads the five per-commitment checkpoints proportionally across the window it is given, at `now + due_in × (i+1)/5`, so a longer deadline leaves even the earliest checkpoint in the future when the wake phase asks for due work. Nothing wakes, the quarantine, follow-up and memory phases never become reachable, and the run ends `partial_failure`.
 
 The first run ends at `run_suspended`, which is the point of the design: the case is checkpointed and the work that remains is waiting on a deadline, not on a session. In the cloud, Cloud Scheduler's one-minute sweep publishes the wake and the push handler starts the continuation run. Locally there is no Pub/Sub, so stand in for it once the deadline has passed:
 
@@ -239,6 +246,7 @@ These have been demonstrated on the deployed fleet, not merely asserted.
 | Demo duration | ≤ 3:50 |
 | Demo language | English (with captions) |
 | Cloud platform | Google Cloud (Vertex AI Agent Engine, Cloud Run, Firestore, GEAP) |
+| Writeup | [docs/hackathon-blog.md](docs/hackathon-blog.md). DEV.to: publish from this file (URL TBD). |
 
 Official rules, submission checklist, scoring mechanism, and judging criteria are mirrored in
 [docs/hackathon-rulebook.md](docs/hackathon-rulebook.md).

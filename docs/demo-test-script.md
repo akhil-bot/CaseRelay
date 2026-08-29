@@ -34,6 +34,13 @@ So maya is three runs, not one, and the demo has two deliberate stops in it. Pla
 
 The portal's BFF proxy (`/api/control-plane/[...path]`) forwards all traffic server-side with a Google-signed ID token. No credential reaches the browser.
 
+**Do not delete case `CR-0828195744`.** It is the only case with surviving memories in Memory Bank (engine `8631858420611284992`) and two control-plane-driven runs. Publishing a wake for it will visibly produce `memory_injected` on camera — the one place in the demo where recalled content reaches an orchestrator prompt. To reproduce:
+
+```bash
+gcloud pubsub topics publish caserelay-events --project caserelay \
+  --message='{"event_type":"workflow_wake","case_id":"CR-0828195744"}'
+```
+
 ---
 
 ## Click path
@@ -137,7 +144,7 @@ Run 1 is fast — under a minute. If you are waiting three minutes for fan-out, 
 | Phase | Event | Expected message | ~Time | What it proves |
 |---|---|---|---|---|
 | — | `run_started` | "Escalation decided — picking Maya's case back up." | 0s | Third run id |
-| — | `memory_recall` | "Recalled N notes from earlier work on Maya's case.", with up to three quoted previews under it | — | **Run 2** wrote memory (run 1 wrote none). This is the one run in the walkthrough where recall can fire, and it is not guaranteed — extraction has to have produced at least one fact. Note that this recall is **displayed only**: it is not injected into any agent's prompt. The one place a recalled memory reaches a model is `preload_memory` inside `11-memory` |
+| — | `memory_recall` | "Recalled N notes from earlier work on Maya's case.", with up to three quoted previews under it | — | **Run 2** wrote memory (run 1 wrote none). This is the one run in the walkthrough where recall can fire, and it is not guaranteed — extraction has to have produced at least one fact. The injection of recalled memories into the orchestrator prompt for the wake, nudge and follow-up phases is deployed and live (`_MEMORY_DECISION_PHASES` in `backend/api/main.py`), with a `memory_injected` audit event when it fires; observed end-to-end on run `de73dabce1d4` (case `CR-0828195744`), where one recalled memory was injected into `5-wake` and `8-followup`. The recalled content so far is general process observations rather than operationally specific intelligence, because the compressed end-to-end script re-executes orchestrator phases that the specialists already handled. The other path where a recalled memory reaches a model is `preload_memory` inside `11-memory` |
 | 11-memory | `phase_started` | "Recording everything that happened for Maya's file." | — | Memory persistence |
 | 11-memory | `phase_complete` | "Case notes updated — every status on Maya's file is recorded." | 5–15s | All scopes written |
 | — | `run_completed` | "All 5 commitments for Maya are fulfilled." (or "4 of 5 commitments fulfilled for Maya." if the follow-up did not land) | — | Terminal state |
@@ -342,7 +349,7 @@ curl -s -X POST \
 
 Each entry carries a `fact` in plain English, its `scope`, and a `topics` label — one of `partner_contacts`, `institutional_shortcuts`, `unblocking_strategies`, which are CaseRelay's own extraction topics rather than the ADK defaults. Drop the `:retrieve` suffix and `GET …/memories?pageSize=20` to show memories from several cases side by side, each isolated under its own `user_id`.
 
-**Be precise about what the recall does.** Writes are real and synchronous (`memories.generate` with `wait_for_completion`), and reads are real semantic searches. But in the run loop the recalled facts are only *narrated* — `_run_background` pushes a `memory_recall` event with previews and does not put them in front of any model. The single path where a recalled memory reaches a model is the `preload_memory` tool in `11-memory`, whose job is to summarise. So nothing the fleet decides currently changes because of what Memory Bank remembered. If a judge asks "what did it do differently because it remembered?", the honest answer today is "nothing yet" — see the strengthening notes before you claim otherwise.
+**Be precise about what the recall does.** Writes are real and synchronous (`memories.generate` with `wait_for_completion`), and reads are real semantic searches. The injection of recalled memories into the orchestrator prompt for the wake, nudge and follow-up phases is deployed and live on the serving revision (`_MEMORY_DECISION_PHASES`), with a `memory_injected` audit event recording which memories entered which phase. Observed end-to-end on run `de73dabce1d4` (case `CR-0828195744`): one recalled memory (topic `unblocking_strategies`) was injected into `5-wake` at 2026-08-28T20:22:57Z and into `8-followup` at 20:23:21Z. The recalled content was a general process observation — not named contacts or institutional shortcuts — because the end-to-end script drives phases via A2A directly to the specialists, so the control plane's orchestrator re-executes phases that have already completed, producing process-level observations rather than the richer partner-interaction detail the specialists handled. A genuine multi-session case history would accumulate denser memories; the compressed single-session demo works against that. The other path where a recalled memory reaches a model is the `preload_memory` tool in `11-memory`, whose job is to summarise. If a judge asks "what did it do differently because it remembered?", the honest answer is "the mechanism is deployed, audited, and observed firing end to end; the recalled content so far is general rather than operationally specific, because the demo's session structure compresses what would normally be a multi-day case history into a single pass".
 
 ### Agent Registry
 

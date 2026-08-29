@@ -456,8 +456,8 @@ which `dataset.create_case:42` also sets on fixture cases, so it will happily de
 mid-demo.
 
 The optional `due_in` on the create call is what makes Step 11 demonstrable: it overrides the
-scenario's deadline schedule, so `{"scenario": "maya", "due_in": "45s"}` produces a case that is
-genuinely due in 45 seconds and rides the same sweeper as one due in 17 days. Accept it as a
+scenario's deadline schedule, so `{"scenario": "maya", "due_in": "10s"}` produces a case that is
+genuinely due in 10 seconds and rides the same sweeper as one due in 17 days. Accept it as a
 duration string, echo the resolved `due_at` back, and show that timestamp in the admin UI so nobody
 has to take the wake on faith.
 
@@ -537,12 +537,15 @@ and dead-lettering, and makes the event backbone in the README true. Delete the 
    is the test that stops the wake silently rotting.
 2. **Live short horizon — the demo.** The deadline offset is a *property of the scenario*, not a
    constant in the code: `maya` carries `due_in: 17d` for a real case, and the demo variant carries
-   `due_in: 45s`. Real Cloud Scheduler, real sweeper, real Pub/Sub, real resume — nothing is faked
-   or shortened in the code path, the case genuinely falls due 45 seconds after creation. Close the
+   `due_in: 10s`. It has to stay that short: `due_in` is the window the five per-commitment
+   checkpoints are spread across, so the earliest lands at a fifth of it, and the wake phase only
+   promotes a checkpoint that is already past due — much longer and nothing wakes at all. Real Cloud
+   Scheduler, real sweeper, real Pub/Sub, real resume — nothing is faked or shortened in the code
+   path, and the case genuinely falls due 10 seconds after creation. Close the
    laptop, come back, it happened. Note what this is *not*: no test-only endpoint rewrites a
    deadline, and no clock is stubbed. The only difference between the demo and a real case is a
    number in the create request.
-3. **Real horizon, as proof.** Create a case with the true 17-day offset alongside the 45-second one
+3. **Real horizon, as proof.** Create a case with the true 17-day offset alongside the 10-second one
    and show the sweeper firing the second while leaving the first alone. Demonstrating the system
    *not* firing is what proves the firing is real and not special-cased — worth 15 seconds of video.
 
@@ -554,7 +557,7 @@ shows a full A2A fan-out with no session and no user — that is the evidence fo
 operation, and it is the single most valuable half-minute of the demo.
 
 *Check:* CI proves the resume with a past-dated checkpoint; on the deployed fleet, a case created
-with a 45-second deadline resumes with nobody watching, and its audit trail names the scheduler.
+with a 10-second deadline resumes with nobody watching, and its audit trail names the scheduler.
 
 **Step 12 · Deploy the control plane to Cloud Run.**
 **Status: DONE — `caserelay-control-plane` deployed at `caserelay-control-plane-6nwo7o4bbq-uc.a.run.app`. `infra/deploy_control_plane.sh` exists. Deploys with `--timeout=900`, `--no-cpu-throttling`, gen2 execution environment, min/max instances pinned to 1. `allUsers` removed; auth-required. Portal reaches it through BFF proxy.**

@@ -33,7 +33,7 @@ Each agent lives in `backend/agents/<folder>/agent.py` and exports a `root_agent
 
 The five specialists have an identical three-tool shape: `get_authorized_context` (go through the Gateway), `query_<partner>` (ask the partner system), `submit_<x>_status` (record the decision). They all set `disallow_transfer_to_peers=True`, so a specialist cannot hand the turn to a sibling.
 
-The orchestrator's nine control-plane tools — `activate_case`, `schedule_wake`, `wake_workflow`, `check_overdue`, `approve_escalation`, `send_followup`, `notify_supervisor`, `preload_memory`, `get_commitment_states` — are not all handed to it at once. Each phase is built with only the tools its own step needs, plus `get_commitment_states`, which is read-only and attached to every phase because the instruction requires every reported status to come from a tool rather than the model's recollection. See section 7 for why that withholding matters.
+The orchestrator's seven control-plane tools — `schedule_wake`, `wake_workflow`, `check_overdue`, `send_followup`, `notify_supervisor`, `preload_memory`, `get_commitment_states` — are not all handed to it at once. Each phase is built with only the tools its own step needs, plus `get_commitment_states`, which is read-only and attached to every phase because the instruction requires every reported status to come from a tool rather than the model's recollection. See section 7 for why that withholding matters.
 
 A ninth agent, `caserelay_chat`, sits outside the fleet in `backend/api/agui.py`. It is the operator copilot behind the portal's chat panel, served over AG-UI, and it holds no case-data tools of its own — it drives the portal's own frontend tools (`list_scenarios`, `create_case`, `run_fleet`) and can therefore do nothing a logged-in operator could not do by clicking.
 
@@ -169,7 +169,7 @@ When the verdict is `quarantine`, the matched filter names (e.g. `sdp`) are incl
 
 The verifier agent's `inspect_school_callback` tool pulls the school's callback, runs it through `screen()`, and returns the verdict. When the verdict is `quarantine`, its second tool `open_escalation` writes a **pending** human approval (`approval_id: apr-{uuid4[:8]}`, policy basis `["block_cross_scope_request", "CR-POLICY-003"]`) plus a `quarantine` audit event. It does not carry out the instruction, not even partially, and it never touches a commitment status.
 
-Nothing moves until a supervisor decides. The orchestrator's `approve_escalation` tool is the gate, and its instruction forbids it from calling that tool unless the request explicitly says a supervisor approved.
+Nothing moves until a supervisor decides. `approve_escalation` is not on the orchestrator's tool surface — the guarantee is structural, not a matter of instruction compliance. The run parks in `awaiting_supervisor`; only an explicit `POST /v1/approvals/{approval_id}/decide` carrying a `decided_by` identity can release it.
 
 ---
 
@@ -257,9 +257,9 @@ The driver then asserts that commitments and grants were actually persisted, and
 
 ### Phase 2 — `2-activate` (supervisor gate)
 
-Prompt: *"A supervisor reviewed and approved the proposed grants for case CR-1042. Call activate_case…"*
+Prompt: *"A supervisor reviewed and approved the proposed grants for case CR-1042."*
 
-The orchestrator calls `activate_case`. `workspace.activate()` asserts `draft → active` against the state machine in `backend/state/case_machine.py`, flips **all five grants** to `status: granted` with `granted_by: supervisor-001` and `revoked: false`, then asserts `active → monitoring` and lands there.
+The orchestrator has no `activate_case` tool; the run parks in `awaiting_supervisor`. The driver then calls `POST /v1/cases/{case_id}/activate` with `supervisor_id: supervisor-001`. `workspace.activate()` asserts `draft → active` against the state machine in `backend/state/case_machine.py`, flips **all five grants** to `status: granted` with `granted_by: supervisor-001` and `revoked: false`, then asserts `active → monitoring` and lands there.
 
 **Store after this phase:** case `monitoring`; 5 grants `granted`. This is the first of the two human gates, and it is the moment the specialists become able to see anything at all.
 
@@ -281,7 +281,7 @@ A partner's reply is decided by the `partner_behaviour` field on its referral ro
 
 **Store after these five phases:** five disclosure audit events, one per identity, each recording its own disclosed and withheld lists; five Memory Bank entries keyed by purpose; commitments now `{education: unresolved, health: completed, legal: completed, shelter: completed, family_services: completed}`.
 
-Each of those five turns is also its own session on `caserelay-run-sessions`, the Agent Engine that hosts Agent Platform Sessions for the fleet. One session per phase invocation rather than one per run: this fan-out dispatches five phases at once, and Google documents row-level locking only for `DatabaseSessionService`, with no equivalent guarantee for the Vertex one. Continuity across phases already comes from Memory Bank, so sharing a session would buy nothing worth the concurrency risk.
+Each of those five turns is also its own session on `caserelay-run-sessions`, the Agent Engine that hosts Agent Platform Sessions for the fleet. One session per phase invocation rather than one per run: this fan-out dispatches five phases at once, and Google documents row-level locking only for `DatabaseSessionService`, with no equivalent guarantee for the Vertex one. Continuity across phases comes from shared case state in Firestore, so sharing a session would buy nothing worth the concurrency risk.
 
 ### Phase 4 — `4-checkpoint`
 
@@ -315,7 +315,7 @@ Note that the education agent has its own independent defence — its instructio
 
 ### Phase 7 — `7-approve` (second supervisor gate)
 
-Prompt: *"A supervisor reviewed the quarantined callback … and approved the escalation."* The orchestrator calls `approve_escalation`, which flips the most recent pending approval to `approved` by `supervisor-001`. Only now can anything proceed on the education track.
+Prompt: *"A supervisor reviewed the quarantined callback … and approved the escalation."* The orchestrator has no `approve_escalation` tool; the run parks in `awaiting_supervisor`. The driver posts `POST /v1/approvals/{approval_id}/decide` with `decision: approve` and `decided_by: supervisor-001`, which flips the pending approval to `approved`. Only now can anything proceed on the education track.
 
 ### Phase 8 — `8-followup`
 
@@ -429,7 +429,7 @@ In another, roughly two minutes:
 ```bash
 CASE=$(curl -s -X POST localhost:8000/v1/cases \
   -H 'content-type: application/json' \
-  -d '{"scenario":"maya","due_in":"45s"}' | python3 -c 'import sys,json; print(json.load(sys.stdin)["case_id"])')
+  -d '{"scenario":"maya","due_in":"10s"}' | python3 -c 'import sys,json; print(json.load(sys.stdin)["case_id"])')
 
 RUN=$(curl -s -X POST "localhost:8000/v1/cases/$CASE/runs" \
   | python3 -c 'import sys,json; print(json.load(sys.stdin)["run_id"])')
@@ -437,7 +437,9 @@ RUN=$(curl -s -X POST "localhost:8000/v1/cases/$CASE/runs" \
 curl -N "localhost:8000/v1/runs/$RUN/events"      # AG-UI frames as they happen
 ```
 
-That first run ends on `run_suspended`, not on `run_completed`, and that is the design rather than a fault: the case is checkpointed and what remains is waiting on a deadline, not on anybody's session. In the cloud, Cloud Scheduler's one-minute sweep publishes the wake and the push handler starts the continuation run. Locally there is no Pub/Sub — `_publish_wake` is a no-op when the store is disabled — so once the 45 seconds are up, stand in for it:
+**Leave `due_in` at `10s`, and do not raise it to look more realistic.** `due_in` is not a commitment deadline — it is the window `schedule_wake` spreads the five per-commitment checkpoints across, at `now + due_in × (i+1)/5`, so the earliest checkpoint lands at a fifth of whatever you pass. The wake phase only promotes a checkpoint that is already past due. At `10s` the earliest is due at +2s and has lapsed by the time the wake is asked for, so the case wakes and carries on; at anything much longer it is still in the future, nothing wakes, and with nothing awake the quarantine, follow-up and memory preconditions are all unsatisfiable — no phase is ready and the run ends `run_partial_failure` with no escalation gate and no close.
+
+That first run ends on `run_suspended`, not on `run_completed`, and that is the design rather than a fault: the case is checkpointed and what remains is waiting on a deadline, not on anybody's session. In the cloud, Cloud Scheduler's one-minute sweep publishes the wake and the push handler starts the continuation run. Locally there is no Pub/Sub — `_publish_wake` is a no-op when the store is disabled — so once the 10 seconds are up, stand in for it:
 
 ```bash
 curl -s -X POST localhost:8000/v1/workflows/sweep     # marks due checkpoints running
@@ -707,7 +709,7 @@ Worth being honest about, since section 6 makes a strong claim about the agents 
 
 Neither of these is case data, and neither is read by an agent as a fact about a child.
 
-One thing in those cards is genuinely wrong rather than merely static, and it is the sort of thing a judge finds by opening two files: **the `tools` list on each card does not name the agent's real tools.** The card for `safeguarding-verifier-v1` advertises `evaluate_policy`, `quarantine_response`, `generate_safe_retry` and `write_audit`; the agent's actual tools are `inspect_school_callback` and `open_escalation`, and `generate_safe_retry` does not exist anywhere in the codebase. Every other card is aspirational in the same way — `education-liaison-v1` advertises `check_enrollment`, `request_status` and `report_callback` where the agent really has `get_authorized_context`, `query_school` and `submit_enrollment_status`. The identities, owner orgs and data scopes on those cards *are* the ones the gateway enforces, so the governance-bearing half of each card is real; the tool names are left over from the build plan. `GET /v1/registry` serves them as-is.
+The `tools` list on each card now names the agent's real tools — `safeguarding-verifier-v1` advertises `inspect_school_callback` and `open_escalation`, `education-liaison-v1` advertises `get_authorized_context`, `query_school` and `submit_enrollment_status`, and so on for every agent in the fleet. The identities, owner orgs and data scopes are the ones the gateway enforces. `GET /v1/registry` serves the fixture as-is, and a judge who cross-references it against the agent source will find a match.
 
 ### One path, not two
 
