@@ -363,6 +363,11 @@ export function useLiveRunEvents(runId: string | null): LiveRunState {
     es.onerror = () => {
       cleanup();
       dispatch({ type: "stream_end" });
+      // Attempt to learn the terminal state after the stream ends. If this
+      // secondary fetch fails (e.g. a transient 502 from the BFF proxy),
+      // leave the feed showing accumulated events rather than replacing the
+      // entire panel with an error card — stream_end was already dispatched,
+      // so the feed correctly shows as no longer streaming.
       getRunStatus(runId)
         .then((status) => {
           const terminal = ["completed", "failed", "partial_failure"].includes(status.state)
@@ -372,10 +377,8 @@ export function useLiveRunEvents(runId: string | null): LiveRunState {
         })
         .catch((err: unknown) => {
           const message = err instanceof Error ? err.message : String(err);
-          // A run the server no longer holds is not a stream failure. Let the
-          // feed say plainly that there is no record of it.
           if (message.includes("404")) return;
-          dispatch({ type: "error", message });
+          console.warn("[CaseRelay] Could not fetch run status after stream end:", message);
         });
     };
 

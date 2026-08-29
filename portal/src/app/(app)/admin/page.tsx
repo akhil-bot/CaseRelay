@@ -43,7 +43,7 @@ export default function AdminPage() {
   const [creating, setCreating] = useState(false);
   const [starting, setStarting] = useState(false);
   const [deleting, setDeleting] = useState(false);
-  const [dueIn, setDueIn] = useState("45s");
+  const [dueIn, setDueIn] = useState("10s");
   const esRef = useRef<EventSource | null>(null);
 
   const reset = useCallback(() => {
@@ -208,7 +208,7 @@ export default function AdminPage() {
                 type="text"
                 value={dueIn}
                 onChange={(e) => setDueIn(e.target.value)}
-                placeholder="e.g. 45s or 17d"
+                placeholder="e.g. 10s or 17d"
                 className="w-20 rounded-control border border-line bg-surface-soft px-2 py-1.5 text-[12px] text-ink focus:border-brand/40 focus:outline-none"
               />
             </label>

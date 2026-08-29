@@ -63,13 +63,13 @@ function CopilotProviderInner({ children }: { children: ReactNode }) {
       {
         name: "create_case",
         description:
-          "Create a test case from a scenario. The user may refer to a scenario by child name (e.g. 'maya', 'rosa') or by scenario ID. If only a child name is given, first call list_scenarios to resolve it. Optionally accepts a deadline string (e.g. '45s' for demo speed, '17d' for realistic). Returns the case_id and due_at on success.",
+          "Create a test case from a scenario. The user may refer to a scenario by child name (e.g. 'maya', 'rosa') or by scenario ID. If only a child name is given, first call list_scenarios to resolve it. Optionally accepts a deadline string — use '10s' for demos (checkpoints must already be past-due when the wake phase runs; values above ~10s stall the run and cause partial_failure), '17d' for realistic timelines. Returns the case_id and due_at on success.",
         parameters: z.object({
           scenario: z.string().describe("Scenario ID or child name to create a case for."),
           due_in: z
             .string()
             .optional()
-            .describe("Optional deadline duration, e.g. '45s' for 45 seconds or '17d' for 17 days."),
+            .describe("Optional deadline duration. Use '10s' for demos — values above ~10s stall checkpoints and the run fails. Use '17d' for realistic timelines."),
         }),
         handler: async ({ scenario, due_in }: { scenario: string; due_in?: string }) => {
           try {

@@ -1,19 +1,20 @@
 "use client";
 
-import { Fragment, memo, useEffect, useRef } from "react";
+import { Fragment, memo, useEffect, useRef, useState } from "react";
 import { Icon, type IconName } from "@/components/icons";
 import { Badge, Card, DOMAIN_META, EmptyState, StatusBadge, cx } from "@/components/ui/primitives";
 import { row, tone, type Tone, type as type_ } from "@/design/tokens";
 import type { RunEvent } from "@/lib/api";
 import {
-  GUARDRAIL_NOTE,
   STATUS_TONE,
   commitmentStatus,
   eventDomain,
   formatElapsed,
   formatEventTime,
   formatFollowUp,
+  formatScheduledAt,
   nextFollowUpAt,
+  useNow,
 } from "@/lib/case-events";
 import type { LiveRunState } from "@/lib/live-case";
 import type { CommitmentStatus, Domain } from "@/lib/types";
@@ -35,14 +36,6 @@ function genericIcon(ev: RunEvent): IconName {
   if (ev.event === "run_started") return "play";
   if (ev.event === "run_completed") return "checkCircle";
   return "activity";
-}
-
-/** How long the case sat idle, and what it is now waiting on. */
-function suspendedLine(ev: RunEvent): string {
-  const open = Number(ev.checkpoint_count ?? 0);
-  if (open === 0) return "Nothing left to follow up on right now.";
-  if (open === 1) return "One commitment is still open, with a follow-up date set.";
-  return `${open} commitments are still open, each with its own follow-up date.`;
 }
 
 type Weight = "alert" | "attention" | "normal" | "quiet";
@@ -75,7 +68,7 @@ function describe(ev: RunEvent): EventView {
   const domainIcon = domain ? DOMAIN_META[domain].icon : null;
 
   if (ev.event === "run_suspended") {
-    return { weight: "quiet", icon: "sleep", variant: "accent", message: suspendedLine(ev) };
+    return { weight: "quiet", icon: "sleep", variant: "accent", message };
   }
 
   if (phase.includes("quarantine")) {
@@ -88,7 +81,6 @@ function describe(ev: RunEvent): EventView {
       icon: domainIcon ?? "shield",
       variant: "danger",
       message,
-      note: GUARDRAIL_NOTE,
       status: "blocked",
     };
   }
@@ -99,15 +91,9 @@ function describe(ev: RunEvent): EventView {
 
   if (ev.event === "reconciliation") {
     const overdue = Number(ev.overdue_count ?? 0);
-    const total = Array.isArray(ev.results) ? ev.results.length : 0;
     return overdue > 0
-      ? {
-          weight: "attention",
-          icon: "clock",
-          variant: "warn",
-          message: `${overdue} of ${total} commitments are past their date.`,
-        }
-      : { weight: "quiet", icon: "list", variant: "neutral", message: "Checked every date — nothing overdue." };
+      ? { weight: "attention", icon: "clock", variant: "warn", message }
+      : { weight: "quiet", icon: "list", variant: "neutral", message };
   }
 
   if (
@@ -129,12 +115,7 @@ function describe(ev: RunEvent): EventView {
   }
 
   if (phase.includes("memory") || ev.event === "memory_recall") {
-    return {
-      weight: "quiet",
-      icon: "memory",
-      variant: "neutral",
-      message: ev.event === "phase_complete" ? "Case notes updated." : message,
-    };
+    return { weight: "quiet", icon: "memory", variant: "neutral", message };
   }
 
   if (ev.event === "run_started") {
@@ -207,14 +188,31 @@ interface SummaryCommitment {
 interface SummaryAction {
   action: string;
   context: string;
+  scheduled_at?: string;
 }
 
-/** Full-width card for `run_summary` events, which carry structured commitment data. */
-function SummaryCard({ ev }: { ev: RunEvent }) {
+/**
+ * Full-width card for `run_summary` events, which carry structured commitment data.
+ *
+ * The most recent summary card (isLatest=true) starts expanded. Older ones
+ * collapse to the heading line — which already carries the full story — so the
+ * feed does not repeat the same five commitments for every completed run.
+ * Any card can be expanded on click.
+ *
+ * Open/closed state is derived: an untouched card (override=null) follows isLatest,
+ * so it auto-collapses when the next summary arrives and demotes it. A card the
+ * user has explicitly toggled keeps their choice for the rest of the session.
+ */
+function SummaryCard({ ev, isLatest }: { ev: RunEvent; isLatest: boolean }) {
+  // null = user has not touched this card; derive from isLatest.
+  // non-null = user set an explicit preference; honour it indefinitely.
+  const [override, setOverride] = useState<boolean | null>(null);
+  const open = override ?? isLatest;
   const commitments = (ev.commitments ?? []) as SummaryCommitment[];
   const nextActions = (ev.next_actions ?? []) as SummaryAction[];
   const outcome = (ev.outcome ?? "completed") as string;
   const ts = formatEventTime(ev.timestamp);
+  const now = useNow();
 
   const borderColor =
     outcome === "completed"
@@ -229,16 +227,31 @@ function SummaryCard({ ev }: { ev: RunEvent }) {
         ? "bg-danger/[0.04]"
         : "bg-warn-soft/30";
 
+  const hasBody = commitments.length > 0 || nextActions.length > 0;
+
   return (
     <li className={cx("rounded-lg border px-4 py-4", borderColor, bgColor)}>
       <div className="flex items-start gap-3">
         <Icon name="list" size={15} className="mt-0.5 shrink-0 text-brand" />
         <div className="min-w-0 flex-1">
-          <p className="text-[13.5px] font-semibold leading-snug text-ink">
-            {String(ev.message)}
-          </p>
+          <div className="flex items-start justify-between gap-2">
+            <p className="text-[13.5px] font-semibold leading-snug text-ink">
+              {String(ev.message)}
+            </p>
+            {hasBody && (
+              <button
+                type="button"
+                onClick={() => setOverride((v) => !(v ?? isLatest))}
+                aria-expanded={open}
+                aria-label={open ? "Collapse" : "Expand"}
+                className="shrink-0 rounded p-0.5 text-ink-muted transition-colors hover:text-ink"
+              >
+                <Icon name={open ? "chevronDown" : "chevronRight"} size={14} />
+              </button>
+            )}
+          </div>
 
-          {commitments.length > 0 && (
+          {open && commitments.length > 0 && (
             <div className="mt-3 space-y-2">
               {commitments.map((c) => {
                 const meta = DOMAIN_META[c.domain as Domain];
@@ -257,22 +270,25 @@ function SummaryCard({ ev }: { ev: RunEvent }) {
             </div>
           )}
 
-          {nextActions.length > 0 && (
+          {open && nextActions.length > 0 && (
             <div className="mt-3 border-t border-line pt-3">
               <p className={type_.label}>Next steps</p>
               <ul className="mt-2 space-y-2">
-                {nextActions.map((a, idx) => (
-                  <li key={idx} className="flex items-start gap-2">
-                    <Icon
-                      name="arrowRight"
-                      size={12}
-                      className="mt-0.5 shrink-0 text-ink-muted"
-                    />
-                    <span className="text-[12.5px] leading-relaxed text-ink-soft">
-                      {a.action}
-                    </span>
-                  </li>
-                ))}
+                {nextActions.map((a, idx) => {
+                  const when = a.scheduled_at ? formatScheduledAt(a.scheduled_at, now) : "";
+                  return (
+                    <li key={idx} className="flex items-start gap-2">
+                      <Icon
+                        name="arrowRight"
+                        size={12}
+                        className="mt-0.5 shrink-0 text-ink-muted"
+                      />
+                      <span className="text-[12.5px] leading-relaxed text-ink-soft">
+                        {when ? `${a.action} ${when[0].toUpperCase() + when.slice(1)}.` : a.action}
+                      </span>
+                    </li>
+                  );
+                })}
               </ul>
             </div>
           )}
@@ -428,9 +444,13 @@ export const LiveActivityFeed = memo(function LiveActivityFeed({ run }: { run: L
   // A phase that has since finished does not also need its "starting" line, so
   // each round of outreach leaves one row per provider rather than two.
   const settledPhases = new Set<string>();
+  const summarisedRuns = new Set<string>();
   for (const ev of run.events) {
     if (ev.event === "phase_complete" || ev.event === "phase_error") {
       settledPhases.add(`${ev.run_id ?? ""}:${ev.phase ?? ""}`);
+    }
+    if (ev.event === "run_summary" && ev.run_id) {
+      summarisedRuns.add(String(ev.run_id));
     }
   }
 
@@ -440,6 +460,12 @@ export const LiveActivityFeed = memo(function LiveActivityFeed({ run }: { run: L
     // restate the one fact the `run_suspended` line already carries.
     if ((ev.phase ?? "").includes("checkpoint")) return false;
     if (ev.event === "run_completed" && String(ev.outcome) === "suspended") return false;
+    // The awaiting_supervisor event is always followed within seconds by a
+    // run_completed that carries a better explanation of why the run stopped.
+    if (ev.event === "awaiting_supervisor") return false;
+    // A run that emitted a summary card already said what happened — the
+    // run_completed event that follows duplicates it word for word.
+    if (ev.event === "run_completed" && summarisedRuns.has(String(ev.run_id))) return false;
     if (ev.event === "phase_started" && settledPhases.has(`${ev.run_id ?? ""}:${ev.phase ?? ""}`)) {
       return false;
     }
@@ -453,6 +479,15 @@ export const LiveActivityFeed = memo(function LiveActivityFeed({ run }: { run: L
     const curr = visibleEvents[i];
     if (prev.run_id && curr.run_id && prev.run_id !== curr.run_id) {
       runGapIndices.add(i);
+    }
+  }
+
+  // The most recent summary card stays expanded; older ones collapse to their heading.
+  let lastSummaryIdx = -1;
+  for (let i = visibleEvents.length - 1; i >= 0; i--) {
+    if (visibleEvents[i].event === "run_summary") {
+      lastSummaryIdx = i;
+      break;
     }
   }
 
@@ -517,7 +552,7 @@ export const LiveActivityFeed = memo(function LiveActivityFeed({ run }: { run: L
                     />
                   )}
                   {ev.event === "run_summary" ? (
-                    <SummaryCard ev={ev} />
+                    <SummaryCard ev={ev} isLatest={i === lastSummaryIdx} />
                   ) : (
                     <EventRow ev={ev} />
                   )}

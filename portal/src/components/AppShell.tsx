@@ -1,17 +1,13 @@
 "use client";
 
-import { usePathname } from "next/navigation";
 import { useState, type ReactNode } from "react";
 import { CaseRelayCopilot } from "@/components/copilot/CaseRelayCopilot";
-import { ActivityPanel } from "@/components/shell/ActivityPanel";
 import { Header } from "@/components/shell/Header";
 import { Sidebar } from "@/components/shell/Sidebar";
 import { cx, layout } from "@/design/tokens";
 
 export function AppShell({ children }: { children: ReactNode }) {
-  const pathname = usePathname();
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
-  const [activityOpen, setActivityOpen] = useState(true);
 
   return (
     <div className="flex min-h-screen">
@@ -44,27 +40,13 @@ export function AppShell({ children }: { children: ReactNode }) {
       )}
 
       <div className="flex min-w-0 flex-1 flex-col">
-        <Header
-          onOpenSidebar={() => setMobileNavOpen(true)}
-          onToggleActivity={() => setActivityOpen((value) => !value)}
-          activityOpen={activityOpen}
-        />
+        <Header onOpenSidebar={() => setMobileNavOpen(true)} />
 
-        <div className="flex min-h-0 flex-1">
-          <main className="min-w-0 flex-1">
-            <div key={pathname} className={cx(layout.page, "animate-rise")}>
-              {children}
-            </div>
-          </main>
-
-          {activityOpen && (
-            <div className="hidden w-[300px] shrink-0 lg:block 2xl:w-[340px]">
-              <div className="sticky top-16 h-[calc(100vh-4rem)]">
-                <ActivityPanel onClose={() => setActivityOpen(false)} />
-              </div>
-            </div>
-          )}
-        </div>
+        <main className="min-w-0 flex-1">
+          <div className={cx(layout.page, "animate-rise")}>
+            {children}
+          </div>
+        </main>
       </div>
 
       <CaseRelayCopilot />

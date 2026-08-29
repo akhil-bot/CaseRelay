@@ -15,6 +15,7 @@ import {
   controlPlaneAuthHeaders,
   controlPlaneUrl,
 } from "@/lib/control-plane-token";
+import { fetchWithRetry } from "@/lib/fetch-retry";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
@@ -41,16 +42,26 @@ async function proxy(
 
     const isSSE = req.headers.get("accept")?.includes("text/event-stream");
 
-    const upstreamRes = await fetch(target.toString(), {
+    // SSE streams last as long as the orchestrator run (~5-10 min).
+    // Non-SSE calls should also carry an explicit signal: without one,
+    // undici's internal socket timeout fires as an opaque
+    // "TypeError: fetch failed", indistinguishable from a DNS error.
+    const signal = isSSE
+      ? AbortSignal.timeout(30 * 60_000)
+      : AbortSignal.timeout(30_000);
+
+    // SSE streams are excluded from retry: a mid-flight stream has already
+    // delivered events, and re-establishing it would duplicate them.
+    // fetchWithRetry is safe for non-SSE because it only retries when fetch()
+    // throws (TCP handshake never completed — no bytes reached the server).
+    const doFetch = isSSE ? fetch : fetchWithRetry;
+
+    const upstreamRes = await doFetch(target.toString(), {
       method: req.method,
       headers,
       body: bodyText,
       cache: "no-store",
-      // SSE streams last as long as the orchestrator run (~5-10 min).
-      // Without an explicit signal the runtime's default body timeout
-      // (~200-300 s depending on the Node/undici version) silently
-      // closes the connection mid-run.
-      ...(isSSE && { signal: AbortSignal.timeout(30 * 60_000) }),
+      signal,
     });
 
     if (

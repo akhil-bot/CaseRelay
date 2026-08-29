@@ -8,15 +8,7 @@ import { pageKeyFor } from "@/design/personas";
 import { chrome, control, cx, type as type_ } from "@/design/tokens";
 import { useViewer } from "@/lib/viewer";
 
-export function Header({
-  onOpenSidebar,
-  onToggleActivity,
-  activityOpen,
-}: {
-  onOpenSidebar: () => void;
-  onToggleActivity: () => void;
-  activityOpen: boolean;
-}) {
+export function Header({ onOpenSidebar }: { onOpenSidebar: () => void }) {
   const pathname = usePathname() ?? "/";
   const { copy } = useViewer();
   const key = pageKeyFor(pathname);
@@ -44,21 +36,6 @@ export function Header({
       </div>
 
       <Notifications />
-
-      <button
-        type="button"
-        onClick={onToggleActivity}
-        aria-pressed={activityOpen}
-        aria-label="Toggle activity panel"
-        title="Activity panel"
-        className={cx(
-          control.icon,
-          "hidden lg:inline-flex",
-          activityOpen && "border-brand/35 bg-brand-soft text-brand-deep",
-        )}
-      >
-        <Icon name="activity" size={17} />
-      </button>
 
       <span className="hidden h-7 w-px bg-line md:block" aria-hidden="true" />
 

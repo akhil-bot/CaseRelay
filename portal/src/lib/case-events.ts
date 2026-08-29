@@ -54,13 +54,6 @@ export const STATUS_TONE: Record<string, Tone> = {
   scheduled: "accent",
 };
 
-/**
- * Why a commitment ever comes back blocked: the only path to that state is an
- * agent refusing a reply that reached past what it was allowed to answer.
- */
-export const GUARDRAIL_NOTE =
-  "Their reply asked for medical records while answering a question about enrollment, so it was held back and passed to your supervisor.";
-
 // ─── Time ─────────────────────────────────────────────────────────────────────
 
 /**
@@ -167,6 +160,37 @@ export function formatFollowUp(ts: unknown): string {
     return `today at ${due.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`;
   }
   return due.toLocaleDateString([], { day: "numeric", month: "short" });
+}
+
+/**
+ * A scheduled time, always shown as a concrete local clock time so the viewer
+ * knows exactly when the follow-up is — never a vague relative word.
+ *
+ * Returns "" when now === 0, which is the server snapshot from useNow(). This
+ * prevents a hydration mismatch: both server and client agree on an empty string
+ * until the clock is live in the browser, at which point the real value fills in.
+ *
+ * Past times are described as "was due at …" so they do not read as a broken
+ * future promise — this was the original complaint that drove earlier attempts
+ * at relative formatting.
+ */
+export function formatScheduledAt(ts: unknown, now: number): string {
+  if (now === 0) return "";
+  const ms = parseTime(ts);
+  if (ms === null) return "";
+
+  const at = new Date(ms);
+  const timeStr = at.toLocaleTimeString([], { hour: "numeric", minute: "2-digit", hour12: true });
+  const isToday = at.toDateString() === new Date(now).toDateString();
+  const isPast = ms < now;
+
+  if (isToday) {
+    if (isPast) return `was due at ${timeStr}`;
+    return `due at ${timeStr}`;
+  }
+  const dateStr = at.toLocaleDateString([], { month: "short", day: "numeric" });
+  if (isPast) return `was due ${dateStr} at ${timeStr}`;
+  return `due ${dateStr} at ${timeStr}`;
 }
 
 // ─── The audit trail's vocabulary ─────────────────────────────────────────────

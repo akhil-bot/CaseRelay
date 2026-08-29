@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { Icon, type IconName } from "@/components/icons";
-import { KIND_META } from "@/components/shell/ActivityPanel";
+import { KIND_META } from "@/lib/activity-meta";
 import {
   Avatar,
   Badge,

@@ -4,7 +4,6 @@ import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { Icon } from "@/components/icons";
-import { CaseTimeline } from "@/components/live/CaseTimeline";
 import { LiveActivityFeed } from "@/components/live/LiveActivityFeed";
 import { NeedsAttention } from "@/components/live/NeedsAttention";
 import {
@@ -76,6 +75,10 @@ function LiveCaseDetail({ caseId }: { caseId: string }) {
   const [approving, setApproving] = useState(false);
   const [approveError, setApproveError] = useState<string | null>(null);
   const [pendingApprovals, setPendingApprovals] = useState<PendingApproval[]>([]);
+  // null = user has not touched this yet; derive from whether all work is done.
+  // non-null = user made an explicit choice; honour it for the rest of the session.
+  const [commitmentsOverride, setCommitmentsOverride] = useState<boolean | null>(null);
+  const [auditOpen, setAuditOpen] = useState(false);
 
   const runs = liveCase.status === "loaded" ? liveCase.runs : NO_RUNS;
   const caseEvents = liveCase.status === "loaded" ? liveCase.events : NO_EVENTS;
@@ -237,10 +240,19 @@ function LiveCaseDetail({ caseId }: { caseId: string }) {
   const hasActiveRun = runs.some((r) => r.state === "running" || r.state === "queued");
   const isStreaming = runState.streaming || hasActiveRun;
 
+  const allCommitmentsClosed =
+    commitmentEntries.length > 0 && closedCount === commitmentEntries.length;
+
+  // Collapsed when all done (the header already says "All done." and 100%),
+  // expanded while any work is still open. A click flips the override and keeps
+  // it regardless of subsequent commitment-state changes.
+  const commitmentsOpen = commitmentsOverride ?? !allCommitmentsClosed;
+
   return (
     <div className={layout.stack}>
       <Breadcrumb label={childName} />
 
+      {/* ── Case header ───────────────────────────────────────────────── */}
       <section className={cx(surface.card, "overflow-hidden px-5 py-5")}>
         <div className="flex flex-wrap items-start gap-4">
           <Avatar name={childName} size={52} variant="brand" />
@@ -310,7 +322,7 @@ function LiveCaseDetail({ caseId }: { caseId: string }) {
         )}
       </section>
 
-      {/* Supervisor activation gate */}
+      {/* ── Approval gates — must not be missed ───────────────────────── */}
       {status === "draft" && commitmentEntries.length > 0 && (
         <SupervisorGate
           gateType="activation"
@@ -322,7 +334,6 @@ function LiveCaseDetail({ caseId }: { caseId: string }) {
         />
       )}
 
-      {/* Pending escalation approvals */}
       {pendingApprovals.length > 0 && pendingApprovals.map((a) => (
         <SupervisorGate
           key={String(a.approval_id)}
@@ -338,69 +349,113 @@ function LiveCaseDetail({ caseId }: { caseId: string }) {
         />
       ))}
 
-      <NeedsAttention commitments={commitmentStates} events={mergedEvents} />
-
-      <CaseTimeline
-        caseData={caseData}
-        commitments={commitmentStates}
-        runs={runs}
-        events={mergedEvents}
-      />
-
-      {/* Commitment states from backend */}
-      {commitmentEntries.length > 0 && (
-        <Card
-          icon="cases"
-          title="Commitments"
-          subtitle={`${closedCount} of ${commitmentEntries.length} closed`}
-          action={
-            <div className="flex w-40 items-center gap-3">
-              <ProgressBar value={closedCount} total={commitmentEntries.length} variant="seal" />
-            </div>
-          }
-          flush
-        >
-          <Rows as="ol">
-            {commitmentEntries.map(([type, commitmentStatus]) => (
-              <li key={type} className={cx("border-l-2", row.pad,
-                commitmentStatus === "completed" ? "border-l-seal"
-                  : commitmentStatus === "blocked" ? "border-l-danger"
-                  : "border-l-transparent",
-              )}>
-                <div className="flex items-center gap-3">
-                  <DomainIcon domain={type as Domain} size={32} />
-                  <div className="min-w-0 flex-1">
-                    <span className="text-[13.5px] font-medium text-ink">
-                      {DOMAIN_META[type as Domain]?.label ?? type.replace(/_/g, " ")}
-                    </span>
-                  </div>
-                  <StatusBadge status={commitmentStatus as CommitmentStatus} />
-                </div>
-              </li>
-            ))}
-          </Rows>
-        </Card>
-      )}
-
-      {/* Live activity feed — stitched across all runs for timeline continuity */}
+      {/* ── Live activity feed — the primary view ─────────────────────── */}
       {(isStreaming || runs.length > 0 || mergedEvents.length > 0) && (
         <LiveActivityFeed run={feedRun} />
       )}
 
-      {/* Audit trail (from initial case fetch) */}
-      {data.timeline.length > 0 && (
+      {/* ── Contextual blockers — secondary to the feed ───────────────── */}
+      <NeedsAttention commitments={commitmentStates} events={mergedEvents} />
+
+      {/* ── Commitments — collapsible, expanded by default ────────────── */}
+      {commitmentEntries.length > 0 && (
         <Card
-          icon="audit"
-          title="Audit trail"
-          subtitle="What was shared, what was refused, and when."
+          icon="cases"
+          title="Commitments"
+          subtitle={
+            allCommitmentsClosed
+              ? "All done."
+              : `${closedCount} of ${commitmentEntries.length} closed`
+          }
+          action={
+            <div className="flex items-center gap-3">
+              <div className="w-32">
+                <ProgressBar value={closedCount} total={commitmentEntries.length} variant="seal" />
+              </div>
+              <button
+                type="button"
+                onClick={() => setCommitmentsOverride((v) => !(v ?? !allCommitmentsClosed))}
+                aria-expanded={commitmentsOpen}
+                aria-label={commitmentsOpen ? "Collapse commitments" : "Expand commitments"}
+                className={cx(control.ghost, "px-2 py-1.5")}
+              >
+                <Icon name={commitmentsOpen ? "chevronDown" : "chevronRight"} size={15} />
+              </button>
+            </div>
+          }
           flush
         >
-          <Rows>
-            {data.timeline.map((entry, i) => (
-              <AuditRow key={i} entry={entry} />
-            ))}
-          </Rows>
+          {commitmentsOpen && (
+            <Rows as="ol">
+              {commitmentEntries.map(([type, commitmentStatus]) => (
+                <li key={type} className={cx("border-l-2", row.pad,
+                  commitmentStatus === "completed" ? "border-l-seal"
+                    : commitmentStatus === "blocked" ? "border-l-danger"
+                    : "border-l-transparent",
+                )}>
+                  <div className="flex items-center gap-3">
+                    <DomainIcon domain={type as Domain} size={32} />
+                    <div className="min-w-0 flex-1">
+                      <span className="text-[13.5px] font-medium text-ink">
+                        {DOMAIN_META[type as Domain]?.label ?? type.replace(/_/g, " ")}
+                      </span>
+                    </div>
+                    <StatusBadge status={commitmentStatus as CommitmentStatus} />
+                  </div>
+                </li>
+              ))}
+            </Rows>
+          )}
+          {!commitmentsOpen && allCommitmentsClosed && (
+            <p className="flex items-center gap-2 px-5 py-3 text-[12.5px] text-ink-muted">
+              <Icon name="checkCircle" size={14} className="shrink-0 text-seal" />
+              {commitmentEntries.length} of {commitmentEntries.length} commitments fulfilled.
+            </p>
+          )}
+          {!commitmentsOpen && !allCommitmentsClosed && (
+            <p className="flex items-center gap-2 px-5 py-3 text-[12.5px] text-ink-muted">
+              <Icon name="list" size={14} className="shrink-0" />
+              {closedCount} of {commitmentEntries.length} closed — expand to see each step.
+            </p>
+          )}
         </Card>
+      )}
+
+      {/* ── Audit trail — evidence on demand, not in the main scroll ──── */}
+      {data.timeline.length > 0 && (
+        <div className={cx(surface.card, "overflow-hidden")}>
+          <button
+            type="button"
+            onClick={() => setAuditOpen((v) => !v)}
+            aria-expanded={auditOpen}
+            className={cx(
+              "flex w-full items-center gap-3 px-5 py-4 text-left transition-colors hover:bg-surface-soft",
+              auditOpen && "border-b border-line",
+            )}
+          >
+            <span className="flex size-8 shrink-0 items-center justify-center rounded-control bg-brand-soft text-brand">
+              <Icon name="audit" size={17} />
+            </span>
+            <div className="min-w-0 flex-1">
+              <h2 className={cx(type_.sectionTitle)}>Audit trail</h2>
+              <p className={cx("mt-1", type_.small)}>
+                {data.timeline.length} entries — what was shared, what was refused, and when.
+              </p>
+            </div>
+            <Icon
+              name={auditOpen ? "chevronDown" : "chevronRight"}
+              size={16}
+              className="shrink-0 text-ink-muted"
+            />
+          </button>
+          {auditOpen && (
+            <Rows>
+              {data.timeline.map((entry, i) => (
+                <AuditRow key={i} entry={entry} />
+              ))}
+            </Rows>
+          )}
+        </div>
       )}
     </div>
   );
@@ -497,10 +552,22 @@ function SupervisorGate({
     : "Approving releases the quarantined action. Rejecting discards it and records your decision.";
 
   return (
-    <section className={cx(surface.card, "overflow-hidden border-2 border-warn/40 px-5 py-5")}>
-      <div className="flex flex-wrap items-start gap-3">
-        <span className="mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-full bg-warn/15">
-          <Icon name="lock" size={18} className="text-warn" />
+    <section
+      className={cx(
+        surface.card,
+        "overflow-hidden border-2 border-warn/50",
+        // Faint warm tint so the card reads as different from a normal card at a glance
+        "bg-warn-soft/20",
+      )}
+    >
+      {/* Coloured top stripe — instantly distinguishes this from any other card */}
+      <div className="h-1 w-full bg-warn/40" />
+
+      <div className="flex flex-wrap items-start gap-3 px-5 pt-5 pb-4">
+        {/* Pulsing icon ring to catch the eye when the card first appears */}
+        <span className="relative mt-0.5 flex size-9 shrink-0 items-center justify-center rounded-full bg-warn/20">
+          <span className="absolute inset-0 animate-ping rounded-full bg-warn/20" />
+          <Icon name="lock" size={18} className="relative text-warn" />
         </span>
         <div className="min-w-0 flex-1">
           <p className="text-[15px] font-semibold text-ink">{title}</p>
@@ -512,7 +579,7 @@ function SupervisorGate({
           </p>
         </div>
       </div>
-      <div className={cx("-mx-5 -mb-5 mt-4 flex flex-wrap items-center gap-3 border-t px-5 py-4", "border-warn/30 bg-warn-soft")}>
+      <div className={cx("flex flex-wrap items-center gap-3 border-t px-5 py-4", "border-warn/30 bg-warn-soft/50")}>
         {onReject && (
           <button
             type="button"
@@ -534,7 +601,7 @@ function SupervisorGate({
           {approving ? "Approving…" : isActivation ? "Approve & activate" : "Approve escalation"}
         </button>
       </div>
-      {error && <p className="mt-2 px-5 text-[12px] text-danger">{error}</p>}
+      {error && <p className="mb-3 px-5 text-[12px] text-danger">{error}</p>}
     </section>
   );
 }
