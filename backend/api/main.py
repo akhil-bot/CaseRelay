@@ -536,6 +536,16 @@ def create_case(body: dict[str, Any]) -> dict:
     if effective_due_in:
         case["due_in"] = effective_due_in
 
+    # When a scenario is used, advocate_for() assigns the volunteer by digit-modulo
+    # so that seeded cases spread across the roster. An acting user supplied by the
+    # portal overrides that, so the case lands in the creating profile's own list.
+    # Only applies to the scenario path — the non-scenario path already builds its
+    # packet from the raw body, so volunteer_id there is already in the packet.
+    if scenario_name and body.get("volunteer_id"):
+        case["volunteer_id"] = body["volunteer_id"]
+        if body.get("volunteer_name"):
+            case["volunteer_name"] = body["volunteer_name"]
+
     deadline = _resolve_deadline(due_in_str, scenario_name)
     cp = durable.write_checkpoint(case_id, deadline)
 

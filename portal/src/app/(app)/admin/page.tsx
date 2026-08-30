@@ -21,6 +21,7 @@ import {
   type Scenario,
 } from "@/lib/api";
 import { useToolEvents, type ToolEventCallbacks } from "@/lib/copilot/tool-events";
+import { useViewer } from "@/lib/viewer";
 
 type Phase = "pick" | "created" | "streaming" | "done";
 
@@ -33,6 +34,7 @@ export default function AdminPage() {
   // into the registry: a case made by clicking here has to be referable by name
   // in the chat afterwards, the same as one the chat made itself.
   const { subscribe, pushCase } = useToolEvents();
+  const { profile } = useViewer();
 
   useEffect(() => {
     listScenarios()
@@ -73,7 +75,7 @@ export default function AdminPage() {
       setCreating(true);
       setError(null);
       try {
-        const result = await createCase(scenario.id, dueIn || undefined);
+        const result = await createCase(scenario.id, dueIn || undefined, profile.volunteerId, profile.name);
         setCreatedCase(result);
         setPhase("created");
         // `start_outreach` resolves a case only through this registry, so
@@ -90,7 +92,7 @@ export default function AdminPage() {
         setCreating(false);
       }
     },
-    [dueIn, pushCase],
+    [dueIn, profile, pushCase],
   );
 
   const startEventStream = useCallback((runId: string) => {

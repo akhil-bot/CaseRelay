@@ -3,6 +3,7 @@
 import { useCallback } from "react";
 import { createCase, listScenarios } from "@/lib/api";
 import { useToolEvents } from "@/lib/copilot/tool-events";
+import { useViewer } from "@/lib/viewer";
 
 export interface CaseTakenOn {
   caseId: string;
@@ -43,6 +44,7 @@ export class UnknownChild extends Error {
  */
 export function useTakeOnCase(): (child: string, dueIn?: string) => Promise<CaseTakenOn> {
   const { pushCase, scenarioCacheRef, subscribersRef } = useToolEvents();
+  const { profile } = useViewer();
 
   return useCallback(
     async (child: string, dueIn?: string) => {
@@ -61,7 +63,7 @@ export function useTakeOnCase(): (child: string, dueIn?: string) => Promise<Case
         );
       }
 
-      const created = await createCase(match.id, dueIn);
+      const created = await createCase(match.id, dueIn, profile.volunteerId, profile.name);
       pushCase({
         caseId: created.case_id,
         scenario: match.id,
@@ -71,6 +73,6 @@ export function useTakeOnCase(): (child: string, dueIn?: string) => Promise<Case
 
       return { caseId: created.case_id, childName: match.child_name, dueAt: created.due_at };
     },
-    [pushCase, scenarioCacheRef, subscribersRef],
+    [pushCase, scenarioCacheRef, subscribersRef, profile],
   );
 }

@@ -153,9 +153,16 @@ export async function listScenarios(): Promise<Scenario[]> {
   return request("/v1/scenarios");
 }
 
-export async function createCase(scenario: string, dueIn?: string): Promise<CreatedCase> {
+export async function createCase(
+  scenario: string,
+  dueIn?: string,
+  volunteerId?: string,
+  volunteerName?: string,
+): Promise<CreatedCase> {
   const body: Record<string, string> = { scenario };
   if (dueIn) body.due_in = dueIn;
+  if (volunteerId) body.volunteer_id = volunteerId;
+  if (volunteerName) body.volunteer_name = volunteerName;
   return request("/v1/cases", { method: "POST", body: JSON.stringify(body) });
 }
 
