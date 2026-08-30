@@ -235,8 +235,8 @@ PHASE_REGISTRY: list[PhaseSpec] = [
     PhaseSpec(
         label="4-checkpoint",
         prompt_template=(
-            "Education is still open for case {case_id}. Call schedule_wake to checkpoint the "
-            "workflow and set the day-17 wake, then stop."
+            "At least one commitment is still open for case {case_id}. Call schedule_wake to "
+            "checkpoint the workflow and set the day-17 wake, then stop."
         ),
         precondition=_specialists_have_reported,
         priority=30,
@@ -256,8 +256,8 @@ PHASE_REGISTRY: list[PhaseSpec] = [
     PhaseSpec(
         label="6-quarantine",
         prompt_template=(
-            "The school system sent a callback for case {case_id}. Ask safeguarding_verifier to "
-            "inspect it and escalate if it reaches outside the education scope. Then stop."
+            "A partner system sent a callback for case {case_id}. Ask safeguarding_verifier to "
+            "inspect it and escalate if it reaches outside the permitted scope. Then stop."
         ),
         precondition=_checkpoint_awake_and_has_inject,
         priority=50,
