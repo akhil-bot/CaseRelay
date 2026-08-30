@@ -22,6 +22,7 @@ import time
 from dataclasses import dataclass, field
 from uuid import uuid4
 
+from google.adk.agents.run_config import RunConfig
 from google.adk.runners import Runner
 from google.adk.sessions import BaseSessionService, InMemorySessionService, VertexAiSessionService
 from google.genai import types
@@ -296,6 +297,10 @@ async def _run(agent, message: str, app_name: str, user_id: str) -> str:
         user_id=user_id,
         session_id=session.id,
         new_message=types.Content(role="user", parts=[types.Part(text=message)]),
+        # Cap LLM calls per invoke to prevent runaway loops. ADK default is 500.
+        # 20 covers a happy-path specialist (~4 rounds) plus one retry loop (~8) with
+        # headroom for orchestrator/intake which use more tools.
+        run_config=RunConfig(max_llm_calls=20),
     ):
         author = getattr(event, "author", app_name) or app_name
         content = getattr(event, "content", None)

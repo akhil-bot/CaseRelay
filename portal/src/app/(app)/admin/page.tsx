@@ -8,10 +8,12 @@ import {
   createCase,
   deleteCase,
   getRunStatus,
+  listCases,
   listScenarios,
   parseRunEventFrame,
   streamRunEvents,
   submitRun,
+  type CaseListItem,
   type CreatedCase,
   type RunEvent,
   type RunRef,
@@ -265,6 +267,8 @@ export default function AdminPage() {
         </Card>
       )}
 
+      <CaseManagementCard />
+
       {/* Streaming / done */}
       {(phase === "streaming" || phase === "done") && (
         <>
@@ -272,7 +276,7 @@ export default function AdminPage() {
             icon="activity"
             title="Run Events"
             subtitle={runStatus ? `Run ${runStatus.run_id}` : undefined}
-            action={<RunStateBadge state={runStatus?.state ?? "queued"} />}
+            action={<RunStateBadge state={runStatus?.state ?? "queued"} failedPhases={runStatus?.failed_phases} />}
           >
             {streamError && (
               <div className="mb-4 flex items-start gap-3 rounded-control border border-danger/25 bg-danger/5 px-4 py-3">
@@ -284,16 +288,18 @@ export default function AdminPage() {
           </Card>
 
           {phase === "done" && runStatus && (
-            <Card
-              icon={runStatus.state === "completed" ? "checkCircle" : runStatus.state === "failed" ? "close" : "alert"}
-              title={
-                runStatus.state === "completed"
-                  ? "Run Complete"
-                  : runStatus.state === "partial_failure"
+          <Card
+            icon={runStatus.state === "completed" ? "checkCircle" : runStatus.state === "failed" ? "close" : "alert"}
+            title={
+              runStatus.state === "completed"
+                ? "Run Complete"
+                : runStatus.state === "partial_failure"
+                  ? runStatus.failed_phases && runStatus.failed_phases.length > 0
                     ? "Run Partial Failure"
-                    : "Run Failed"
-              }
-            >
+                    : "Run Waiting on Partners"
+                  : "Run Failed"
+            }
+          >
               <dl className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
                 <Fact label="Final state" value={runStatus.state} />
                 {runStatus.error && <Fact label="Error" value={runStatus.error} />}
@@ -373,12 +379,13 @@ function Fact({ label, value, mono }: { label: string; value: string; mono?: boo
   );
 }
 
-function RunStateBadge({ state }: { state: string }) {
+function RunStateBadge({ state, failedPhases }: { state: string; failedPhases?: string[] }) {
+  const isPartialPendingOnly = state === "partial_failure" && !(failedPhases && failedPhases.length > 0);
   const variant =
     state === "completed"
       ? "brand"
       : state === "partial_failure"
-        ? "warn"
+        ? isPartialPendingOnly ? "accent" : "warn"
         : state === "failed"
           ? "danger"
           : "neutral";
@@ -386,15 +393,19 @@ function RunStateBadge({ state }: { state: string }) {
     state === "completed"
       ? "check"
       : state === "partial_failure"
-        ? "alert"
+        ? isPartialPendingOnly ? "clock" : "alert"
         : state === "failed"
           ? "close"
           : state === "running"
             ? "activity"
             : "clock";
+  const label =
+    state === "partial_failure"
+      ? isPartialPendingOnly ? "waiting on partners" : "partial failure"
+      : state;
   return (
-    <Badge variant={variant as "brand" | "warn" | "danger" | "neutral"} icon={icon as "check" | "alert" | "close" | "activity" | "clock"}>
-      {state}
+    <Badge variant={variant as "brand" | "warn" | "accent" | "danger" | "neutral"} icon={icon as "check" | "alert" | "clock" | "close" | "activity"}>
+      {label}
     </Badge>
   );
 }
@@ -579,6 +590,172 @@ function EventLog({ events, streaming }: { events: RunEvent[]; streaming: boolea
       )}
       <div ref={endRef} />
     </div>
+  );
+}
+
+function CaseManagementCard() {
+  const [items, setItems] = useState<CaseListItem[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [fetchError, setFetchError] = useState<string | null>(null);
+  const [confirmId, setConfirmId] = useState<string | null>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [deleteErrors, setDeleteErrors] = useState<Record<string, string>>({});
+
+  const refresh = useCallback(() => {
+    setLoading(true);
+    setFetchError(null);
+    listCases({ limit: 100 })
+      .then(({ items: fetched }) => setItems(fetched))
+      .catch((err: unknown) =>
+        setFetchError(err instanceof Error ? err.message : String(err)),
+      )
+      .finally(() => setLoading(false));
+  }, []);
+
+  // Initial load — setState only in async callbacks to satisfy the linter rule.
+  useEffect(() => {
+    listCases({ limit: 100 })
+      .then(({ items: fetched }) => {
+        setItems(fetched);
+        setFetchError(null);
+      })
+      .catch((err: unknown) =>
+        setFetchError(err instanceof Error ? err.message : String(err)),
+      )
+      .finally(() => setLoading(false));
+  }, []);
+
+  const handleDelete = useCallback(
+    async (caseId: string) => {
+      setDeletingId(caseId);
+      setConfirmId(null);
+      setDeleteErrors((prev) => {
+        const next = { ...prev };
+        delete next[caseId];
+        return next;
+      });
+      try {
+        await deleteCase(caseId);
+        setItems((prev) => prev.filter((c) => c.case_id !== caseId));
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : String(err);
+        setDeleteErrors((prev) => ({
+          ...prev,
+          [caseId]: msg.startsWith("API 403")
+            ? "Protected — only test cases can be deleted from the portal."
+            : msg,
+        }));
+      } finally {
+        setDeletingId(null);
+      }
+    },
+    [],
+  );
+
+  const subtitle = loading
+    ? "Loading…"
+    : `${items.length} case${items.length !== 1 ? "s" : ""}`;
+
+  return (
+    <Card
+      icon="trash"
+      title="Case Management"
+      subtitle={subtitle}
+      action={
+        <button
+          type="button"
+          onClick={refresh}
+          disabled={loading}
+          className={control.ghost}
+        >
+          <Icon name="retry" size={14} />
+          {loading ? "Loading…" : "Refresh"}
+        </button>
+      }
+    >
+      {fetchError && (
+        <div className="mb-4 flex items-start gap-3 rounded-control border border-danger/25 bg-danger/5 px-4 py-3">
+          <Icon name="alert" size={18} className="mt-0.5 shrink-0 text-danger" />
+          <p className={type_.small}>{fetchError}</p>
+        </div>
+      )}
+
+      {loading && items.length === 0 ? (
+        <p className={type_.body}>Loading cases…</p>
+      ) : items.length === 0 ? (
+        <p className={cx(type_.body, "text-ink-muted")}>No cases found.</p>
+      ) : (
+        <ul className="divide-y divide-line">
+          {items.map((c) => {
+            const id = c.case_id ?? "";
+            const name = c.child_name ?? "—";
+            const isDeleting = deletingId === id;
+            const isConfirming = confirmId === id;
+            const deleteError = deleteErrors[id];
+
+            return (
+              <li key={id} className="flex flex-col gap-1.5 py-3 first:pt-0 last:pb-0">
+                <div className="flex flex-wrap items-center gap-3">
+                  <span className="font-mono text-[11.5px] text-ink-soft truncate min-w-0 flex-1">
+                    {id}
+                  </span>
+                  <span className="text-[13px] text-ink shrink-0 max-w-[200px] truncate">
+                    {name}
+                  </span>
+                  {c.test_case && (
+                    <Badge variant="neutral">test</Badge>
+                  )}
+                  <span className="shrink-0">
+                    {isConfirming ? (
+                      <span className="inline-flex items-center gap-2">
+                        <span className="text-[12.5px] text-ink-soft">Delete?</span>
+                        <button
+                          type="button"
+                          onClick={() => setConfirmId(null)}
+                          className={control.ghost}
+                        >
+                          Cancel
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleDelete(id)}
+                          className="inline-flex items-center justify-center gap-1.5 rounded-control border border-danger/30 bg-danger-soft px-3 py-2 text-[13px] font-medium text-danger transition-colors hover:bg-danger/15 disabled:opacity-40"
+                        >
+                          <Icon name="trash" size={13} />
+                          Yes, delete
+                        </button>
+                      </span>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => setConfirmId(id)}
+                        disabled={isDeleting}
+                        className={control.ghost}
+                      >
+                        {isDeleting ? (
+                          <>
+                            <span className="inline-block size-3 animate-spin rounded-full border-2 border-danger border-t-transparent" />
+                            Deleting…
+                          </>
+                        ) : (
+                          <>
+                            <Icon name="trash" size={14} />
+                            Delete
+                          </>
+                        )}
+                      </button>
+                    )}
+                  </span>
+                </div>
+                {deleteError && (
+                  <p className="text-[12px] text-danger">{deleteError}</p>
+                )}
+              </li>
+            );
+          })}
+        </ul>
+      )}
+    </Card>
   );
 }
 
