@@ -89,7 +89,7 @@
     "owner_org": "CASA Compliance",
     "version": "1.0.0",
     "purpose": "Allow, quarantine, or escalate partner responses",
-    "tools": ["inspect_school_callback", "open_escalation"],
+    "tools": ["inspect_partner_callback", "open_escalation"],
     "allowed_data_scopes": ["policy_rules"],
     "denied_data_scopes": ["raw_case_data"],
     "identity": "caserelay-verifier@agent.caserelay.dev",
