@@ -160,7 +160,7 @@ function timeAgo(timestamp: number): string {
 }
 
 /**
- * The switcher, laid over the message list rather than beside it — a 492px
+ * The switcher, laid over the message list rather than beside it — a 560px
  * panel has no room for two columns.
  *
  * Positioned against the SDK's own `aside`, which is fixed and therefore the

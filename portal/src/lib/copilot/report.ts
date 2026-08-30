@@ -577,10 +577,29 @@ export function reportToMarkdown(report: CaseReport): string {
   return lines.join("\n");
 }
 
-/** A filename that sorts by case and says what it is. */
+/**
+ * What a saved report is called: `CR-0830152920_Maya_court-report_2026-08-30`.
+ *
+ * The case id leads so that a folder of these sorts by case, and the child's
+ * name comes next because that is what the person hunting for the file actually
+ * remembers. Anything a filesystem or a court's document store might refuse in
+ * a name is replaced rather than dropped, so two children cannot quietly end up
+ * sharing a filename.
+ */
+export function reportFileStem(report: CaseReport): string {
+  const child = report.childName
+    .trim()
+    .replace(/[^\p{L}\p{N}]+/gu, "-")
+    .replace(/^-+|-+$/g, "");
+
+  return [report.caseId, child || "child", "court-report", report.generatedAt.slice(0, 10)].join(
+    "_",
+  );
+}
+
+/** The same name, with the extension the download needs. */
 export function reportFilename(report: CaseReport, extension: string): string {
-  const day = report.generatedAt.slice(0, 10);
-  return `${report.caseId}-court-report-${day}.${extension}`;
+  return `${reportFileStem(report)}.${extension}`;
 }
 
 export { when as formatReportDate, day as formatReportDay };

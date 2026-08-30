@@ -12,16 +12,18 @@ import {
 } from "@/lib/copilot/report";
 import { downloadText, useReportStore } from "@/lib/copilot/report-store";
 import { useBeginOutreach } from "@/lib/copilot/outreach";
+import { useTakeOnCase, type CaseTakenOn } from "@/lib/copilot/take-on";
 
 /**
- * The two things the assistant draws rather than describes.
+ * The things the assistant draws rather than describes.
  *
- * A widget earns its place here only where prose is the wrong medium: a case
- * about to be worked needs a decision from a person, and a report needs to leave
- * the browser as a file. Everything else the assistant does stays as a sentence
- * and a quiet step line — see the note on WIDGET_TOOLS in chat-parts.tsx.
+ * A widget earns its place here only where prose is the wrong medium: a list of
+ * children to choose between is a question whose answer is a click, a case about
+ * to be worked needs a decision from a person, and a report needs to leave the
+ * browser as a file. Everything else stays as a sentence and a quiet step line —
+ * see the note on WIDGET_TOOLS in chat-parts.tsx.
  *
- * Both are built for the 492px panel, so facts wrap as pairs rather than sitting
+ * All are built for the 560px panel, so facts wrap as pairs rather than sitting
  * in a table that would need to scroll sideways.
  */
 
@@ -113,7 +115,7 @@ function Facts({ rows }: { rows: [string, string][] }) {
  *
  * `control.primary` and its siblings are built for a page's action bar, where
  * 13px text and 14px of side padding sit correctly. Two of those side by side
- * overflow a 492px panel once it has its own 32px of inset, so the chat gets its
+ * overflow a 560px panel once it has its own 32px of inset, so the chat gets its
  * own smaller pair. Written out in full rather than composed with the tokens,
  * because a competing `hover:` utility would otherwise resolve by stylesheet
  * order instead of by the order it is passed.
@@ -167,18 +169,39 @@ export interface WidgetProps {
  * from one started by asking.
  */
 export function CaseReviewWidget({ status, result }: WidgetProps) {
-  const beginOutreach = useBeginOutreach();
-  const [phase, setPhase] = useState<"idle" | "starting" | "started">("idle");
-  const [error, setError] = useState<string | null>(null);
-
   if (status !== "complete") return <Pending title="Setting up the case…" />;
 
   const parsed = parseResult(result);
   if (!parsed) return <Failed message={result || "The case could not be set up."} />;
 
-  const caseId = str(parsed.case_id);
-  const childName = str(parsed.child_name) || caseId;
-  const dueAt = str(parsed.due_at);
+  return (
+    <CaseReview
+      caseId={str(parsed.case_id)}
+      childName={str(parsed.child_name) || str(parsed.case_id)}
+      dueAt={str(parsed.due_at)}
+    />
+  );
+}
+
+/**
+ * The card itself, given a case rather than a tool result.
+ *
+ * Split out because a case can reach this state two ways — the assistant set it
+ * up, or the volunteer picked the child off the list below — and both should
+ * arrive at the same card with the same button on it.
+ */
+function CaseReview({
+  caseId,
+  childName,
+  dueAt,
+}: {
+  caseId: string;
+  childName: string;
+  dueAt: string;
+}) {
+  const beginOutreach = useBeginOutreach();
+  const [phase, setPhase] = useState<"idle" | "starting" | "started">("idle");
+  const [error, setError] = useState<string | null>(null);
 
   async function start() {
     if (!caseId) return;
@@ -196,7 +219,7 @@ export function CaseReviewWidget({ status, result }: WidgetProps) {
   return (
     <WidgetShell
       icon="cases"
-      title={`${childName} — ready for outreach`}
+      title={`${childName || caseId} — ready for outreach`}
       subtitle="Nothing has been sent yet. Outreach begins when you say so."
       footer={
         phase === "started" ? (
@@ -230,13 +253,110 @@ export function CaseReviewWidget({ status, result }: WidgetProps) {
   );
 }
 
+// ─── The children waiting, as a list to pick from ────────────────────────────
+
+/** Whatever the handler listed, as strings, with anything unusable dropped. */
+function items(value: unknown): string[] {
+  return Array.isArray(value) ? value.filter((entry): entry is string => str(entry) !== "") : [];
+}
+
+/**
+ * The children whose referrals are waiting, each one a case that can be taken on.
+ *
+ * A list of nine names followed by "which would you like?" is a question with
+ * nine answers, and prose is the wrong medium for that: it asks the volunteer to
+ * type back something already on screen, and to spell it the way the assistant
+ * did. Drawn as a row of choices, the answer is the click.
+ *
+ * The list is whatever the handler returned rather than a fixed set, so a
+ * scenario added to the control plane appears here without this component
+ * knowing anything about it.
+ *
+ * Only first names, deliberately. The rest of each record — the internal id, the
+ * complexity rating, the expected outcome — is written for whoever is exercising
+ * the system, and putting it in front of a volunteer would read as though the
+ * child were a test fixture. Same reason the handler keeps it out of the model's
+ * context.
+ */
+export function ChildChoiceWidget({ status, result }: WidgetProps) {
+  const takeOnCase = useTakeOnCase();
+  const [taking, setTaking] = useState<string | null>(null);
+  const [taken, setTaken] = useState<CaseTakenOn | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  // Once a child is chosen the question is answered, so the list gives way to
+  // the case rather than sitting above it still asking.
+  if (taken) {
+    return <CaseReview caseId={taken.caseId} childName={taken.childName} dueAt={taken.dueAt} />;
+  }
+
+  if (status !== "complete") return <Pending title="Checking who is waiting…" />;
+
+  const parsed = parseResult(result);
+  const children = items(parsed?.children);
+  if (children.length === 0) {
+    return <Failed message={result || "Nobody is waiting for an advocate just now."} />;
+  }
+
+  async function choose(child: string) {
+    setTaking(child);
+    setError(null);
+    try {
+      setTaken(await takeOnCase(child));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setTaking(null);
+    }
+  }
+
+  return (
+    <WidgetShell
+      icon="users"
+      title="Waiting for an advocate"
+      subtitle={`${children.length} ${children.length === 1 ? "child" : "children"} whose referrals are ready. Pick one to open the case.`}
+      footer={error ? <span className="text-[12px] text-danger">{error}</span> : undefined}
+    >
+      <div className="flex flex-wrap gap-1.5">
+        {children.map((child) => {
+          const busy = taking === child;
+          return (
+            <button
+              key={child}
+              type="button"
+              onClick={() => void choose(child)}
+              // One at a time. Two cases opening at once from one list is never
+              // what was meant, and the second would land on a card the first
+              // has already replaced.
+              disabled={taking !== null}
+              aria-label={`Take on ${child}'s case`}
+              className={cx(
+                "inline-flex items-center gap-1.5 rounded-control border px-2.5 py-1.5",
+                "text-[12.5px] font-medium transition-colors disabled:opacity-40",
+                busy
+                  ? "border-brand bg-brand-soft text-brand-deep"
+                  : "border-line-strong bg-surface text-ink hover:border-brand hover:bg-brand-soft hover:text-brand-deep",
+              )}
+            >
+              {busy && (
+                <span className="size-3 shrink-0 animate-spin rounded-full border-2 border-brand border-t-transparent" />
+              )}
+              {child}
+            </button>
+          );
+        })}
+      </div>
+    </WidgetShell>
+  );
+}
+
 // ─── Report, with both downloads on it ──────────────────────────────────────
 
 /**
  * A finished report, and the two ways to take it away.
  *
  * The card shows counts rather than the report itself: the markdown is already
- * in the thread above, and repeating a document inside a 492px panel helps
+ * in the thread above, and repeating a document inside a 560px panel helps
  * nobody. What the card adds is the file.
  *
  * Both routes are entirely local. The `.md` is a Blob built from a string

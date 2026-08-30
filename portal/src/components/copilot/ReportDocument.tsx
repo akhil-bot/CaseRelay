@@ -122,7 +122,7 @@ function ReportDocument({ report }: { report: CaseReport }) {
             <dd>{formatReportDate(report.generatedAt)}</dd>
           </div>
         </dl>
-        <p>{summaryLine(report)}</p>
+        <p className="print-summary">{summaryLine(report)}</p>
       </header>
 
       <section className="print-part">
@@ -141,7 +141,7 @@ function ReportDocument({ report }: { report: CaseReport }) {
       {report.contacts.length > 0 && (
         <section>
           <h3>Collateral contacts</h3>
-          <table>
+          <table className="print-contacts">
             <thead>
               <tr>
                 <th>Organisation</th>

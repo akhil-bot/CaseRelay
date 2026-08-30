@@ -66,16 +66,33 @@ const STEP_FALLBACK = { doing: "Working on it", done: "Finished that step" };
  * The steps that draw something of their own instead of reading as one line.
  *
  * The default is the line, not the widget. A step gets a card here only where
- * the reply is not the point — a case waiting on a decision needs a button, and
- * a report needs to become a file — and both would be worse as a paragraph
- * asking the volunteer to type their answer back.
+ * the reply is not the point — a list of children is a question whose answer is
+ * a click, a case waiting on a decision needs a button, and a report needs to
+ * become a file. All three would be worse as a paragraph asking the volunteer to
+ * type their answer back.
  *
  * Everything else stays in `StepLine`, which is why this is a set and not a
  * switch: the panel's rule is still that a volunteer never sees a tool name, and
  * a widget has to earn its way out of that. Names listed here are skipped by the
  * step line, so a card is never captioned by a sentence saying the same thing.
  */
-const WIDGET_TOOLS = new Set(["create_case", "case_report"]);
+const WIDGET_TOOLS = new Set(["list_scenarios", "create_case", "case_report"]);
+
+/**
+ * The steps whose card is the entire answer.
+ *
+ * Nine children drawn as nine things to press is the answer to "who needs an
+ * advocate", and a model that then writes the same nine names down the panel as
+ * a bulleted list has not added a second answer — it has made the volunteer read
+ * the first one twice and pick from the copy that cannot be clicked.
+ *
+ * The tool description asks it not to. It does it anyway, often enough that the
+ * panel settles it here instead: prose that follows one of these cards inside
+ * the same reply is dropped. This is not a rule about length or tone, which
+ * would be a matter of taste — it is that the card has already said this, and a
+ * restatement of a list of names carries nothing the card does not.
+ */
+const CARD_ANSWERS_ALONE = new Set(["list_scenarios"]);
 
 /**
  * When each reply first appeared. The transport carries no timestamp, so the
@@ -143,6 +160,24 @@ function opensReply(turns: ChatMessage[], message: AssistantTurn): boolean {
     if (speaks(turns[i])) return false;
   }
   return true;
+}
+
+/**
+ * Whether a card earlier in this same reply has already given the answer.
+ *
+ * Walks back only while the messages are still the assistant's, so it stops at
+ * the question that opened the reply — the same bound `opensReply` uses. A card
+ * drawn for an earlier question has no claim on what is said in answer to a
+ * later one.
+ */
+function answeredByCard(turns: ChatMessage[], message: AssistantTurn): boolean {
+  const index = turns.findIndex((m) => m.id === message.id);
+  for (let i = index - 1; i >= 0 && isAssistant(turns[i]); i -= 1) {
+    const earlier = turns[i] as AssistantTurn;
+    const cards = earlier.toolCalls ?? [];
+    if (cards.some((call) => CARD_ANSWERS_ALONE.has(call.function.name))) return true;
+  }
+  return false;
 }
 
 /**
@@ -261,18 +296,28 @@ function AssistantMessageView({
   ...props
 }: CopilotChatAssistantMessageProps) {
   const thread = messages ?? [];
+  const drawn = thread.filter((m) => !UNDRAWN_ROLES.has(m.role));
   const steps = message.toolCalls ?? [];
   if (!hasText(message) && steps.length === 0) return null;
+
+  // Said already, by the card. Whether that card is on the message before this
+  // one or on this one — a turn can carry both, and which of the two happens is
+  // the model's choice rather than ours — the sentences are the same list again.
+  //
+  // The prose is dropped rather than the whole message, because a turn that
+  // restates can still be taking a step of its own, and the step has to draw.
+  const carriesCard = steps.some((step) => CARD_ANSWERS_ALONE.has(step.function.name));
+  const restates = hasText(message) && (carriesCard || answeredByCard(drawn, message));
+  if (restates && steps.length === 0) return null;
+
+  const spoken = restates ? { ...message, content: "" } : message;
 
   // A widget says what it did by existing, so the step line covers only the
   // steps that have no other representation. Both can still appear on one reply:
   // resolving a name is a line, setting the case up is a card.
   const quiet = steps.filter((step) => !WIDGET_TOOLS.has(step.function.name));
 
-  const leads = opensReply(
-    thread.filter((m) => !UNDRAWN_ROLES.has(m.role)),
-    message,
-  );
+  const leads = opensReply(drawn, message);
 
   // A reply arrives in pieces, and this is the middle of the thread's spacing
   // hierarchy. Steps carry their own 4px on `StepLine`, so a run of them needs
@@ -280,7 +325,7 @@ function AssistantMessageView({
   // break from them, and a reply as a whole stands 12px clear of the question
   // above it — still inside the 20px turn boundary that `globals.css` sets on
   // CopilotKit's user-message padding.
-  const gap = leads ? "mt-3" : hasText(message) ? "mt-1" : undefined;
+  const gap = leads ? "mt-3" : hasText(spoken) ? "mt-1" : undefined;
 
   return (
     <div className={cx(gap)}>
@@ -289,7 +334,7 @@ function AssistantMessageView({
 
       <CopilotChatAssistantMessage
         {...props}
-        message={message}
+        message={spoken}
         messages={messages}
         thumbsUpButton={Hidden}
         thumbsDownButton={Hidden}
@@ -383,7 +428,7 @@ type ChatHeaderProps = Parameters<NonNullable<CopilotModalHeaderProps["children"
  *
  * This replaces the header's layout rather than filling its title slot, because
  * the default arranges launcher, title and close as three equal thirds, which
- * leaves a name and a status pill nowhere to sit in a 492px panel. Owning the
+ * leaves a name and a status pill nowhere to sit in a 560px panel. Owning the
  * element also lets the row match the app header's 64px, so the two align where
  * the panel meets the page.
  *

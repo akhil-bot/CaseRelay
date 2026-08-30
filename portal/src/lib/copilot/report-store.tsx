@@ -10,6 +10,7 @@ import {
   useState,
   type ReactNode,
 } from "react";
+import { reportFileStem } from "@/lib/copilot/report";
 import type { CaseReport } from "@/lib/copilot/report";
 
 /**
@@ -58,8 +59,18 @@ export function ReportStoreProvider({ children }: { children: ReactNode }) {
     printedRef.current = printing;
 
     let live = true;
+
+    // Every browser offers the document title as the filename in its "Save as
+    // PDF" field, and there is no other way to reach it. So for as long as the
+    // dialog is up the tab is named what the file should be named, and the real
+    // title goes back on afterwards — otherwise a report saves itself under the
+    // product's tagline, which says nothing about whose case it is.
+    const title = document.title;
+    document.title = reportFileStem(printing);
+
     const finish = () => {
       if (!live) return;
+      document.title = title;
       printedRef.current = null;
       setPrinting(null);
     };
@@ -73,6 +84,7 @@ export function ReportStoreProvider({ children }: { children: ReactNode }) {
 
     return () => {
       live = false;
+      document.title = title;
       cancelAnimationFrame(outer);
       window.removeEventListener("afterprint", finish);
     };

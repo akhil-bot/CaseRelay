@@ -230,6 +230,16 @@ function LiveCaseDetail({ caseId }: { caseId: string }) {
   const hasActiveRun = runs.some((r) => r.state === "running" || r.state === "queued");
   const isStreaming = runState.streaming || hasActiveRun;
 
+  // Whether there is anything left for a round of outreach to do.
+  //
+  // Deliberately stricter than `closedCount`: blocked and unresolved commitments
+  // are closed as far as the case's progress goes, but they are precisely what
+  // another round exists to chase, so offering the button on them is right. Only
+  // a case where every service actually came back has nothing left to ask for.
+  const nothingLeftToChase =
+    commitmentEntries.length > 0 &&
+    commitmentEntries.every(([, state]) => state === "completed");
+
   // Activation is worked out here rather than read off the shared poll: this
   // page already knows the case is in draft with its commitments extracted, and
   // a case opened moments after it was created should not wait for the next
@@ -259,7 +269,22 @@ function LiveCaseDetail({ caseId }: { caseId: string }) {
   // each disappears with its contents.
   const showFeed = isStreaming || runs.length > 0 || mergedEvents.length > 0;
   const showCommitments = commitmentEntries.length > 0;
-  const showAudit = data.timeline.length > 0;
+
+  // The audit trail is not the advocate's screen.
+  //
+  // What it answers — which field was released to which service, under whose
+  // authority, and what was refused — is a question about CaseRelay's conduct,
+  // asked by whoever answers for it. That is the supervisor who approved the
+  // grants, and the administrator who runs the fleet. The advocate's question is
+  // what the case is owed and who has not come back, and the two sections above
+  // are that question; a log of disclosures underneath it invites them to audit
+  // a system they are not accountable for instead of chasing a child's school.
+  //
+  // The same division is drawn in src/design/personas.ts, which keeps /audit —
+  // the fleet-wide log — off the supervisor's navigation on the grounds that the
+  // record they need is the case-scoped one. This is that record.
+  const canSeeAudit = role === "supervisor" || role === "admin";
+  const showAudit = canSeeAudit && data.timeline.length > 0;
 
   return (
     <div className={layout.stack}>
@@ -300,32 +325,55 @@ function LiveCaseDetail({ caseId }: { caseId: string }) {
           </Field>
         </dl>
 
+        {/* The foot of the header is where the case says what it wants next. On a
+            case that has been answered in full there is no next, so it states
+            that instead of offering a round of outreach with nothing to carry —
+            a button that would contact five services to be told again what they
+            have already said. */}
         {!hasActiveRun && !runState.streaming && (
-          <div
-            className={cx(
-              "-mx-5 -mb-5 mt-5 flex flex-wrap items-center gap-3 border-t px-5 py-4",
-              "border-brand/25 bg-brand-soft text-brand",
-            )}
-          >
-            <Icon name="play" size={18} className="shrink-0" />
-            <div className="min-w-0 flex-1">
-              <p className="text-[13px] font-medium">
-                {runs.length === 0 ? "No outreach started yet" : "Start another round of outreach"}
-              </p>
-              <p className="mt-0.5 text-[12px] text-ink-soft">
-                Contact all service providers and follow up on each step.
-              </p>
-            </div>
-            <button
-              type="button"
-              onClick={handleRun}
-              disabled={submitting}
-              className={control.primary}
+          nothingLeftToChase ? (
+            <div
+              className={cx(
+                "-mx-5 -mb-5 mt-5 flex flex-wrap items-center gap-3 border-t px-5 py-4",
+                tone.seal.soft,
+                tone.seal.text,
+              )}
             >
-              <Icon name="play" size={15} />
-              {submitting ? "Starting…" : "Start outreach"}
-            </button>
-          </div>
+              <Icon name="checkCircle" size={18} className="shrink-0" />
+              <div className="min-w-0 flex-1">
+                <p className="text-[13px] font-medium">Every commitment has been kept</p>
+                <p className="mt-0.5 text-[12px] text-ink-soft">
+                  Nothing on this case is waiting on another round of outreach.
+                </p>
+              </div>
+            </div>
+          ) : (
+            <div
+              className={cx(
+                "-mx-5 -mb-5 mt-5 flex flex-wrap items-center gap-3 border-t px-5 py-4",
+                "border-brand/25 bg-brand-soft text-brand",
+              )}
+            >
+              <Icon name="play" size={18} className="shrink-0" />
+              <div className="min-w-0 flex-1">
+                <p className="text-[13px] font-medium">
+                  {runs.length === 0 ? "No outreach started yet" : "Start another round of outreach"}
+                </p>
+                <p className="mt-0.5 text-[12px] text-ink-soft">
+                  Contact all service providers and follow up on each step.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={handleRun}
+                disabled={submitting}
+                className={control.primary}
+              >
+                <Icon name="play" size={15} />
+                {submitting ? "Starting…" : "Start outreach"}
+              </button>
+            </div>
+          )
         )}
         {submitError && (
           <p className="mt-2 text-[12px] text-danger">{submitError}</p>

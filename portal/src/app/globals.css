@@ -199,7 +199,7 @@ html [data-copilotkit] {
 
 /*
  * The composer sits in a wrapper that CopilotKit pads to 32px a side inside a
- * sidebar, which spends 64px of a 492px panel on margin and forces the
+ * sidebar, which spends 64px of a 560px panel on margin and forces the
  * placeholder to wrap. That wrapper is not exposed as a slot, so it is reached
  * as the first child of the input root, which we tag via the `input` slot.
  *
@@ -238,7 +238,7 @@ html aside[data-copilot-sidebar] {
 /*
  * ── Chat thread rhythm ───────────────────────────────────────────────────────
  * CopilotKit spaces the thread for a full-width article, and two of its layers
- * dominate a 492px panel.
+ * dominate a 560px panel.
  *
  * The user message root carries `pt-10` as its turn separator. And the
  * assistant's markdown sits in `prose`, whose paragraphs take 1.25em top and
@@ -273,7 +273,7 @@ html [data-copilotkit] .copilotKitAssistantMessage :where(.space-y-4 > :not(:las
 }
 
 /*
- * Tables in a 492px panel.
+ * Tables in a 560px panel.
  *
  * `prose` sizes a table for an article column, so a four-column one — which is
  * what a case report's decision log is — pushes past the panel and takes the
@@ -549,13 +549,22 @@ html [data-copilotkit] .copilotKitAssistantMessage :where(hr) {
   }
 
   @page {
-    margin: 18mm 16mm;
+    margin: 16mm 15mm 14mm;
   }
 
   html,
   body {
     background: #fff;
     color: #000;
+  }
+
+  /* The chat panel shifts the page aside by writing an inline `margin-right`
+     onto <body>, and it is open whenever someone prints from the report card.
+     An inline style outranks this sheet, so without `!important` the report is
+     laid out in whatever the panel left behind — a 48mm strip down the left
+     edge of the sheet, wrapping the title and every table cell to one word. */
+  body {
+    margin: 0 !important;
   }
 
   .print-doc {
@@ -596,11 +605,24 @@ html [data-copilotkit] .copilotKitAssistantMessage :where(hr) {
     margin: 0 0 4pt;
   }
 
-  /* Sections are the unit a reader scans, so they are kept off page breaks
-     wherever they are short enough to fit whole. */
+  /* Keeping every section off a page break sounds right and reads badly: a
+     section that will not fit in what is left of a page jumps to the next one
+     whole, and the report grows a half-empty page each time it happens. What
+     actually reads badly is narrower than that — a heading stranded at the foot
+     of a page, or a single line split from its paragraph — so that is all this
+     forbids. The short, self-contained blocks further down opt back in. */
   .print-doc section {
-    margin-top: 16pt;
-    break-inside: avoid;
+    margin-top: 14pt;
+  }
+
+  .print-doc :is(h1, h2, h3, h4) {
+    break-after: avoid;
+  }
+
+  .print-doc p,
+  .print-doc li {
+    orphans: 2;
+    widows: 2;
   }
 
   /* "A. CASA activities" and "B. Findings" divide the report rather than holding
@@ -608,6 +630,7 @@ html [data-copilotkit] .copilotKitAssistantMessage :where(hr) {
   .print-doc .print-part {
     margin-top: 22pt;
     margin-bottom: -8pt;
+    break-after: avoid;
   }
 
   .print-doc p {
@@ -623,15 +646,18 @@ html [data-copilotkit] .copilotKitAssistantMessage :where(hr) {
     margin-bottom: 2pt;
   }
 
-  /* The header facts run as a wrapped row of label-over-value pairs, which fits
-     six of them on one line of a portrait page without a table. */
+  /* The header facts are a filing block, and a filing block is read by scanning
+     down a column for a label. A wrapped flex row put each pair wherever the
+     one before it ended, so nothing lined up; three fixed columns give the
+     labels a left edge to sit on and hold the whole block to four lines. */
   .print-doc .print-meta {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 4pt 20pt;
-    margin: 0 0 4pt;
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 7pt 18pt;
+    margin: 0 0 10pt;
     padding-bottom: 10pt;
     border-bottom: 1pt solid #000;
+    break-inside: avoid;
   }
 
   .print-doc .print-meta dt {
@@ -645,6 +671,14 @@ html [data-copilotkit] .copilotKitAssistantMessage :where(hr) {
     margin: 1pt 0 0;
     font-size: 10pt;
     font-weight: 500;
+  }
+
+  /* The one sentence a judge reads if they read nothing else, so it is set a
+     size above the body and given the room to be the last thing on the block. */
+  .print-doc .print-summary {
+    font-size: 11pt;
+    line-height: 1.45;
+    margin: 0;
   }
 
   .print-doc table {
@@ -680,6 +714,32 @@ html [data-copilotkit] .copilotKitAssistantMessage :where(hr) {
     break-inside: avoid;
   }
 
+  /* Five columns on a portrait page. Left to itself the browser hands the two
+     date columns enough width for "30 Aug 2026" to sit on one line and then
+     wraps the organisation and the named officer to one word each, which is the
+     wrong way round: the dates are the columns that can afford to be tight. */
+  .print-doc .print-contacts {
+    table-layout: fixed;
+  }
+
+  .print-doc .print-contacts th:nth-child(1) {
+    width: 21%;
+  }
+
+  .print-doc .print-contacts th:nth-child(2) {
+    width: 25%;
+  }
+
+  .print-doc .print-contacts th:nth-child(3),
+  .print-doc .print-contacts th:nth-child(4) {
+    width: 13%;
+  }
+
+  .print-doc .print-contacts td:nth-child(3),
+  .print-doc .print-contacts td:nth-child(4) {
+    white-space: nowrap;
+  }
+
   /* ── The parts only the volunteer can write ────────────────────────────────
      A court report asks for judgements CaseRelay does not hold. Printing them
      as ruled blanks rather than omitting them is the honest option and the
@@ -688,6 +748,7 @@ html [data-copilotkit] .copilotKitAssistantMessage :where(hr) {
   .print-doc .print-blank {
     padding-left: 8pt;
     border-left: 1.5pt solid #ccc;
+    break-inside: avoid;
   }
 
   .print-doc .print-hint {
@@ -710,8 +771,11 @@ html [data-copilotkit] .copilotKitAssistantMessage :where(hr) {
     height: 15pt;
   }
 
+  /* A signature block split across a page break is a signature block someone
+     signs twice, so it moves whole. */
   .print-doc .print-signatures {
-    margin-top: 24pt;
+    margin-top: 22pt;
+    break-inside: avoid;
   }
 
   .print-doc .print-signature {
@@ -746,11 +810,12 @@ html [data-copilotkit] .copilotKitAssistantMessage :where(hr) {
   }
 
   .print-doc footer {
-    margin-top: 18pt;
+    margin-top: 16pt;
     padding-top: 6pt;
     border-top: 0.5pt solid #999;
     font-size: 8pt;
     font-style: italic;
     color: #555;
+    break-inside: avoid;
   }
 }

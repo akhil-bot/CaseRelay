@@ -67,6 +67,69 @@ function UnconfiguredChat() {
 }
 
 /**
+ * ── The slots, held still ────────────────────────────────────────────────────
+ *
+ * Every one of these is a constant, and they are out here rather than inline on
+ * the element because their identity is load-bearing.
+ *
+ * CopilotKit memoises each message individually and compares the slot props it
+ * was given by reference — `if (prevProps.slotProps !== nextProps.slotProps)
+ * return false`, in both the assistant and user message wrappers. Written as
+ * literals in the render, they are new objects every time, so that comparison
+ * never holds and every message in the thread re-renders whenever anything
+ * re-renders the panel.
+ *
+ * Which is often: the component below reads the caseload, the approvals queue
+ * and the scenario clock, and the approvals poll alone re-renders it every
+ * fifteen seconds. The cost of that grows with the length of the conversation,
+ * so the longer someone talks to the assistant the worse it gets.
+ *
+ * Nothing in here closes over a prop or a hook, so module scope is the honest
+ * place for them: they are describing which components fill which slot, and
+ * that answer never changes.
+ */
+/**
+ * How wide the panel opens, in px.
+ *
+ * The thread is not only prose: it carries the widgets in `chat-widgets.tsx`,
+ * and a court report's decision log, which is a four-column table. At 492 those
+ * were the things that suffered first — facts truncating mid-word, a name and a
+ * date on a chip wrapping to two lines.
+ *
+ * Only ever a desktop measurement. Below 768px CopilotKit gives the panel the
+ * full viewport and stops pushing the body aside, so a wider number here cannot
+ * crowd a phone. On desktop it does come out of the page behind it, which is why
+ * this is a modest step rather than as wide as the content would like.
+ */
+const PANEL_WIDTH = 560;
+
+const HEADER = { closeButton: ChatCloseButton, children: ChatHeader } as const;
+
+const TOGGLE_BUTTON = { openIcon: ToggleOpenIcon, closeIcon: ToggleCloseIcon } as const;
+
+const MESSAGE_VIEW = {
+  assistantMessage: AssistantMessage,
+  intelligenceIndicator: Hidden,
+  // The user-message toolbar is only a copy button, and it ships
+  // `invisible group-hover:visible` — which still reserves its 36px
+  // under every question the volunteer asks. Dropping the slot reclaims
+  // the space instead of styling around a control we do not offer.
+  userMessage: { toolbar: Hidden },
+} as const;
+
+const INPUT = {
+  className: "caserelay-chat-input",
+  addMenuButton: Hidden,
+  startTranscribeButton: Hidden,
+  showDisclaimer: false,
+} as const;
+
+const LABELS = {
+  chatInputPlaceholder: "Ask about a case, a deadline, or who owns a step",
+  welcomeMessageText: "I can help you follow commitments, deadlines, and handoffs.",
+} as const;
+
+/**
  * The chat surface, plus the context the agent is allowed to see.
  *
  * `useAgentContext` is a one-way channel: the agent reads what the person is
@@ -114,28 +177,12 @@ function ConnectedChat() {
       <CopilotSidebar
         agentId={CASERELAY_AGENT_ID}
         defaultOpen={false}
-        width={492}
-        header={{ closeButton: ChatCloseButton, children: ChatHeader }}
-        toggleButton={{ openIcon: ToggleOpenIcon, closeIcon: ToggleCloseIcon }}
-        messageView={{
-          assistantMessage: AssistantMessage,
-          intelligenceIndicator: Hidden,
-          // The user-message toolbar is only a copy button, and it ships
-          // `invisible group-hover:visible` — which still reserves its 36px
-          // under every question the volunteer asks. Dropping the slot reclaims
-          // the space instead of styling around a control we do not offer.
-          userMessage: { toolbar: Hidden },
-        }}
-        input={{
-          className: "caserelay-chat-input",
-          addMenuButton: Hidden,
-          startTranscribeButton: Hidden,
-          showDisclaimer: false,
-        }}
-        labels={{
-            chatInputPlaceholder: "Ask about a case, a deadline, or who owns a step",
-            welcomeMessageText: "I can help you follow commitments, deadlines, and handoffs.",
-          }}
+        width={PANEL_WIDTH}
+        header={HEADER}
+        toggleButton={TOGGLE_BUTTON}
+        messageView={MESSAGE_VIEW}
+        input={INPUT}
+        labels={LABELS}
       />
 
       <ConversationBridge />

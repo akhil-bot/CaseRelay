@@ -7,16 +7,18 @@ import type { ReactNode } from "react";
 import { z } from "zod";
 import {
   CaseReviewWidget,
+  ChildChoiceWidget,
   ReportWidget,
   type WidgetProps,
 } from "@/components/copilot/chat-widgets";
 import { ReportPrintRoot } from "@/components/copilot/ReportDocument";
-import { createCase, listScenarios } from "@/lib/api";
+import { listScenarios } from "@/lib/api";
 import { COPILOT_RUNTIME_URL, isRuntimeAvailable } from "@/lib/copilot/config";
 import { ConversationsProvider } from "@/lib/copilot/conversations";
 import { useBeginOutreach } from "@/lib/copilot/outreach";
 import { buildReport, reportToMarkdown } from "@/lib/copilot/report";
 import { ReportStoreProvider, useReportStore } from "@/lib/copilot/report-store";
+import { UnknownChild, useTakeOnCase } from "@/lib/copilot/take-on";
 import { ToolEventsProvider, useToolEvents } from "@/lib/copilot/tool-events";
 
 /** A bare case id, as opposed to a child's name or a pronoun. */
@@ -42,28 +44,29 @@ export function CopilotProvider({ children }: { children: ReactNode }) {
 }
 
 function CopilotProviderInner({ children }: { children: ReactNode }) {
-  const { findCase, pushCase, scenarioCacheRef, subscribersRef } = useToolEvents();
+  const { findCase, scenarioCacheRef } = useToolEvents();
   const { put: putReport } = useReportStore();
   const beginOutreach = useBeginOutreach();
+  const takeOnCase = useTakeOnCase();
 
   // Every one of these is read through a ref so the frontendTools memo can keep
   // a zero-length dependency array — CopilotKit requires a stable array, and
   // rebuilding it re-registers the tools on every navigation.
   const findCaseRef = useRef(findCase);
-  const pushCaseRef = useRef(pushCase);
   const putReportRef = useRef(putReport);
   const beginOutreachRef = useRef(beginOutreach);
+  const takeOnCaseRef = useRef(takeOnCase);
   useEffect(() => { findCaseRef.current = findCase; }, [findCase]);
-  useEffect(() => { pushCaseRef.current = pushCase; }, [pushCase]);
   useEffect(() => { putReportRef.current = putReport; }, [putReport]);
   useEffect(() => { beginOutreachRef.current = beginOutreach; }, [beginOutreach]);
+  useEffect(() => { takeOnCaseRef.current = takeOnCase; }, [takeOnCase]);
 
   const frontendTools = useMemo(
     () => [
       {
         name: "list_scenarios",
         description:
-          "List the children whose referrals are ready for an advocate to pick up. Call this when the volunteer asks who needs an advocate or what they can take on, or when they name a child you do not recognise. Answer with the first names, and pass one of them straight to create_case when they choose.",
+          "List the children whose referrals are ready for an advocate to pick up. Call this when the volunteer asks who needs an advocate or what they can take on, or when they name a child you do not recognise. The names are drawn for the volunteer as a list they can pick from, so do not repeat them back — reply with one short line at most, such as asking which they would like to take on. If they answer with a name, pass it straight to create_case.",
         parameters: z.object({}),
         // Only the names cross into the model's context. The rest of each record —
         // the internal id, the complexity rating, the one-line title, the expected
@@ -77,6 +80,12 @@ function CopilotProviderInner({ children }: { children: ReactNode }) {
             children: scenarios.map((s) => s.child_name),
           });
         },
+        // Nine names and "which would you like?" is a question with nine
+        // answers. Drawn as choices, the answer is a click rather than the
+        // volunteer typing back a name that is already on screen.
+        render: ({ status, result }: WidgetProps) => (
+          <ChildChoiceWidget status={status} result={result} />
+        ),
       },
       {
         name: "create_case",
@@ -93,27 +102,19 @@ function CopilotProviderInner({ children }: { children: ReactNode }) {
         }),
         handler: async ({ scenario, due_in }: { scenario: string; due_in?: string }) => {
           try {
-            if (!scenarioCacheRef.current) {
-              scenarioCacheRef.current = await listScenarios();
-            }
-            const match =
-              scenarioCacheRef.current.find((s) => s.id === scenario) ||
-              scenarioCacheRef.current.find(
-                (s) => s.child_name.toLowerCase() === scenario.toLowerCase(),
-              );
-            if (!match) {
-              const available = scenarioCacheRef.current.map((s) => s.child_name).join(", ");
-              return `No child named "${scenario}" is waiting for an advocate. Waiting now: ${available}`;
-            }
-            const result = await createCase(match.id, due_in);
-            pushCaseRef.current({ caseId: result.case_id, scenario: match.id, childName: match.child_name });
-            for (const cb of subscribersRef.current) cb.onCaseCreated(result, match);
+            // The same act as picking the child off the list the assistant drew
+            // — one scenario matched, one registry entry, one set of
+            // subscribers told.
+            const taken = await takeOnCaseRef.current(scenario, due_in);
             return JSON.stringify({
-              case_id: result.case_id,
-              child_name: match.child_name,
-              due_at: result.due_at,
+              case_id: taken.caseId,
+              child_name: taken.childName,
+              due_at: taken.dueAt,
             });
           } catch (err) {
+            if (err instanceof UnknownChild) {
+              return `${err.message} Waiting now: ${err.waiting.join(", ")}`;
+            }
             return `Error creating case: ${err instanceof Error ? err.message : String(err)}`;
           }
         },
