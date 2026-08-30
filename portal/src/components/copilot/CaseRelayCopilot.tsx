@@ -86,10 +86,8 @@ function ConnectedChat() {
 
   const caseRegistryValue =
     caseEntries.length === 0
-      ? "No cases created this session."
-      : caseEntries
-          .map((e) => `${e.childName} → ${e.caseId} (scenario: ${e.scenario})`)
-          .join("; ");
+      ? "No cases opened in this conversation yet."
+      : caseEntries.map((e) => `${e.childName} → ${e.caseId}`).join("; ");
 
   useAgentContext({
     description: "Current view and signed-in role",
@@ -102,12 +100,12 @@ function ConnectedChat() {
   });
 
   useAgentContext({
-    description: "Scenario clock position",
+    description: "Where the caseload stands on the timeline today",
     value: `${meta.dayLabel} — ${meta.label}. ${meta.narration}`,
   });
 
   useAgentContext({
-    description: "Session case registry — maps child names to case IDs for conversational reference",
+    description: "Cases opened in this conversation — child's name to case ID, for resolving who 'it' refers to",
     value: caseRegistryValue,
   });
 

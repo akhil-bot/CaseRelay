@@ -63,32 +63,33 @@ function CopilotProviderInner({ children }: { children: ReactNode }) {
       {
         name: "list_scenarios",
         description:
-          "List available test scenarios. Each scenario has an id, child_name, complexity (simple or complex), title, and expected_outcome. Call this when the user asks what scenarios are available or when you need to resolve a child name to a scenario ID.",
+          "List the children whose referrals are ready for an advocate to pick up. Call this when the volunteer asks who needs an advocate or what they can take on, or when they name a child you do not recognise. Answer with the first names, and pass one of them straight to create_case when they choose.",
         parameters: z.object({}),
+        // Only the names cross into the model's context. The rest of each record —
+        // the internal id, the complexity rating, the one-line title, the expected
+        // outcome — is written for whoever is exercising the system, and any of it
+        // repeated back to a volunteer would read as though they were the subject
+        // of a test rather than an advocate for a child.
         handler: async () => {
           const scenarios = await listScenarios();
           scenarioCacheRef.current = scenarios;
           return JSON.stringify({
-            scenarios: scenarios.map((s) => ({
-              id: s.id,
-              child_name: s.child_name,
-              complexity: s.complexity,
-              title: s.title,
-              expected_outcome: s.expected_outcome,
-            })),
+            children: scenarios.map((s) => s.child_name),
           });
         },
       },
       {
         name: "create_case",
         description:
-          "Create a test case from a scenario. The user may refer to a scenario by child name (e.g. 'maya', 'rosa') or by scenario ID. If only a child name is given, first call list_scenarios to resolve it. Optionally accepts a deadline string — use '10s' for demos (checkpoints must already be past-due when the wake phase runs; values above ~10s stall the run and cause partial_failure), '17d' for realistic timelines. Returns the case_id and due_at on success.",
+          "Take on a child's case: open the case record from the child's referrals so it can be worked. Pass the child's first name as given (e.g. 'maya', 'rosa') — that is enough, and there is no need to look the child up first. Only call list_scenarios when the name is one you do not recognise. If the volunteer states a deadline, pass it through as due_in exactly as they said it. Returns the case_id and the date the work is due. The case opens in draft and needs a supervisor's approval before anything is sent.",
         parameters: z.object({
-          scenario: z.string().describe("Scenario ID or child name to create a case for."),
+          scenario: z.string().describe("The child's first name, as the volunteer said it."),
           due_in: z
             .string()
             .optional()
-            .describe("Optional deadline duration. Use '10s' for demos — values above ~10s stall checkpoints and the run fails. Use '17d' for realistic timelines."),
+            .describe(
+              "Optional deadline, e.g. '10s' or '17d'. Pass through whatever the volunteer asked for and do not substitute a value of your own. '10s' is what a live demonstration wants: the follow-up sweep only acts on deadlines that have already passed, and anything longer leaves them still in the future when it lands, so the round stalls part-way. '17d' is a realistic court timeline.",
+            ),
         }),
         handler: async ({ scenario, due_in }: { scenario: string; due_in?: string }) => {
           try {
@@ -102,14 +103,13 @@ function CopilotProviderInner({ children }: { children: ReactNode }) {
               );
             if (!match) {
               const available = scenarioCacheRef.current.map((s) => s.child_name).join(", ");
-              return `No scenario found matching "${scenario}". Available: ${available}`;
+              return `No child named "${scenario}" is waiting for an advocate. Waiting now: ${available}`;
             }
             const result = await createCase(match.id, due_in);
             pushCaseRef.current({ caseId: result.case_id, scenario: match.id, childName: match.child_name });
             for (const cb of subscribersRef.current) cb.onCaseCreated(result, match);
             return JSON.stringify({
               case_id: result.case_id,
-              scenario: result.scenario,
               child_name: match.child_name,
               due_at: result.due_at,
             });

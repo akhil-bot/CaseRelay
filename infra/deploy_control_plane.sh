@@ -247,5 +247,39 @@ gcloud run services update-traffic "$SERVICE" \
   --region="$REGION" \
   --to-latest
 
+# Remove stale canary tags so old revisions don't stay warm.
+# Cloud Run honors min-instances=1 for any tagged revision even at 0% traffic,
+# so each unremoved canary tag costs one always-on instance. We keep the two
+# newest canary-* tags (current + one rollback option) and strip the rest.
+echo "=== removing stale canary tags ==="
+STALE_CANARY_TAGS=$(gcloud run services describe "$SERVICE" \
+  --project="$PROJECT" \
+  --region="$REGION" \
+  --format='json' \
+  | python3 -c "
+import json, sys
+data = json.load(sys.stdin)
+traffic = data.get('spec', {}).get('traffic', [])
+# Sort descending so index 0 is newest; canary tags are canary-<epoch> so lex sort is correct.
+tags = sorted(
+    [e['tag'] for e in traffic if e.get('tag', '').startswith('canary-')],
+    reverse=True
+)
+to_remove = tags[2:]  # keep newest 2, remove the rest
+if to_remove:
+    print(','.join(to_remove))
+" 2>/dev/null || true)
+
+if [ -n "$STALE_CANARY_TAGS" ]; then
+  echo "    removing: $STALE_CANARY_TAGS"
+  gcloud run services update-traffic "$SERVICE" \
+    --project="$PROJECT" \
+    --region="$REGION" \
+    --remove-tags="$STALE_CANARY_TAGS"
+  echo "    done — stale revisions can now scale to 0"
+else
+  echo "    no stale canary tags to remove"
+fi
+
 echo "$SERVICE_URL" > infra/control_plane_url.txt
 echo "=== deployed and verified: $SERVICE_URL ==="

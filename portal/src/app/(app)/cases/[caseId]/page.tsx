@@ -211,8 +211,18 @@ function LiveCaseDetail({ caseId }: { caseId: string }) {
   const caseData = data.case;
   const childName = String(caseData.child_name ?? caseId);
   const referral = (caseData.referral_packet ?? {}) as Record<string, unknown>;
-  const scenario = String(caseData.scenario ?? referral.scenario ?? "");
   const status = String(caseData.status ?? "unknown");
+  const referralCount = Array.isArray(referral.referrals) ? referral.referrals.length : 0;
+  const advocate = String(caseData.volunteer_name ?? referral.volunteer_name ?? "");
+
+  // The stored case carries no summary line of its own, so the one shown under
+  // the child's name is assembled from what the record does hold — who the case
+  // is for, and how many referrals are open on it. Nothing here is inferred.
+  const headline =
+    String(caseData.summary ?? "") ||
+    (referralCount > 0
+      ? `Following ${referralCount} ${referralCount === 1 ? "referral" : "referrals"} for ${childName} — one agency and one deadline each.`
+      : `Case record for ${childName}.`);
   const commitmentStates = data.commitments;
   const commitmentEntries = Object.entries(commitmentStates);
   const TERMINAL_STATUSES = new Set(["completed", "blocked", "unresolved"]);
@@ -263,11 +273,8 @@ function LiveCaseDetail({ caseId }: { caseId: string }) {
               <h2 className="text-[18px] font-semibold text-ink">{childName}</h2>
               <Mono className="text-[12px]">{caseId}</Mono>
               <Badge variant="accent" icon="activity">Live</Badge>
-              {scenario && <Badge variant="neutral">{scenario}</Badge>}
             </div>
-            <p className={cx("mt-1.5", layout.measure, type_.body)}>
-              {String(caseData.summary ?? `Case ${caseId} — scenario ${scenario}`)}
-            </p>
+            <p className={cx("mt-1.5", layout.measure, type_.body)}>{headline}</p>
           </div>
           <Badge
             variant={status === "closed" ? "brand" : status === "monitoring" ? "brand" : "neutral"}
@@ -281,8 +288,8 @@ function LiveCaseDetail({ caseId }: { caseId: string }) {
           <Field label="Case ID">
             <Mono>{caseId}</Mono>
           </Field>
-          <Field label="Scenario">
-            {scenario || "—"}
+          <Field label="Advocate">
+            {advocate || "Not assigned"}
           </Field>
           <Field label="Status">
             {caseStatusLabel(status, canDecide)}
