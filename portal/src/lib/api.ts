@@ -10,7 +10,14 @@ import { decodeRunEvent } from "@/lib/agui";
 
 const BASE = "/api/control-plane";
 
-async function request<T>(path: string, init?: RequestInit): Promise<T> {
+/** A parsed answer, and what the route said about the set the body came from. */
+interface Answer<T> {
+  data: T;
+  /** `X-Total-Count`, where the route pages. Null where it does not. */
+  total: number | null;
+}
+
+async function send<T>(path: string, init?: RequestInit): Promise<Answer<T>> {
   const res = await fetch(`${BASE}${path}`, {
     ...init,
     headers: { "Content-Type": "application/json", ...init?.headers },
@@ -19,7 +26,72 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     const body = await res.text().catch(() => res.statusText);
     throw new Error(`API ${res.status}: ${body}`);
   }
-  return res.json() as Promise<T>;
+  const header = res.headers.get("X-Total-Count");
+  const total = header === null ? null : Number(header);
+  return {
+    data: (await res.json()) as T,
+    total: total !== null && Number.isFinite(total) ? total : null,
+  };
+}
+
+/**
+ * Reads already on the wire, by URL.
+ *
+ * Several parts of the portal poll the same routes on their own timers — the
+ * approvals provider and the audit page both want the caseload, the provider
+ * and an open case detail both want the same case — and until now each of them
+ * spent a request on it. Callers that ask for the same URL while an answer is
+ * still coming now wait on the one already in flight.
+ *
+ * Only reads, and only until the answer lands: this coalesces concurrent
+ * duplicates, it does not cache. A poll that fires after the previous one
+ * finished still goes to the network, which is what a poll is for.
+ *
+ * Everyone sharing a call shares the parsed body, so it must be treated as
+ * read-only. Every caller here derives new objects from it rather than
+ * editing it in place.
+ */
+const inFlight = new Map<string, Promise<Answer<unknown>>>();
+
+function read<T>(path: string): Promise<Answer<T>> {
+  const existing = inFlight.get(path);
+  if (existing) return existing as Promise<Answer<T>>;
+
+  const pending = send<T>(path).finally(() => {
+    inFlight.delete(path);
+  }) as Promise<Answer<unknown>>;
+
+  inFlight.set(path, pending);
+  return pending as Promise<Answer<T>>;
+}
+
+async function request<T>(path: string, init?: RequestInit): Promise<T> {
+  // Writes are never shared: two identical POSTs are two things happening.
+  const answer = init?.method && init.method !== "GET" ? await send<T>(path, init) : await read<T>(path);
+  return answer.data;
+}
+
+/** One page of a list, and how many there are behind it. */
+export interface Page<T> {
+  items: T[];
+  total: number;
+}
+
+async function readPage<T>(path: string): Promise<Page<T>> {
+  const { data, total } = await read<T[]>(path);
+  // A route that answered without the header is not paging; what arrived is all
+  // there is, and reporting its length keeps every caller's "is there more?"
+  // arithmetic honest rather than leaving it to compare against null.
+  return { items: data, total: total ?? data.length };
+}
+
+function query(params: Record<string, string | number | undefined>): string {
+  const search = new URLSearchParams();
+  for (const [key, value] of Object.entries(params)) {
+    if (value !== undefined && value !== "") search.set(key, String(value));
+  }
+  const rendered = search.toString();
+  return rendered ? `?${rendered}` : "";
 }
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -118,12 +190,50 @@ export interface CaseListItem {
   volunteer_name?: string;
   created_at?: string;
   test_case?: boolean;
+  /**
+   * How many commitments have been extracted, where the control plane can say
+   * so without opening the case. Absent behind Firestore, where commitments are
+   * a subcollection — so `undefined` means unknown, not none.
+   */
+  commitment_count?: number;
   [key: string]: unknown;
 }
 
-/** Unscoped: there is no volunteer or supervisor filter, so this is every case. */
-export async function listCases(): Promise<CaseListItem[]> {
-  return request("/v1/cases");
+/**
+ * How many cases to ask for at a time.
+ *
+ * The caseload pages, but the portal sorts and searches it whole — by urgency,
+ * by a term typed into the header — and neither of those is something the
+ * control plane can order for us. So a list view reads every page rather than
+ * only the first; what paging buys is that the rows start arriving after one
+ * short request instead of one long one, and that a store nobody has pruned
+ * cannot hand the browser everything at once.
+ */
+export const CASE_PAGE = 20;
+
+export interface CaseQuery {
+  /** Narrow to one case status, e.g. `draft`. Applied before paging. */
+  status?: string;
+  offset?: number;
+  limit?: number;
+}
+
+/**
+ * A page of cases, newest first.
+ *
+ * Still unscoped: there is no viewer filter, so whoever asks gets whichever
+ * cases they asked for. An advocate's own caseload is narrowed in the browser,
+ * because "mine" there also means every case that names nobody, and that is not
+ * a question this endpoint can be asked.
+ */
+export async function listCases(params: CaseQuery = {}): Promise<Page<CaseListItem>> {
+  return readPage<CaseListItem>(
+    `/v1/cases${query({
+      status: params.status,
+      offset: params.offset ?? 0,
+      limit: params.limit ?? CASE_PAGE,
+    })}`,
+  );
 }
 
 // ─── Registry ────────────────────────────────────────────────────────────────
@@ -184,9 +294,87 @@ export interface AuditEvent {
   workflow_ids?: string[];
 }
 
-/** Audit is per case; there is no endpoint that spans them. */
-export async function listCaseAudit(caseId: string): Promise<AuditEvent[]> {
-  return request(`/v1/cases/${caseId}/audit`);
+/** How many audit rows to read at a time, on either the per-case or the fleet route. */
+export const AUDIT_PAGE = 20;
+
+/** One case's own record, in the order it was written. */
+export async function listCaseAudit(
+  caseId: string,
+  params: { offset?: number; limit?: number } = {},
+): Promise<Page<AuditEvent>> {
+  return readPage<AuditEvent>(
+    `/v1/cases/${caseId}/audit${query({
+      offset: params.offset ?? 0,
+      limit: params.limit ?? AUDIT_PAGE,
+    })}`,
+  );
+}
+
+/**
+ * A case's whole record, followed to the end a page at a time.
+ *
+ * For the readers that cannot be given part of it: a court report that quietly
+ * stopped at the first hundred entries would be a misleading document rather
+ * than a shorter one.
+ */
+export async function listAllCaseAudit(caseId: string): Promise<AuditEvent[]> {
+  const collected: AuditEvent[] = [];
+  for (;;) {
+    const page = await listCaseAudit(caseId, { offset: collected.length, limit: AUDIT_PAGE });
+    collected.push(...page.items);
+    if (page.items.length === 0 || collected.length >= page.total) return collected;
+  }
+}
+
+/** An audit event as the fleet-wide route serves it: with the case it belongs to. */
+export interface FleetAuditEvent extends AuditEvent {
+  case_id: string;
+  child_name: string;
+}
+
+/**
+ * Counted over the whole trail, not over the page.
+ *
+ * This is why the fleet route answers with an envelope rather than an array: a
+ * page of fifty events cannot say how many refusals there were across eleven
+ * thousand, and a reader who had to fetch every page to find out would be no
+ * better off than before it paged.
+ */
+export interface AuditSummary {
+  cases: number;
+  events: number;
+  traces: number;
+  refusals: number;
+  withheld: number;
+  /** Every kind recorded, with its count, most frequent first. */
+  types: [string, number][];
+}
+
+export interface AuditPage {
+  events: FleetAuditEvent[];
+  /** How many match the current filter. The page is a window onto these. */
+  total: number;
+  summary: AuditSummary;
+}
+
+/**
+ * Everything recorded, across every case, newest first.
+ *
+ * The fan-out over cases happens on the control plane now. The portal used to
+ * do it here — list the cases, then ask each one for its audit, every poll —
+ * which cost one request per case and could not show the newest hundred events
+ * without first reading all of them.
+ */
+export async function listAudit(
+  params: { eventType?: string; offset?: number; limit?: number } = {},
+): Promise<AuditPage> {
+  return request<AuditPage>(
+    `/v1/audit${query({
+      event_type: params.eventType,
+      offset: params.offset ?? 0,
+      limit: params.limit ?? AUDIT_PAGE,
+    })}`,
+  );
 }
 
 export interface LiveCaseDetail {
@@ -235,6 +423,11 @@ export interface PendingApproval {
   action_type: string;
   reason?: string;
   decision: string;
+  /**
+   * Denormalised onto the approval by the control plane, so that captioning a
+   * queue of gates does not mean opening every case named in it.
+   */
+  child_name?: string;
   [key: string]: unknown;
 }
 

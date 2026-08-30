@@ -745,13 +745,6 @@ html [data-copilotkit] .copilotKitAssistantMessage :where(hr) {
     flex: 0 0 90pt;
   }
 
-  /* The accountability record is not part of the filing, so it starts its own
-     page and says what it is before it starts listing grants. */
-  .print-doc .print-appendix {
-    break-before: page;
-    margin-top: 0;
-  }
-
   .print-doc footer {
     margin-top: 18pt;
     padding-top: 6pt;

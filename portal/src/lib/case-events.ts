@@ -54,6 +54,23 @@ export const STATUS_TONE: Record<string, Tone> = {
   scheduled: "accent",
 };
 
+/**
+ * A commitment nobody is waiting on any longer — kept, refused, or given up on.
+ *
+ * Closed is not the same as kept: a blocked commitment is as finished as a
+ * completed one as far as the case's own progress goes, and counting it as
+ * outstanding would leave every such case reading as permanently unfinished.
+ */
+const TERMINAL_STATUSES = new Set(["completed", "blocked", "unresolved"]);
+
+export function isClosed(status: string): boolean {
+  return TERMINAL_STATUSES.has(status);
+}
+
+export function closedCount(commitments: Record<string, string>): number {
+  return Object.values(commitments).filter(isClosed).length;
+}
+
 // ─── Time ─────────────────────────────────────────────────────────────────────
 
 /**

@@ -73,15 +73,19 @@ function fields(value: unknown): Record<string, unknown> {
   return typeof value === "object" && value !== null ? (value as Record<string, unknown>) : {};
 }
 
-/** The facts a supervisor needs about a case, read off the case detail once. */
-function describe(detail: LiveCaseDetail | null): Partial<Gate> {
-  if (!detail) return {};
+/**
+ * The facts that only the case aggregate carries.
+ *
+ * Everything else a gate card shows is on the caseload listing already. These
+ * two are not, and they are the reason a case is opened at all — so they are
+ * read when a supervisor asks for them, not on a timer.
+ */
+function describe(detail: LiveCaseDetail): Partial<Gate> {
   const record = detail.case;
   const packet = fields(record.referral_packet);
   const referrals = Array.isArray(packet.referrals) ? packet.referrals : [];
 
   return {
-    advocateName: text(record.volunteer_name) || text(packet.volunteer_name) || undefined,
     commitmentCount: Object.keys(detail.commitments).length,
     grantCount: detail.grants.length,
     organisations: referrals
@@ -90,65 +94,58 @@ function describe(detail: LiveCaseDetail | null): Partial<Gate> {
         return text(referral.target_org_short) || text(referral.target_org);
       })
       .filter((name) => name.length > 0),
-    openedAt: text(record.created_at) || undefined,
   };
 }
 
+/**
+ * Drafts the control plane could not classify, and what opening them found.
+ *
+ * A draft is a gate once something has been extracted from it, and the caseload
+ * listing normally says so outright in `commitment_count`. Where it does not —
+ * a case stored before that field existed — the only way to know is to open the
+ * case, so this remembers the answer rather than asking again every fifteen
+ * seconds. Reading the case also repairs the stored count, so a case lands here
+ * at most once and the listing answers for it from then on.
+ */
+const classified = new Map<string, number>();
+
+async function commitmentsOn(caseId: string, record: CaseListItem): Promise<number | null> {
+  if (typeof record.commitment_count === "number") return record.commitment_count;
+
+  const known = classified.get(caseId);
+  if (known !== undefined) return known;
+
+  const detail = await getCase(caseId).catch(() => null);
+  // A read that failed is not an answer. Say so, rather than recording a zero
+  // that would drop a real gate off the queue until the tab is reloaded.
+  if (!detail) return null;
+
+  const counted = Object.keys(detail.commitments).length;
+  classified.set(caseId, counted);
+  return counted;
+}
+
 async function collectGates(): Promise<Gate[]> {
-  const [approvals, cases] = await Promise.all([listPendingApprovals(), listCases()]);
+  // Only drafts, rather than the whole system filtered down here. Escalations
+  // arrive already narrowed — `/v1/approvals` returns the pending ones — so
+  // between them these two calls describe everything that could be waiting.
+  const [approvals, drafts] = await Promise.all([
+    listPendingApprovals(),
+    listCases({ status: "draft" }),
+  ]);
 
-  const listed = new Map<string, CaseListItem>();
-  for (const record of cases) {
-    const caseId = text(record.case_id);
-    if (caseId) listed.set(caseId, record);
-  }
-
-  const drafts = cases.filter((record) => text(record.status) === "draft");
-
-  // A gate is worth several facts the list does not carry — how many commitments
-  // were extracted, which organisations approval would contact — so each gated
-  // case is read in full. Once, even where it holds both kinds of gate, and only
-  // while it is waiting: there are never many at a time.
-  const gatedIds = new Set<string>();
-  for (const record of drafts) {
-    const caseId = text(record.case_id);
-    if (caseId) gatedIds.add(caseId);
-  }
-  for (const approval of approvals) gatedIds.add(String(approval.case_id));
-
-  const details = new Map<string, LiveCaseDetail | null>(
-    await Promise.all(
-      [...gatedIds].map(
-        async (caseId): Promise<[string, LiveCaseDetail | null]> => [
-          caseId,
-          await getCase(caseId).catch(() => null),
-        ],
-      ),
-    ),
-  );
-
-  function childName(caseId: string, detail: LiveCaseDetail | null): string {
-    return (
-      text(detail?.case.child_name) || text(listed.get(caseId)?.child_name) || caseId
-    );
-  }
-
-  /** The list carries the advocate too, so a case that would not open still names one. */
-  function advocate(caseId: string): string | undefined {
-    return text(listed.get(caseId)?.volunteer_name) || undefined;
-  }
+  // Belt and braces: a control plane that does not know the `status` filter
+  // answers with every case rather than refusing, and every active case would
+  // then be read as a draft awaiting activation.
+  const draftRows = drafts.items.filter((record) => text(record.status) === "draft");
 
   const escalations: Gate[] = approvals.map((approval) => {
     const caseId = String(approval.case_id);
-    const detail = details.get(caseId) ?? null;
-    const facts = describe(detail);
     return {
-      ...facts,
       key: `escalation:${approval.approval_id}`,
       kind: "escalation" as GateKind,
       caseId,
-      childName: childName(caseId, detail),
-      advocateName: facts.advocateName ?? advocate(caseId),
+      childName: text(approval.child_name) || caseId,
       approvalId: String(approval.approval_id),
       reason: typeof approval.reason === "string" ? approval.reason : undefined,
       actionType: typeof approval.action_type === "string" ? approval.action_type : undefined,
@@ -157,23 +154,37 @@ async function collectGates(): Promise<Gate[]> {
 
   // A draft with nothing extracted yet has nothing to approve, so it is not a
   // gate — which is why the status alone was never enough to build this from.
-  const activations = drafts
-    .map((record): Gate | null => {
-      const caseId = text(record.case_id);
-      if (!caseId) return null;
-      const detail = details.get(caseId) ?? null;
-      if (!detail || Object.keys(detail.commitments).length === 0) return null;
-      const facts = describe(detail);
-      return {
-        ...facts,
-        key: `activation:${caseId}`,
-        kind: "activation" as GateKind,
-        caseId,
-        childName: childName(caseId, detail),
-        advocateName: facts.advocateName ?? advocate(caseId),
-      };
-    })
-    .filter((gate): gate is Gate => gate !== null);
+  const activations = (
+    await Promise.all(
+      draftRows.map(async (record): Promise<Gate | null> => {
+        const caseId = text(record.case_id);
+        if (!caseId) return null;
+
+        const commitments = await commitmentsOn(caseId, record);
+        if (commitments === null || commitments === 0) return null;
+
+        return {
+          key: `activation:${caseId}`,
+          kind: "activation" as GateKind,
+          caseId,
+          childName: text(record.child_name) || caseId,
+          advocateName: text(record.volunteer_name) || undefined,
+          commitmentCount: commitments,
+          openedAt: text(record.created_at) || undefined,
+        };
+      }),
+    )
+  ).filter((gate): gate is Gate => gate !== null);
+
+  // Cases that are no longer drafts have been decided, so what was learned by
+  // opening them is spent. Kept against the drafts this poll saw rather than
+  // against the gates it returned, because a draft found to have nothing
+  // extracted is exactly the one worth remembering: it is the one that would
+  // otherwise be opened again every fifteen seconds to learn the same thing.
+  const stillDraft = new Set(draftRows.map((record) => text(record.case_id)));
+  for (const caseId of classified.keys()) {
+    if (!stillDraft.has(caseId)) classified.delete(caseId);
+  }
 
   // Activation first: it is the gate that grants access to the child's data at
   // all, so it outranks anything held up behind one.
@@ -214,17 +225,34 @@ interface LiveApprovalsValue {
   decideError: { key: string; message: string } | null;
   decide: (gate: Gate, decision: "approve" | "reject", decidedBy: string) => Promise<void>;
   refresh: () => void;
+  /**
+   * Open the case behind a gate, for the facts the caseload listing cannot
+   * carry: how many grants are proposed, and which organisations approving
+   * would begin contacting. Nothing reads a case until this is called, and
+   * calling it twice for the same case reads it once.
+   */
+  open: (caseId: string) => void;
+  /** Cases being read right now, so the card that asked can say it is working. */
+  opening: ReadonlySet<string>;
 }
 
 const LiveApprovalsContext = createContext<LiveApprovalsValue | null>(null);
 
 const POLL_INTERVAL = 15_000;
 
+const NONE: ReadonlySet<string> = new Set();
+
 export function LiveApprovalsProvider({ children }: { children: ReactNode }) {
   const [gates, setGates] = useState<Gate[]>([]);
   const [decidingKey, setDecidingKey] = useState<string | null>(null);
   const [decideError, setDecideError] = useState<{ key: string; message: string } | null>(null);
   const reloadRef = useRef<() => void>(() => {});
+
+  // What opening a case turned up, by case id, kept so that a card a supervisor
+  // has already expanded does not collapse back to a summary on the next poll.
+  const [opened, setOpened] = useState<Record<string, Partial<Gate>>>({});
+  const [opening, setOpening] = useState<ReadonlySet<string>>(NONE);
+  const askedRef = useRef<Set<string>>(new Set());
 
   useEffect(() => {
     let cancelled = false;
@@ -309,9 +337,42 @@ export function LiveApprovalsProvider({ children }: { children: ReactNode }) {
 
   const refresh = useCallback(() => reloadRef.current(), []);
 
+  const open = useCallback((caseId: string) => {
+    // Asked for once per case. A second click while the first read is still out
+    // would be coalesced by the API client anyway, but a case already read is
+    // not worth going back for at all.
+    if (!caseId || askedRef.current.has(caseId)) return;
+    askedRef.current.add(caseId);
+
+    setOpening((prev) => new Set(prev).add(caseId));
+
+    void getCase(caseId)
+      .then((detail) => {
+        setOpened((prev) => ({ ...prev, [caseId]: describe(detail) }));
+      })
+      .catch(() => {
+        // Let it be asked for again. A card that failed to expand should
+        // respond to a second click rather than sitting there inert.
+        askedRef.current.delete(caseId);
+      })
+      .finally(() => {
+        setOpening((prev) => {
+          const next = new Set(prev);
+          next.delete(caseId);
+          return next.size === 0 ? NONE : next;
+        });
+      });
+  }, []);
+
+  // What the poll knows, with anything a supervisor has opened laid over it.
+  const seen = useMemo(
+    () => gates.map((gate) => (opened[gate.caseId] ? { ...gate, ...opened[gate.caseId] } : gate)),
+    [gates, opened],
+  );
+
   const value = useMemo<LiveApprovalsValue>(
-    () => ({ gates, decidingKey, decideError, decide, refresh }),
-    [gates, decidingKey, decideError, decide, refresh],
+    () => ({ gates: seen, decidingKey, decideError, decide, refresh, open, opening }),
+    [seen, decidingKey, decideError, decide, refresh, open, opening],
   );
 
   return <LiveApprovalsContext.Provider value={value}>{children}</LiveApprovalsContext.Provider>;

@@ -85,6 +85,25 @@ def list_cases() -> list[dict[str, Any]]:
     return [d.to_dict() or {} for d in _db().collection(CASES).stream()]
 
 
+def list_pending_approvals(case_id: str) -> list[dict[str, Any]]:
+    """Only the approvals still waiting on a person, for one case.
+
+    One subcollection, filtered in the query. `load_case` would answer the same
+    question by fetching the case document and all four of its subcollections —
+    commitments, grants, audit and approvals — which is five reads to look at
+    one of them, and a sweep across a caseload pays that per case.
+    """
+    if not enabled():
+        return []
+    docs = (
+        _case_ref(case_id)
+        .collection("human_approvals")
+        .where("decision", "==", "pending")
+        .stream()
+    )
+    return [d.to_dict() or {} for d in docs]
+
+
 def delete_case(case_id: str) -> None:
     """Purge the case and its subcollections so a reseed starts from draft.
 

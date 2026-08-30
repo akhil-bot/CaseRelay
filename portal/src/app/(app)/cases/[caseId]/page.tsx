@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { Icon } from "@/components/icons";
+import { CommitmentOrbit } from "@/components/live/CommitmentOrbit";
 import { LiveActivityFeed } from "@/components/live/LiveActivityFeed";
 import { NeedsAttention } from "@/components/live/NeedsAttention";
 import { SupervisorGate } from "@/components/live/SupervisorGate";
@@ -27,7 +28,7 @@ import {
 import { fieldLabel, purposeLabel } from "@/design/copy";
 import { PERSONAS } from "@/design/personas";
 import { control, layout, row, surface, tone, type as type_ } from "@/design/tokens";
-import { auditView, formatEventTime } from "@/lib/case-events";
+import { auditView, closedCount, formatEventTime } from "@/lib/case-events";
 import { useDemo } from "@/lib/demo-store";
 import { submitRun, type CaseRunSummary, type RunEvent } from "@/lib/api";
 import { useLiveApprovals, type Gate } from "@/lib/live-approvals";
@@ -35,7 +36,7 @@ import { useLiveCase, useLiveRunEvents } from "@/lib/live-case";
 import { AUTHORITY_GRANT, CASES, PRIMARY_CASE_ID } from "@/lib/mock/cases";
 import { EDUCATION_PROJECTION } from "@/lib/mock/policy";
 import { useViewer } from "@/lib/viewer";
-import type { Commitment, CommitmentStatus, Domain } from "@/lib/types";
+import type { Commitment, Domain } from "@/lib/types";
 
 // ---------------------------------------------------------------------------
 // Route decision: mock walkthrough vs live control-plane data
@@ -225,13 +226,9 @@ function LiveCaseDetail({ caseId }: { caseId: string }) {
       : `Case record for ${childName}.`);
   const commitmentStates = data.commitments;
   const commitmentEntries = Object.entries(commitmentStates);
-  const TERMINAL_STATUSES = new Set(["completed", "blocked", "unresolved"]);
-  const closedCount = commitmentEntries.filter(([, v]) => TERMINAL_STATUSES.has(v)).length;
+  const closed = closedCount(commitmentStates);
   const hasActiveRun = runs.some((r) => r.state === "running" || r.state === "queued");
   const isStreaming = runState.streaming || hasActiveRun;
-
-  const allCommitmentsClosed =
-    commitmentEntries.length > 0 && closedCount === commitmentEntries.length;
 
   // Activation is worked out here rather than read off the shared poll: this
   // page already knows the case is in draft with its commitments extracted, and
@@ -248,17 +245,21 @@ function LiveCaseDetail({ caseId }: { caseId: string }) {
     ...gates.filter((gate) => gate.caseId === caseId && gate.kind === "escalation"),
   ];
 
-  // The feed is the tall thing on the page. What is still owed, and the evidence
-  // behind it, are both short — so they stack in a column beside the feed rather
-  // than each claiming a full-width band and pushing the case apart.
+  // What happened and what is still owed are the two halves of the same
+  // question, so they stand side by side: the account of the case on the left,
+  // what it is answerable for on the right. Both are tall, and neither is a
+  // footnote to the other.
   //
-  // Any of the three can be absent: a case with no runs yet, a case whose
-  // commitments have not been extracted, a case that has recorded nothing. The
-  // column disappears with its contents and the feed takes the full width.
+  // The audit trail goes underneath, across the width. It is the record behind
+  // both columns rather than a companion to either, and it is the one region
+  // here that is read a row at a time.
+  //
+  // Any of the three can be absent — a case with no runs yet, one whose
+  // commitments have not been extracted, one that has recorded nothing — and
+  // each disappears with its contents.
   const showFeed = isStreaming || runs.length > 0 || mergedEvents.length > 0;
   const showCommitments = commitmentEntries.length > 0;
   const showAudit = data.timeline.length > 0;
-  const showAside = showCommitments || showAudit;
 
   return (
     <div className={layout.stack}>
@@ -295,7 +296,7 @@ function LiveCaseDetail({ caseId }: { caseId: string }) {
             {caseStatusLabel(status, canDecide)}
           </Field>
           <Field label="Commitments">
-            {closedCount} of {commitmentEntries.length} closed
+            {closed} of {commitmentEntries.length} closed
           </Field>
         </dl>
 
@@ -352,96 +353,48 @@ function LiveCaseDetail({ caseId }: { caseId: string }) {
       ))}
 
       {/* ── What happened, beside what is still owed ──────────────────── */}
-      {(showFeed || showAside) && (
+      {(showFeed || showCommitments) && (
         <div
           className={cx(
             "grid items-start gap-4",
             showFeed &&
-              showAside &&
-              "xl:grid-cols-[minmax(0,1fr)_minmax(0,360px)] 3xl:grid-cols-[minmax(0,1fr)_minmax(0,420px)]",
+              showCommitments &&
+              "xl:grid-cols-[minmax(0,1fr)_minmax(0,520px)] 3xl:grid-cols-[minmax(0,1fr)_minmax(0,620px)]",
           )}
         >
           {showFeed && <LiveActivityFeed run={feedRun} />}
 
-          {/* Both cards are the same shape — icon, title, a count or a measure on
-              the right, then rows to the edges — so the column reads as one
-              piece beside the feed rather than two unrelated widgets. Neither
-              hides behind a toggle: what is owed and what was recorded are the
-              two things the case is answerable for. */}
-          {showAside && (
-            <div className="grid gap-4">
-              {showCommitments && (
-                <Card
-                  icon="cases"
-                  title="Commitments"
-                  subtitle={
-                    allCommitmentsClosed
-                      ? "All done."
-                      : `${closedCount} of ${commitmentEntries.length} closed`
-                  }
-                  action={
-                    // The subtitle already counts them, so the bar drops its
-                    // percentage and spends the whole width on the measure
-                    // rather than on a number stated twice.
-                    <div className="w-20">
-                      <ProgressBar
-                        value={closedCount}
-                        total={commitmentEntries.length}
-                        variant="seal"
-                        hideValue
-                      />
-                    </div>
-                  }
-                  flush
-                >
-                  <div className="max-h-[420px] overflow-y-auto">
-                    <Rows as="ol">
-                      {commitmentEntries.map(([type, commitmentStatus]) => (
-                        <li key={type} className={cx("border-l-2", row.pad,
-                          commitmentStatus === "completed" ? "border-l-seal"
-                            : commitmentStatus === "blocked" ? "border-l-danger"
-                            : "border-l-transparent",
-                        )}>
-                          <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
-                            <DomainIcon domain={type as Domain} size={32} />
-                            <span className="min-w-0 flex-1 text-[13.5px] font-medium text-ink">
-                              {DOMAIN_META[type as Domain]?.label ?? type.replace(/_/g, " ")}
-                            </span>
-                            <StatusBadge status={commitmentStatus as CommitmentStatus} />
-                          </div>
-                        </li>
-                      ))}
-                    </Rows>
-                  </div>
-                </Card>
-              )}
-
-              {showAudit && (
-                <Card
-                  icon="audit"
-                  title="Audit trail"
-                  // Short enough to hold one line at this column width, so this
-                  // header stands the same height as the one above it.
-                  subtitle="What was shared and refused."
-                  action={
-                    <span className={type_.meta}>
-                      {data.timeline.length} {data.timeline.length === 1 ? "entry" : "entries"}
-                    </span>
-                  }
-                  flush
-                >
-                  <div className="max-h-[420px] overflow-y-auto">
-                    <Rows>
-                      {data.timeline.map((entry, i) => (
-                        <AuditRow key={i} entry={entry} />
-                      ))}
-                    </Rows>
-                  </div>
-                </Card>
-              )}
-            </div>
+          {showCommitments && (
+            <CommitmentOrbit
+              commitments={commitmentStates}
+              events={mergedEvents}
+              streaming={isStreaming}
+            />
           )}
         </div>
+      )}
+
+      {/* ── The record behind both ────────────────────────────────────── */}
+      {showAudit && (
+        <Card
+          icon="audit"
+          title="Audit trail"
+          subtitle="What was shared and refused."
+          action={
+            <span className={type_.meta}>
+              {data.timeline.length} {data.timeline.length === 1 ? "entry" : "entries"}
+            </span>
+          }
+          flush
+        >
+          <div className="max-h-[420px] overflow-y-auto">
+            <Rows>
+              {data.timeline.map((entry, i) => (
+                <AuditRow key={i} entry={entry} />
+              ))}
+            </Rows>
+          </div>
+        </Card>
       )}
 
       {/* ── Contextual blockers — secondary to the feed ───────────────── */}
@@ -478,7 +431,9 @@ function AuditRow({ entry }: { entry: Record<string, unknown> }) {
           <span className="text-[12.5px] font-medium text-ink">{view.label}</span>
           {domain && <Badge variant="neutral">{DOMAIN_META[domain].label}</Badge>}
         </div>
-        {detail && <p className={cx("mt-0.5", type_.meta)}>{detail}</p>}
+        {/* The trail runs the width of the page, which is more than a line of
+            prose should ever be given. */}
+        {detail && <p className={cx("mt-0.5", layout.measure, type_.meta)}>{detail}</p>}
       </div>
       {at && (
         <span className="shrink-0 font-mono text-[10.5px] tabular-nums text-ink-muted">{at}</span>

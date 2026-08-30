@@ -50,6 +50,8 @@ export function SupervisorGate({
   organisations,
   openedAt,
   actionType,
+  onOpen,
+  opening = false,
   readOnly = false,
   onApprove,
   onReject,
@@ -75,6 +77,15 @@ export function SupervisorGate({
   /** ISO-8601. */
   openedAt?: string;
   actionType?: string;
+  /**
+   * Read the case behind this gate.
+   *
+   * Grants and organisations are only on the case aggregate, and a queue that
+   * fetched them for every gate would open every waiting case on a timer just
+   * in case somebody looked. So the card asks for them when somebody does.
+   */
+  onOpen?: () => void;
+  opening?: boolean;
   /**
    * For anyone but the supervisor. The gate still shows — an advocate opening a
    * stopped case needs to know it is stopped and why — but it names who it is
@@ -186,6 +197,25 @@ export function SupervisorGate({
             </div>
           ))}
         </dl>
+      )}
+
+      {/* Offered rather than fetched. Everything above is on the caseload
+          listing already; what is behind this button is not, and reading it for
+          every card on a timer is how a queue of gates turns into a burst of
+          requests nobody asked for. */}
+      {caseId && onOpen && organisations === undefined && (
+        <div className="border-t border-warn/25 px-5 py-3.5">
+          <button
+            type="button"
+            onClick={onOpen}
+            disabled={opening}
+            className={control.secondary}
+            aria-label={`Show what approving covers for ${childName}`}
+          >
+            <Icon name={opening ? "clock" : "chevronDown"} size={15} />
+            {opening ? "Reading the case…" : "What approving covers"}
+          </button>
+        </div>
       )}
 
       {/* The consequence, named. "Outreach to all services" is a phrase; these

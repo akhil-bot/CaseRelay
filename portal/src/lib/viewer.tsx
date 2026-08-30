@@ -18,15 +18,17 @@ import { applyRole, DEFAULT_ROLE, readRole, storeRole } from "@/lib/role";
  * The switcher is in the header and most of what it changes is in the sidebar,
  * so the role is read through a store rather than passed down: every reader sees
  * the same value the moment it changes, in both copies of the sidebar.
+ *
+ * Every reader in *this* tab. There is no `storage` listener here on purpose —
+ * see src/lib/role.ts: switching the view is a thing done to a tab, and a
+ * second tab open on the other role is the reason someone switched at all.
  */
 const roleListeners = new Set<() => void>();
 
 function subscribeToRole(listener: () => void) {
   roleListeners.add(listener);
-  window.addEventListener("storage", listener);
   return () => {
     roleListeners.delete(listener);
-    window.removeEventListener("storage", listener);
   };
 }
 

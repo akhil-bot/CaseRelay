@@ -436,6 +436,23 @@ const STATUS_META: Record<CommitmentStatus, { label: string; variant: Tone; icon
   completed: { label: "Completed", variant: "seal", icon: "checkCircle" },
 };
 
+/**
+ * Does the product have wording for this state? The control plane's status is a
+ * string, and a state nobody has written a label for must not be passed to
+ * `StatusBadge`, which would render an empty badge over an undefined tone.
+ */
+export function isCommitmentStatus(status: string): status is CommitmentStatus {
+  return status in STATUS_META;
+}
+
+/**
+ * The badge's own wording, for the places that need it as text rather than as a
+ * badge — the name of a control, or a sentence a screen reader is given.
+ */
+export function statusLabel(status: string): string {
+  return isCommitmentStatus(status) ? STATUS_META[status].label : status.replace(/_/g, " ");
+}
+
 export function StatusBadge({ status }: { status: CommitmentStatus }) {
   const meta = STATUS_META[status];
   return (

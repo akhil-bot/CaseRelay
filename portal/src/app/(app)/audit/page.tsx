@@ -14,66 +14,66 @@ import {
   cx,
 } from "@/components/ui/primitives";
 import { control, layout, row, tone, type as type_, type Tone } from "@/design/tokens";
-import { listCaseAudit, listCases, type AuditEvent } from "@/lib/api";
+import { AUDIT_PAGE, listAudit, type FleetAuditEvent } from "@/lib/api";
 import { auditView } from "@/lib/case-events";
 import { usePolled } from "@/lib/use-polled";
 
-/** An audit event with the case it was recorded against carried alongside it. */
-interface CaseAuditEvent extends AuditEvent {
-  caseId: string;
-  childName: string;
-}
-
 const POLL_INTERVAL = 15_000;
 
-/**
- * Audit is recorded per case and there is no endpoint that spans them, so a
- * fleet-wide trail has to be assembled here: every case, then its events,
- * merged newest first. A case whose audit cannot be read is skipped rather
- * than failing the whole page — one unreadable case should not hide the rest.
- */
-async function loadAudit(): Promise<CaseAuditEvent[]> {
-  const cases = await listCases();
-  const perCase = await Promise.all(
-    cases.map(async (record): Promise<CaseAuditEvent[]> => {
-      const caseId = String(record.case_id ?? "");
-      if (!caseId) return [];
-      const events = await listCaseAudit(caseId).catch(() => [] as AuditEvent[]);
-      const childName = String(record.child_name || caseId);
-      return events.map((event) => ({ ...event, caseId, childName }));
-    }),
-  );
-  return perCase
-    .flat()
-    .sort((a, b) => String(b.timestamp).localeCompare(String(a.timestamp)));
-}
+const EMPTY: FleetAuditEvent[] = [];
 
 export default function ActivityLogPage() {
-  const load = useCallback(() => loadAudit(), []);
-  const [audit, refresh] = usePolled(load, POLL_INTERVAL);
   const [selectedType, setSelectedType] = useState("all");
+  const eventType = selectedType === "all" ? undefined : selectedType;
 
-  const events = useMemo(() => (audit.status === "loaded" ? audit.data : []), [audit]);
-
-  /**
-   * The filters are built from what is actually recorded, so the page never
-   * offers one that can only ever come back empty.
-   */
-  const types = useMemo(() => {
-    const counts = new Map<string, number>();
-    for (const event of events) {
-      counts.set(event.event_type, (counts.get(event.event_type) ?? 0) + 1);
-    }
-    return [...counts.entries()].sort((a, b) => b[1] - a[1]);
-  }, [events]);
-
-  const filtered = useMemo(
-    () =>
-      selectedType === "all"
-        ? events
-        : events.filter((event) => event.event_type === selectedType),
-    [events, selectedType],
+  // Only the newest page is polled. The trail is append-only and newest first,
+  // so everything below the first page is settled and re-reading it every
+  // fifteen seconds would be asking a question whose answer cannot have changed.
+  const load = useCallback(
+    () => listAudit({ eventType, offset: 0, limit: AUDIT_PAGE }),
+    [eventType],
   );
+  const [audit, refresh] = usePolled(load, POLL_INTERVAL);
+
+  // Pages fetched behind the first, each at its own offset, kept as they land.
+  const [earlier, setEarlier] = useState<FleetAuditEvent[]>(EMPTY);
+  const [reading, setReading] = useState(false);
+
+  const page = audit.status === "loaded" ? audit.data : null;
+  const newest = page?.events ?? EMPTY;
+  // Counted across the whole trail rather than the page, so the figures above
+  // the list describe the record and not the reader's scroll position.
+  const summary = page?.summary;
+  const total = page?.total ?? 0;
+
+  // An event written between two page reads shifts everything after it down by
+  // one, which can hand the same row back at the next offset. Keyed on the
+  // event id, so it is shown once wherever it turns up.
+  const events = useMemo(() => {
+    const seen = new Set(newest.map((event) => event.event_id));
+    return [...newest, ...earlier.filter((event) => !seen.has(event.event_id))];
+  }, [newest, earlier]);
+
+  // Narrowing is done on the control plane now, so a new filter is a new
+  // question, read from the top of the trail rather than inheriting how far the
+  // last one had been followed.
+  const choose = useCallback((next: string) => {
+    setSelectedType(next);
+    setEarlier(EMPTY);
+  }, []);
+
+  const showMore = useCallback(async () => {
+    setReading(true);
+    try {
+      const next = await listAudit({ eventType, offset: events.length, limit: AUDIT_PAGE });
+      setEarlier((prev) => [...prev, ...next.events]);
+    } catch {
+      // Nothing to say that the list does not already say. What is on screen
+      // stays, and the button can be pressed again.
+    } finally {
+      setReading(false);
+    }
+  }, [eventType, events.length]);
 
   if (audit.status === "loading") {
     return (
@@ -87,7 +87,7 @@ export default function ActivityLogPage() {
         <Loading
           icon="audit"
           title="Reading the audit log…"
-          hint="Audit is kept per case, so every case is being asked in turn."
+          hint="The newest entries first, across every case."
         />
       </Card>
     );
@@ -113,15 +113,13 @@ export default function ActivityLogPage() {
     );
   }
 
-  const caseCount = new Set(events.map((event) => event.caseId)).size;
-  const traceCount = new Set(events.map((event) => event.trace_id)).size;
-  const refusals = events.filter(
-    (event) => event.verdict === "deny" || event.verdict === "quarantine",
-  ).length;
-  const withheld = events.reduce(
-    (sum, event) => sum + (event.withheld_fields?.length ?? 0),
-    0,
-  );
+  const caseCount = summary?.cases ?? 0;
+  const eventCount = summary?.events ?? 0;
+  const traceCount = summary?.traces ?? 0;
+  const refusals = summary?.refusals ?? 0;
+  const withheld = summary?.withheld ?? 0;
+  const types = summary?.types ?? [];
+  const more = events.length < total;
 
   return (
     <div className={layout.stack}>
@@ -141,7 +139,7 @@ export default function ActivityLogPage() {
             <Mono>{caseCount}</Mono>
           </Field>
           <Field label="Events recorded">
-            <Mono>{events.length}</Mono>{" "}
+            <Mono>{eventCount}</Mono>{" "}
             <span className="text-ink-muted">
               · {traceCount} {traceCount === 1 ? "trace" : "traces"}
             </span>
@@ -159,14 +157,20 @@ export default function ActivityLogPage() {
         icon="activity"
         title="Recorded events"
         subtitle="Newest first. Open a row for what it shared, what it held back, and which trace it belongs to."
-        action={<span className={type_.meta}>{filtered.length} shown</span>}
+        action={
+          <span className={type_.meta}>
+            {events.length === total
+              ? `${total} shown`
+              : `${events.length} of ${total} shown`}
+          </span>
+        }
         flush
       >
         {types.length > 0 && (
           <div className="flex flex-wrap gap-1.5 border-b border-line px-5 py-3.5">
             <button
               type="button"
-              onClick={() => setSelectedType("all")}
+              onClick={() => choose("all")}
               className={selectedType === "all" ? control.chipActive : control.chip}
             >
               <Icon name="audit" size={14} />
@@ -178,7 +182,7 @@ export default function ActivityLogPage() {
                 <button
                   key={eventType}
                   type="button"
-                  onClick={() => setSelectedType(eventType)}
+                  onClick={() => choose(eventType)}
                   className={selectedType === eventType ? control.chipActive : control.chip}
                 >
                   <Icon name={view.icon} size={14} />
@@ -190,28 +194,46 @@ export default function ActivityLogPage() {
           </div>
         )}
 
-        {filtered.length === 0 ? (
+        {events.length === 0 ? (
           <div className="px-5 py-4">
             <EmptyState
               icon="clock"
               title={
-                events.length === 0
+                eventCount === 0
                   ? "Nothing has been recorded yet."
                   : "No events of that kind."
               }
               hint={
-                events.length === 0
+                eventCount === 0
                   ? "An event is written the first time an agent shares something, refuses something, or checks back on a case."
                   : undefined
               }
             />
           </div>
         ) : (
-          <Rows as="ol">
-            {filtered.map((event) => (
-              <AuditRow key={`${event.caseId}-${event.event_id}`} event={event} />
-            ))}
-          </Rows>
+          <>
+            <Rows as="ol">
+              {events.map((event) => (
+                <AuditRow key={`${event.case_id}-${event.event_id}`} event={event} />
+              ))}
+            </Rows>
+
+            {more && (
+              <div className="border-t border-line px-5 py-3.5">
+                <button
+                  type="button"
+                  onClick={() => void showMore()}
+                  disabled={reading}
+                  className={control.secondary}
+                >
+                  <Icon name={reading ? "clock" : "chevronDown"} size={15} />
+                  {reading
+                    ? "Reading…"
+                    : `Show ${Math.min(AUDIT_PAGE, total - events.length)} more`}
+                </button>
+              </div>
+            )}
+          </>
         )}
       </Card>
 
@@ -246,7 +268,7 @@ function formatStamp(timestamp: string): string {
   });
 }
 
-function AuditRow({ event }: { event: CaseAuditEvent }) {
+function AuditRow({ event }: { event: FleetAuditEvent }) {
   const [open, setOpen] = useState(false);
   const view = auditView(event.event_type);
 
@@ -271,8 +293,8 @@ function AuditRow({ event }: { event: CaseAuditEvent }) {
           {event.verdict && (
             <Badge variant={verdictTone(event.verdict)}>{event.verdict.replace(/_/g, " ")}</Badge>
           )}
-          <span className={type_.meta}>{event.childName}</span>
-          <Mono className="text-[11px]">{event.caseId}</Mono>
+          <span className={type_.meta}>{event.child_name || event.case_id}</span>
+          <Mono className="text-[11px]">{event.case_id}</Mono>
           <Mono className="ml-auto text-[11px]">{formatStamp(event.timestamp)}</Mono>
           <Icon
             name={open ? "chevronDown" : "chevronRight"}

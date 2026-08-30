@@ -6,7 +6,7 @@ import { Suspense, useEffect, useMemo, useRef, useState, type ReactNode } from "
 import { Icon, type IconName } from "@/components/icons";
 import { Avatar, Badge, Card, Dot, EmptyState, Loading, Rows, cx } from "@/components/ui/primitives";
 import { control, layout, row, surface, type Tone, type as type_ } from "@/design/tokens";
-import { listCases } from "@/lib/api";
+import { CASE_PAGE, listCases } from "@/lib/api";
 import { useViewer } from "@/lib/viewer";
 
 /**
@@ -42,7 +42,11 @@ const EMPTY: CaseRecord[] = [];
 
 const DAY = 86_400_000;
 
+/** How many rows "show more" adds. Nothing to do with how many are fetched at a time. */
 const PAGE = 40;
+
+/** How many pages of the caseload are in the air at once while it loads. */
+const BATCH = 6;
 
 function text(value: unknown): string {
   return typeof value === "string" ? value : "";
@@ -261,18 +265,62 @@ function CaseList({ handoff }: { handoff: string }) {
   const [sort, setSort] = useState<SortId>("urgency");
   const [visible, setVisible] = useState(PAGE);
 
+  /**
+   * The caseload arrives a page at a time, and every page that lands is drawn.
+   *
+   * It is read to the end rather than stopping at the first page, because the
+   * sorting and searching below happen here: the control plane cannot order a
+   * caseload by urgency, and a "show 40 more" that only ever paged through the
+   * hundred most recent cases would quietly answer the wrong question. What
+   * paging buys is that the first rows appear after one short request instead
+   * of one long one, and that a store nobody has pruned cannot hand the browser
+   * everything in a single response.
+   */
   useEffect(() => {
     let live = true;
-    listCases()
-      .then((raw) => {
+
+    void (async () => {
+      // Fixed before the first request rather than per page, so that every
+      // relative date on the list is measured from one instant and a later
+      // page cannot shift an earlier row's "3 days ago".
+      const now = Date.now();
+      const collected: CaseRecord[] = [];
+
+      try {
+        const first = await listCases({ limit: CASE_PAGE });
         if (!live) return;
-        const now = Date.now();
-        setLoad({ state: "loaded", cases: raw.map((item) => toRecord(item, now)), now });
-      })
-      .catch((err: unknown) => {
+
+        for (const item of first.items) collected.push(toRecord(item, now));
+        setLoad({ state: "loaded", cases: [...collected], now });
+        if (first.items.length === 0) return;
+
+        // The first page says how many there are, so the rest are asked for
+        // together rather than one behind another. In batches, because a long
+        // caseload should not open fifty sockets at once, and because each
+        // batch that lands is drawn rather than held back for the last one.
+        const offsets: number[] = [];
+        for (let at = first.items.length; at < first.total; at += CASE_PAGE) offsets.push(at);
+
+        for (let i = 0; i < offsets.length; i += BATCH) {
+          const batch = await Promise.all(
+            offsets.slice(i, i + BATCH).map((offset) => listCases({ offset, limit: CASE_PAGE })),
+          );
+          if (!live) return;
+
+          for (const page of batch) {
+            for (const item of page.items) collected.push(toRecord(item, now));
+          }
+          setLoad({ state: "loaded", cases: [...collected], now });
+        }
+      } catch (err: unknown) {
         if (!live) return;
+        // A page that fails after others have landed leaves what did arrive on
+        // screen. Only a first page that never came is nothing to show.
+        if (collected.length > 0) return;
         setLoad({ state: "error", message: err instanceof Error ? err.message : String(err) });
-      });
+      }
+    })();
+
     return () => {
       live = false;
     };

@@ -28,7 +28,7 @@ logging.basicConfig(
 for _ns in ("caserelay", "backend"):
     logging.getLogger(_ns).setLevel(_log_level)
 
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Query, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
 
@@ -85,6 +85,10 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+    # Paged routes carry the size of the whole set in a header. A browser cannot
+    # read a response header it has not been handed, so a direct caller would
+    # page blind without this.
+    expose_headers=["X-Total-Count"],
 )
 
 
@@ -215,38 +219,97 @@ def _resolve_deadline(due_in: str | None, scenario_name: str | None) -> datetime
 # Stage 1 read models
 # ---------------------------------------------------------------------------
 
+# A page nobody asked the size of. Small enough that a caller which forgot to
+# say gets a screenful rather than a store dump, and that no single response is
+# large enough to be worth waiting on.
+_DEFAULT_PAGE = 20
+_MAX_PAGE = 500
+
+
+def _page(rows: list[dict], response: Response, offset: int, limit: int) -> list[dict]:
+    """Slice a page out of `rows` and tell the caller how many there were in total.
+
+    The total goes in a header rather than in the body so that every paged route
+    keeps answering with the same JSON array it always did. A client that knows
+    nothing about paging reads the first page and is none the wiser; one that
+    does can size the scrollbar without a second round trip.
+    """
+    response.headers["X-Total-Count"] = str(len(rows))
+    return rows[offset : offset + limit]
+
+
+def _case_rows() -> list[dict]:
+    """Every case, newest first, in the shape the list endpoint promises.
+
+    The stored path returns the whole case document and the in-memory one a
+    projection, which is a difference callers already live with. What they can
+    now rely on either way is the *order*: paging over a set whose order is
+    whatever the store felt like would show the same case twice and skip
+    another. `created_at` descending, with the case id breaking ties, is stable
+    across calls because both fields are immutable once written.
+
+    `commitment_count` is best-effort and appears only where it is free. It
+    settles the one question a caller most often opens a case to ask — whether
+    a draft has anything extracted to approve yet — and answering it here saves
+    the approvals queue a read per draft on every poll. In memory the
+    commitments are already to hand. Behind Firestore they are a subcollection,
+    so knowing the count would mean loading each case's whole aggregate, which
+    is the very cost this is meant to avoid; there, the field is simply absent
+    and a caller that needs the number must still open the case.
+    """
+    from backend.state import store
+
+    if store.enabled():
+        rows = [dict(record) for record in store.list_cases()]
+    else:
+        rows = [
+            {
+                "case_id": cid,
+                "child_name": c.get("child_name", ""),
+                "status": c.get("status", ""),
+                "volunteer_id": c.get("volunteer_id", ""),
+                "volunteer_name": c.get("volunteer_name", ""),
+                "created_at": c.get("created_at", ""),
+                "test_case": c.get("test_case", False),
+                "commitment_count": len(workspace.commitments.get(cid, [])),
+            }
+            for cid, c in workspace.cases.items()
+        ]
+
+    # Two stable passes rather than one compound key: the tie-break sorts up
+    # while the date sorts down, which a single `reverse=True` cannot express.
+    rows.sort(key=lambda r: str(r.get("case_id") or ""))
+    rows.sort(key=lambda r: str(r.get("created_at") or ""), reverse=True)
+    return rows
+
 
 @app.get(
     "/v1/cases",
     responses={403: {"description": "Identity denied"}, 404: {"description": "Not found"}},
 )
-def list_cases() -> list[dict]:
-    """Every case, with enough of each to list a caseload without opening it.
+def list_cases(
+    response: Response,
+    status: str | None = None,
+    offset: int = Query(0, ge=0),
+    limit: int = Query(_DEFAULT_PAGE, ge=1, le=_MAX_PAGE),
+) -> list[dict]:
+    """A page of cases, with enough of each to list a caseload without opening it.
 
-    The stored path returns the whole case document; this projection names the
-    fields a caller can rely on either way. `volunteer_id`/`volunteer_name` are
-    among them because a supervisor's caseload is grouped by advocate, and
-    without them that grouping would need one read per case.
+    `volunteer_id`/`volunteer_name` are part of the projection because a
+    supervisor's caseload is grouped by advocate, and without them that grouping
+    would need one read per case.
 
-    Still unscoped: there is no volunteer or supervisor filter, so every caller
-    gets every case and any narrowing happens client-side.
+    `status` narrows the set before it is paged, which is the difference between
+    the approvals queue fetching the drafts it is about to examine and fetching
+    the whole system to throw most of it away. It is not a security boundary:
+    this endpoint is still unscoped, and every caller may ask for every case.
+
+    `X-Total-Count` carries the size of the narrowed set, before paging.
     """
-    from backend.state import store
-
-    if store.enabled():
-        return store.list_cases()
-    return [
-        {
-            "case_id": cid,
-            "child_name": c.get("child_name", ""),
-            "status": c.get("status", ""),
-            "volunteer_id": c.get("volunteer_id", ""),
-            "volunteer_name": c.get("volunteer_name", ""),
-            "created_at": c.get("created_at", ""),
-            "test_case": c.get("test_case", False),
-        }
-        for cid, c in workspace.cases.items()
-    ]
+    rows = _case_rows()
+    if status:
+        rows = [r for r in rows if str(r.get("status") or "") == status]
+    return _page(rows, response, offset, limit)
 
 
 @app.get(
@@ -255,9 +318,14 @@ def list_cases() -> list[dict]:
 )
 def get_case(case_id: str) -> dict:
     case = workspace.get_case(case_id)
+    commitments = workspace.commitment_states(case_id)
+    # The aggregate is loaded either way, so this is the one place the
+    # denormalised count can be corrected for nothing. Cases written before the
+    # field existed are healed the first time anyone opens them.
+    workspace.sync_commitment_count(case_id)
     return {
         "case": case,
-        "commitments": workspace.commitment_states(case_id),
+        "commitments": commitments,
         "grants": workspace.grants.get(case_id, []),
         "timeline": workspace.list_audit(case_id)[:20],
     }
@@ -267,13 +335,107 @@ def get_case(case_id: str) -> dict:
     "/v1/cases/{case_id}/audit",
     responses={404: {"description": "Case not found"}},
 )
-def get_audit(case_id: str, trace_id: str | None = None, event_type: str | None = None) -> list[dict]:
+def get_audit(
+    case_id: str,
+    response: Response,
+    trace_id: str | None = None,
+    event_type: str | None = None,
+    offset: int = Query(0, ge=0),
+    limit: int = Query(_DEFAULT_PAGE, ge=1, le=_MAX_PAGE),
+) -> list[dict]:
+    """One case's audit, in the order it was written. `X-Total-Count` is the whole of it.
+
+    Append order, not newest-first: this is a case's own record read end to end,
+    and the fleet-wide view at `/v1/audit` is the one that answers "what just
+    happened".
+    """
     events = workspace.list_audit(case_id)
     if trace_id:
         events = [e for e in events if e.get("trace_id") == trace_id]
     if event_type:
         events = [e for e in events if e.get("event_type") == event_type]
-    return events
+    return _page(events, response, offset, limit)
+
+
+@app.get("/v1/audit")
+def list_fleet_audit(
+    response: Response,
+    event_type: str | None = None,
+    offset: int = Query(0, ge=0),
+    limit: int = Query(_DEFAULT_PAGE, ge=1, le=_MAX_PAGE),
+) -> dict:
+    """Everything recorded, across every case, newest first.
+
+    Audit is stored per case, so before this existed a fleet-wide trail could
+    only be assembled by a client asking every case in turn — one request per
+    case, every poll, and no way to read the newest hundred events without
+    first reading all of them. The fan-out still happens, but it happens here,
+    once, on the side of the wire that already holds the data.
+
+    The summary is counted over the whole trail rather than over the page, so a
+    reader who has been handed fifty rows is still told how many there are, how
+    many were refusals, and which kinds exist to filter by. Those figures are
+    the reason this returns an envelope instead of an array: a page of events
+    cannot describe the set it came from, and a client that had to fetch every
+    page to total them would be back where it started.
+
+    `total` follows `event_type`; the summary deliberately does not, because it
+    is what the filter controls are *built* from.
+    """
+    names = {
+        str(row.get("case_id") or ""): str(row.get("child_name") or "")
+        for row in _case_rows()
+    }
+
+    events: list[dict] = []
+    for case_id, child_name in names.items():
+        if not case_id:
+            continue
+        try:
+            recorded = workspace.list_audit(case_id)
+        except CaseNotFound:
+            # Listed a moment ago, gone now. One deleted case must not take the
+            # whole trail down with it.
+            continue
+        for event in recorded:
+            events.append({**event, "case_id": case_id, "child_name": child_name})
+
+    # Newest first, with the event id breaking ties so that two events written
+    # inside the same clock tick cannot swap places between one page and the next.
+    events.sort(key=lambda e: str(e.get("event_id") or ""))
+    events.sort(key=lambda e: str(e.get("timestamp") or ""), reverse=True)
+
+    types: dict[str, int] = {}
+    traces: set[str] = set()
+    cases: set[str] = set()
+    refusals = 0
+    withheld = 0
+    for event in events:
+        kind = str(event.get("event_type") or "")
+        types[kind] = types.get(kind, 0) + 1
+        traces.add(str(event.get("trace_id") or ""))
+        cases.add(str(event.get("case_id") or ""))
+        if event.get("verdict") in ("deny", "quarantine"):
+            refusals += 1
+        withheld += len(event.get("withheld_fields") or [])
+
+    summary = {
+        "cases": len(cases),
+        "events": len(events),
+        "traces": len(traces),
+        "refusals": refusals,
+        "withheld": withheld,
+        "types": sorted(types.items(), key=lambda pair: (-pair[1], pair[0])),
+    }
+
+    if event_type:
+        events = [e for e in events if str(e.get("event_type") or "") == event_type]
+
+    return {
+        "events": events[offset : offset + limit],
+        "total": len(events),
+        "summary": summary,
+    }
 
 
 @app.get(
@@ -290,11 +452,28 @@ def get_memory(case_id: str) -> dict:
     responses={403: {"description": "Identity denied"}},
 )
 def list_approvals() -> list[dict]:
+    """Every quarantined action still waiting on a person.
+
+    Each carries the child's name as well as the case id. A queue of approvals
+    is read by a supervisor, and "Riley Chen" is the thing they recognise; the
+    name is already to hand here, and without it the portal would have to open
+    every gated case just to caption a card.
+
+    Built off the stored caseload rather than off whichever cases this process
+    has happened to load, and asking each of them only for its pending
+    approvals. Reading the full aggregate per case to answer this made the route
+    the slowest on the control plane — ten seconds and more against a caseload
+    that is not large — because it fetched every case's commitments, grants and
+    audit trail to look at none of them.
+    """
     pending = []
-    for case_id in workspace.cases:
-        for a in workspace.list_approvals(case_id):
-            if a.get("decision") == "pending":
-                pending.append({**a, "case_id": case_id})
+    for row in _case_rows():
+        case_id = str(row.get("case_id") or "")
+        if not case_id:
+            continue
+        child_name = str(row.get("child_name") or "")
+        for a in workspace.pending_approvals(case_id):
+            pending.append({**a, "case_id": case_id, "child_name": child_name})
     return pending
 
 
@@ -1287,10 +1466,13 @@ def _run_background(
                                 "event_type": "commitment_deferred",
                                 "commitment_type": _svc,
                                 "verdict": "deferred",
+                                # Quoted verbatim into the court report's findings,
+                                # so it names the child and the service the way the
+                                # filing does rather than the way the runtime does.
                                 "explanation": (
-                                    f"{narrator._org(_svc)} asked for more time on the "
-                                    f"{_svc} commitment; the fleet will check back when "
-                                    f"the scheduled reminder fires."
+                                    f"{narrator._org(_svc)} asked for more time on "
+                                    f"{narrator.child}'s {narrator._subject(_svc)}; "
+                                    f"CaseRelay will check back when the reminder falls due."
                                 ),
                             })
 

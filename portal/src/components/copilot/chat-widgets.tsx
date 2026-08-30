@@ -269,7 +269,7 @@ export function ReportWidget({ status, result }: WidgetProps) {
     <WidgetShell
       icon="document"
       title={`Court report — ${report.childName}`}
-      subtitle={`Assembled ${formatReportDate(report.generatedAt)} from recorded case state. Sections needing your own account are left blank.`}
+      subtitle={`Assembled ${formatReportDate(report.generatedAt)} from the case record. Sections needing your own account are left blank.`}
       footer={
         <>
           <button
@@ -291,9 +291,8 @@ export function ReportWidget({ status, result }: WidgetProps) {
         rows={[
           ["Commitments", `${counts.settled} of ${counts.commitments} settled`],
           ["Still owed", `${report.outstanding.length} outstanding`],
-          ["Authority", `${counts.grants} ${counts.grants === 1 ? "grant" : "grants"}`],
-          ["Audit events", String(counts.audit)],
-          ["Refusals", String(counts.refusals)],
+          ["Organisations contacted", String(report.contacts.length)],
+          ["Findings", `${report.findings.length} services`],
           ["For you to write", `${CLOSING_BLANKS.length + BACKGROUND_BLANKS.length + 1} sections`],
         ]}
       />

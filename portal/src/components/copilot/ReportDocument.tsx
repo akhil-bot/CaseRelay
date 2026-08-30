@@ -3,9 +3,11 @@
 import {
   BACKGROUND_BLANKS,
   CLOSING_BLANKS,
+  PROVENANCE,
   formatReportDate,
   formatReportDay,
   sectionNumbers,
+  summaryLine,
 } from "@/lib/copilot/report";
 import type { CaseReport } from "@/lib/copilot/report";
 import { useReportStore } from "@/lib/copilot/report-store";
@@ -52,7 +54,6 @@ function Blank({
  * and the `.md` download carry the same content in the same sequence.
  */
 function ReportDocument({ report }: { report: CaseReport }) {
-  const { counts } = report;
   const n = sectionNumbers(report);
 
   return (
@@ -121,12 +122,7 @@ function ReportDocument({ report }: { report: CaseReport }) {
             <dd>{formatReportDate(report.generatedAt)}</dd>
           </div>
         </dl>
-        <p>
-          {counts.settled} of {counts.commitments} commitments settled. {counts.grants} authority{" "}
-          {counts.grants === 1 ? "grant" : "grants"} on file. {counts.audit} audit{" "}
-          {counts.audit === 1 ? "event" : "events"} recorded, including {counts.refusals}{" "}
-          {counts.refusals === 1 ? "refusal" : "refusals"}.
-        </p>
+        <p>{summaryLine(report)}</p>
       </header>
 
       <section className="print-part">
@@ -172,7 +168,7 @@ function ReportDocument({ report }: { report: CaseReport }) {
 
       <Blank
         heading="Child and family contacts"
-        hint="Your visits with the child and contacts with the family. CaseRelay records agent outreach only."
+        hint="Your visits with the child and your contacts with the family. Only the requests made to services are recorded above."
       />
 
       <section className="print-part">
@@ -283,94 +279,7 @@ function ReportDocument({ report }: { report: CaseReport }) {
         ))}
       </section>
 
-      <section className="print-appendix">
-        <h2>Appendix — CaseRelay accountability record</h2>
-        <p>
-          What the agent fleet was permitted to do on this case, and what it was refused.
-        </p>
-      </section>
-
-      {report.organisations.length > 0 && (
-        <section>
-          <h3>A1. Organisations contacted</h3>
-          <ul>
-            {report.organisations.map((org) => (
-              <li key={org}>{org}</li>
-            ))}
-          </ul>
-        </section>
-      )}
-
-      {report.grants.length > 0 && (
-        <section>
-          <h3>A2. Authority granted</h3>
-          <table>
-            <thead>
-              <tr>
-                <th>Granted to</th>
-                <th>Purpose</th>
-                <th>Status</th>
-              </tr>
-            </thead>
-            <tbody>
-              {report.grants.map((item, index) => (
-                <tr key={`${item.grantedTo}-${item.purpose}-${index}`}>
-                  <td>{item.grantedTo}</td>
-                  <td>{item.purpose}</td>
-                  <td>{item.status}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </section>
-      )}
-
-      {(report.disclosed.length > 0 || report.withheld.length > 0) && (
-        <section>
-          <h3>A3. Data handling</h3>
-          {report.disclosed.length > 0 && (
-            <p>
-              <strong>Released</strong> {report.disclosed.join(", ")}
-            </p>
-          )}
-          {report.withheld.length > 0 && (
-            <p>
-              <strong>Refused</strong> {report.withheld.join(", ")}
-            </p>
-          )}
-        </section>
-      )}
-
-      {report.decisions.length > 0 && (
-        <section>
-          <h3>A4. Decisions</h3>
-          <table>
-            <thead>
-              <tr>
-                <th>When</th>
-                <th>Agent</th>
-                <th>Event</th>
-                <th>Verdict</th>
-              </tr>
-            </thead>
-            <tbody>
-              {report.decisions.map((item, index) => (
-                <tr key={`${item.at}-${index}`}>
-                  <td>{formatReportDate(item.at)}</td>
-                  <td>{item.agent}</td>
-                  <td>{item.type}</td>
-                  <td>{item.verdict}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </section>
-      )}
-
-      <footer>
-        Sections A and B are assembled from recorded case state. No part of this report is
-        generated prose; the sections marked for the CASA volunteer are deliberately left blank.
-      </footer>
+      <footer>{PROVENANCE}</footer>
     </article>
   );
 }

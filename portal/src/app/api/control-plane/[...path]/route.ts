@@ -78,12 +78,20 @@ async function proxy(
       });
     }
 
+    const headersOut: Record<string, string> = {
+      "Content-Type":
+        upstreamRes.headers.get("content-type") || "application/json",
+    };
+
+    // Paged routes report the size of the whole set in a header, and the body
+    // they return is deliberately just the page. Dropping this is what turns a
+    // paginated endpoint back into one the caller has to read to the end.
+    const total = upstreamRes.headers.get("x-total-count");
+    if (total) headersOut["X-Total-Count"] = total;
+
     return new Response(await upstreamRes.text(), {
       status: upstreamRes.status,
-      headers: {
-        "Content-Type":
-          upstreamRes.headers.get("content-type") || "application/json",
-      },
+      headers: headersOut,
     });
   } catch (err) {
     return Response.json(

@@ -184,7 +184,16 @@ export type Tone = "neutral" | "brand" | "accent" | "seal" | "warn" | "danger";
 
 export const tone: Record<
   Tone,
-  { badge: string; soft: string; dot: string; text: string; border: string; bar: string }
+  {
+    badge: string;
+    soft: string;
+    dot: string;
+    text: string;
+    border: string;
+    bar: string;
+    /** For tone carried by drawn geometry rather than by a box: an SVG path or arc. */
+    stroke: string;
+  }
 > = {
   neutral: {
     badge: "border-line-strong bg-surface-muted text-ink-soft",
@@ -193,6 +202,7 @@ export const tone: Record<
     text: "text-ink-soft",
     border: "border-line-strong",
     bar: "bg-ink-muted",
+    stroke: "stroke-ink-muted",
   },
   brand: {
     badge: "border-brand/25 bg-brand-soft text-brand-deep",
@@ -201,6 +211,7 @@ export const tone: Record<
     text: "text-brand-deep",
     border: "border-brand/30",
     bar: "bg-brand",
+    stroke: "stroke-brand",
   },
   accent: {
     badge: "border-accent/25 bg-accent-soft text-accent-deep",
@@ -209,6 +220,7 @@ export const tone: Record<
     text: "text-accent-deep",
     border: "border-accent/30",
     bar: "bg-accent",
+    stroke: "stroke-accent",
   },
   seal: {
     badge: "border-seal/25 bg-seal-soft text-seal",
@@ -217,6 +229,7 @@ export const tone: Record<
     text: "text-seal",
     border: "border-seal/30",
     bar: "bg-seal",
+    stroke: "stroke-seal",
   },
   warn: {
     badge: "border-warn/25 bg-warn-soft text-warn",
@@ -225,6 +238,7 @@ export const tone: Record<
     text: "text-warn",
     border: "border-warn/30",
     bar: "bg-warn",
+    stroke: "stroke-warn",
   },
   danger: {
     badge: "border-danger/25 bg-danger-soft text-danger",
@@ -233,6 +247,7 @@ export const tone: Record<
     text: "text-danger",
     border: "border-danger/30",
     bar: "bg-danger",
+    stroke: "stroke-danger",
   },
 };
 

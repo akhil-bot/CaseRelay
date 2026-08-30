@@ -16,7 +16,7 @@ import { useViewer } from "@/lib/viewer";
  */
 export default function ApprovalsPage() {
   const { copy, profile, role } = useViewer();
-  const { gates, decidingKey, decideError, decide } = useLiveApprovals();
+  const { gates, decidingKey, decideError, decide, open, opening } = useLiveApprovals();
 
   // The queue belongs to the supervisor. It is not in anyone else's sidebar, but
   // a link or an old bookmark can still land here, and a blank screen would read
@@ -85,6 +85,8 @@ export default function ApprovalsPage() {
           organisations={gate.organisations}
           openedAt={gate.openedAt}
           actionType={gate.actionType}
+          onOpen={() => open(gate.caseId)}
+          opening={opening.has(gate.caseId)}
           decidingAs={profile.name}
           busy={decidingKey === gate.key}
           error={decideError?.key === gate.key ? decideError.message : null}

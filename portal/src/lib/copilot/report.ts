@@ -1,5 +1,5 @@
 import { DOMAIN_META } from "@/components/ui/primitives";
-import { getCase, listCaseAudit, type AuditEvent, type LiveCaseDetail } from "@/lib/api";
+import { getCase, listAllCaseAudit, type AuditEvent, type LiveCaseDetail } from "@/lib/api";
 import type { Domain } from "@/lib/types";
 
 /**
@@ -21,6 +21,13 @@ import type { Domain } from "@/lib/types";
  * not guessed and not quietly dropped. They are carried as ADVOCATE_SECTIONS and
  * printed as named blanks, so what comes out is a draft with the verifiable part
  * already filled and the human part visibly still owed.
+ *
+ * What is deliberately absent is the machinery. How CaseRelay reached a partner,
+ * which agent held which grant, what a policy engine released or refused at the
+ * field level — none of that goes to a judge. It is real and it is worth being
+ * able to produce, but its reader is a supervisor auditing the system, and the
+ * audit screen is where it lives. A filing that carries it teaches the court to
+ * read past the parts that matter.
  */
 export interface CaseReport {
   caseId: string;
@@ -44,7 +51,7 @@ export interface CaseReport {
   generatedAt: string;
   dueAt: string;
 
-  /** What the fleet read, and who it approached on the child's behalf. */
+  /** What was read, and who was approached on the child's behalf. */
   recordsReviewed: string[];
   contacts: ReportContact[];
 
@@ -53,19 +60,10 @@ export interface CaseReport {
   /** Commitments still owed at the close of the period. */
   outstanding: ReportCommitment[];
 
-  organisations: string[];
   commitments: ReportCommitment[];
-  grants: ReportGrant[];
-  /** Fields the fleet released, and fields it was asked for and refused. */
-  disclosed: string[];
-  withheld: string[];
-  decisions: ReportDecision[];
   counts: {
     commitments: number;
     settled: number;
-    grants: number;
-    audit: number;
-    refusals: number;
   };
 }
 
@@ -113,20 +111,6 @@ export interface ReportFinding {
   /** ISO-8601. */
   dueAt: string;
   notes: string[];
-}
-
-export interface ReportGrant {
-  grantedTo: string;
-  purpose: string;
-  status: string;
-}
-
-export interface ReportDecision {
-  at: string;
-  agent: string;
-  type: string;
-  verdict: string;
-  note: string;
 }
 
 /**
@@ -178,11 +162,19 @@ export const CLOSING_BLANKS: { heading: string; hint: string }[] = [
   },
 ];
 
+/**
+ * The footnote at the end of the filing.
+ *
+ * The claim worth making to a court is that nobody wrote this on the
+ * volunteer's behalf, and that is said in those words. How the record was
+ * gathered is a separate assurance, owed to a supervisor rather than a judge,
+ * and the audit screen is where it is given.
+ */
+export const PROVENANCE =
+  "Sections A and B are taken from the case record. Nothing in this report has been written on the volunteer's behalf; the sections marked for the CASA volunteer are deliberately left blank.";
+
 /** Statuses that mean the commitment no longer needs chasing. */
 const SETTLED = new Set(["completed", "verified", "closed"]);
-
-/** Verdicts that mean a request for data was turned down. */
-const REFUSALS = new Set(["deny", "denied", "quarantine", "quarantined"]);
 
 function text(value: unknown): string {
   return typeof value === "string" ? value : "";
@@ -199,10 +191,9 @@ function rows(value: unknown): Record<string, unknown>[] {
 /**
  * The first of several field names that carries a value.
  *
- * Grant rows are written by more than one agent and the shapes have drifted —
- * `workspace.grant_for` matches on the same fallback chain when it authorises a
- * request, so a report that read only one spelling would show a blank beside a
- * grant the backend considers valid.
+ * Referral rows are written by more than one agent and the spellings have
+ * drifted, so a report that read only one of them would print a blank beside a
+ * fact the record actually holds.
  */
 function firstOf(row: Record<string, unknown>, ...keys: string[]): string {
   for (const key of keys) {
@@ -222,11 +213,6 @@ function referrals(detail: LiveCaseDetail): Record<string, unknown>[] {
 
 function organisationOf(referral: Record<string, unknown>): string {
   return firstOf(referral, "target_org", "target_org_short");
-}
-
-function organisations(detail: LiveCaseDetail): string[] {
-  const named = referrals(detail).map(organisationOf).filter((name) => name.length > 0);
-  return Array.from(new Set(named));
 }
 
 /**
@@ -263,15 +249,12 @@ function contacts(detail: LiveCaseDetail): ReportContact[] {
 /**
  * The documents behind the report.
  *
- * A volunteer lists what they read. The fleet's equivalent is the referral packet
- * it was given and the responses that came back, so those are what is named —
- * not the field-level disclosures, which are the appendix's business.
+ * A volunteer lists what they read, and this is the same list: the referral
+ * packet the case began from and the replies that came back to it. Documents,
+ * named the way a person would name them — not the log of how they were
+ * obtained, which is a different question, asked by a different reader.
  */
-function recordsReviewed(
-  detail: LiveCaseDetail,
-  seen: ReportContact[],
-  auditCount: number,
-): string[] {
+function recordsReviewed(detail: LiveCaseDetail, seen: ReportContact[]): string[] {
   const packet = record(detail.case.referral_packet);
   const source = text(packet.source_document_ref);
   const reviewed = [source ? `Referral packet (${source})` : "Referral packet"];
@@ -280,7 +263,6 @@ function recordsReviewed(
     if (contact.outcome === "No response") continue;
     reviewed.push(`Response from ${contact.organisation}`);
   }
-  reviewed.push(`Case audit log (${auditCount} ${auditCount === 1 ? "entry" : "entries"})`);
   return reviewed;
 }
 
@@ -288,7 +270,7 @@ function recordsReviewed(
  * What the log recorded against one service, newest first and deduplicated.
  *
  * Capped, because a chased partner can generate the same explanation weekly and
- * a court report is not a log. The appendix carries every entry.
+ * a court report is not a log. The audit screen carries every entry.
  */
 function notesFor(events: AuditEvent[], domain: Domain): string[] {
   const seen = new Set<string>();
@@ -326,52 +308,16 @@ function placement(detail: LiveCaseDetail): ReportPlacement | null {
 }
 
 /**
- * What the fleet released and what it refused, gathered across the whole log.
- *
- * Deduplicated, because a field asked for by four specialists is one disclosure
- * as far as a supervisor reviewing the case is concerned. A field that appears
- * in both lists stays in both: it was released to one caller and refused to
- * another, and that difference is the case for having an audit log at all.
- */
-function disclosure(events: AuditEvent[]): { disclosed: string[]; withheld: string[] } {
-  const disclosed = new Set<string>();
-  const withheld = new Set<string>();
-  for (const event of events) {
-    for (const field of event.disclosed_fields ?? []) disclosed.add(field);
-    for (const field of event.withheld_fields ?? []) withheld.add(field);
-    if (event.denied_field) withheld.add(event.denied_field);
-  }
-  return { disclosed: [...disclosed].sort(), withheld: [...withheld].sort() };
-}
-
-/**
- * The log entries that record a judgement, newest first.
- *
- * An audit log is mostly movement — a wake fired, a phase opened — and none of
- * that is what a report is for. Only entries carrying a verdict are kept, so
- * what survives is the set of moments where the fleet allowed, refused or
- * escalated something, which is the part a person is accountable for.
- */
-function decisions(events: AuditEvent[]): ReportDecision[] {
-  return events
-    .filter((event) => !!event.verdict)
-    .map((event) => ({
-      at: event.timestamp,
-      agent: event.agent_identity ?? "—",
-      type: event.event_type,
-      verdict: event.verdict ?? "",
-      note: event.explanation ?? event.purpose ?? "",
-    }))
-    .sort((a, b) => b.at.localeCompare(a.at));
-}
-
-/**
  * Assemble a report for one case. Two requests, in parallel: the case aggregate
  * and its audit log. Neither is cached — a report carries a generation time and
  * has to mean it.
+ *
+ * The log is read for what it says happened to each service, in the sentences
+ * it recorded at the time. Its other half — who asked, under whose authority,
+ * what was allowed — is not read here at all.
  */
 export async function buildReport(caseId: string): Promise<CaseReport> {
-  const [detail, events] = await Promise.all([getCase(caseId), listCaseAudit(caseId)]);
+  const [detail, events] = await Promise.all([getCase(caseId), listAllCaseAudit(caseId)]);
 
   const caseRecord = detail.case;
   const packet = record(caseRecord.referral_packet);
@@ -382,16 +328,6 @@ export async function buildReport(caseId: string): Promise<CaseReport> {
     ([domain, status]) => ({ domain, label: serviceLabel(domain), status }),
   );
 
-  const grants: ReportGrant[] = detail.grants.map((raw) => {
-    const row = record(raw);
-    return {
-      grantedTo: firstOf(row, "granted_to", "identity", "agent") || "—",
-      purpose: firstOf(row, "purpose", "authorized_purpose") || "—",
-      status: firstOf(row, "status") || "—",
-    };
-  });
-
-  const { disclosed, withheld } = disclosure(events);
   const seen = contacts(detail);
 
   return {
@@ -412,23 +348,15 @@ export async function buildReport(caseId: string): Promise<CaseReport> {
     generatedAt: new Date().toISOString(),
     dueAt: text(caseRecord.due_at) || text(packet.due_at),
 
-    recordsReviewed: recordsReviewed(detail, seen, events.length),
+    recordsReviewed: recordsReviewed(detail, seen),
     contacts: seen,
     findings: findings(detail, events),
     outstanding: commitments.filter((item) => !SETTLED.has(item.status)),
 
-    organisations: organisations(detail),
     commitments,
-    grants,
-    disclosed,
-    withheld,
-    decisions: decisions(events),
     counts: {
       commitments: commitments.length,
       settled: commitments.filter((item) => SETTLED.has(item.status)).length,
-      grants: grants.length,
-      audit: events.length,
-      refusals: events.filter((event) => REFUSALS.has(event.verdict ?? "")).length,
     },
   };
 }
@@ -487,6 +415,28 @@ export function sectionNumbers(report: CaseReport): {
   };
 }
 
+/**
+ * The line under the header: where the case stands, in one sentence.
+ *
+ * It counts what was promised to a child and who was asked for it. Counting
+ * events or refusals instead would answer a question about CaseRelay, and this
+ * document is about a child.
+ *
+ * Shared by both renderers for the same reason the numbering is.
+ */
+export function summaryLine(report: CaseReport): string {
+  const { settled, commitments } = report.counts;
+  const owed = report.outstanding.length;
+  const asked = report.contacts.length;
+
+  const settledPart =
+    `${settled} of ${commitments} ${commitments === 1 ? "commitment" : "commitments"} settled` +
+    (owed > 0 ? `, ${owed} still owed at the close of this period.` : ".");
+
+  if (asked === 0) return settledPart;
+  return `${settledPart} ${asked} ${asked === 1 ? "organisation" : "organisations"} contacted.`;
+}
+
 /** Pipes would end the cell they sit in, so they are escaped before a row is built. */
 function cell(value: string): string {
   return value.replace(/\|/g, "\\|");
@@ -512,7 +462,7 @@ function blank(lines: string[], heading: string, hint: string, prefix = "### "):
  * agent is handed — one text, so the three can never disagree. Sections with
  * nothing in them are dropped rather than printed empty: a report that says
  * "None" four times reads as a broken template, and a case early in its life
- * legitimately has no grants and no decisions yet.
+ * legitimately has nobody to name yet.
  */
 export function reportToMarkdown(report: CaseReport): string {
   const n = sectionNumbers(report);
@@ -537,10 +487,7 @@ export function reportToMarkdown(report: CaseReport): string {
     `**Reporting period** ${day(report.periodFrom)} to ${day(report.generatedAt)}${report.dueAt ? ` · **Next deadline** ${when(report.dueAt)}` : ""}`,
     `**Report completed** ${when(report.generatedAt)}`,
     "",
-    `${report.counts.settled} of ${report.counts.commitments} commitments settled. ` +
-      `${report.counts.grants} authority ${report.counts.grants === 1 ? "grant" : "grants"} on file. ` +
-      `${report.counts.audit} audit ${report.counts.audit === 1 ? "event" : "events"} recorded, ` +
-      `including ${report.counts.refusals} ${report.counts.refusals === 1 ? "refusal" : "refusals"}.`,
+    summaryLine(report),
     "",
     "## A. CASA activities",
   );
@@ -567,7 +514,7 @@ export function reportToMarkdown(report: CaseReport): string {
   blank(
     lines,
     "Child and family contacts",
-    "Your visits with the child and contacts with the family. CaseRelay records agent outreach only.",
+    "Your visits with the child and your contacts with the family. Only the requests made to services are recorded above.",
   );
 
   lines.push("", "## B. Findings", "", `### ${n.background}. Background`, "");
@@ -624,50 +571,7 @@ export function reportToMarkdown(report: CaseReport): string {
     "",
     "---",
     "",
-    "## Appendix — CaseRelay accountability record",
-    "",
-    "*What the agent fleet was permitted to do on this case, and what it was refused.*",
-  );
-
-  if (report.organisations.length > 0) {
-    lines.push("", "### A1. Organisations contacted", "");
-    for (const org of report.organisations) lines.push(`- ${org}`);
-  }
-
-  if (report.grants.length > 0) {
-    lines.push("", "### A2. Authority granted", "");
-    lines.push(
-      ...table(
-        ["Granted to", "Purpose", "Status"],
-        report.grants.map((item) => [item.grantedTo, item.purpose, item.status]),
-      ),
-    );
-  }
-
-  if (report.disclosed.length > 0 || report.withheld.length > 0) {
-    lines.push("", "### A3. Data handling", "");
-    if (report.disclosed.length > 0) lines.push(`**Released** ${report.disclosed.join(", ")}`);
-    if (report.withheld.length > 0) {
-      if (report.disclosed.length > 0) lines.push("");
-      lines.push(`**Refused** ${report.withheld.join(", ")}`);
-    }
-  }
-
-  if (report.decisions.length > 0) {
-    lines.push("", "### A4. Decisions", "");
-    lines.push(
-      ...table(
-        ["When", "Agent", "Event", "Verdict"],
-        report.decisions.map((item) => [when(item.at), item.agent, item.type, item.verdict]),
-      ),
-    );
-  }
-
-  lines.push(
-    "",
-    "---",
-    "",
-    "*Sections A and B above are assembled from recorded case state. No part of this report is generated prose; the sections marked for the CASA volunteer are deliberately left blank.*",
+    `*${PROVENANCE}*`,
   );
 
   return lines.join("\n");

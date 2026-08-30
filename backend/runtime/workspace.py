@@ -127,6 +127,12 @@ class Workspace:
             # not mean opening every case to find out whose it is.
             "volunteer_name": packet.get("volunteer_name", ""),
             "supervisor_id": packet.get("supervisor_id", ""),
+            # Likewise denormalised: it is what separates a draft with work
+            # waiting on a supervisor from one that has had nothing extracted
+            # yet, and a queue of gates should not have to open every draft in
+            # the system to tell those two apart. Written here so a case carries
+            # the answer from birth rather than only once something is stored.
+            "commitment_count": 0,
             "created_at": _now().isoformat(),
             "activated_at": None,
             "referral_packet": packet,
@@ -172,6 +178,26 @@ class Workspace:
     def put_commitments(self, case_id: str, rows: list[dict[str, Any]]) -> None:
         self.commitments[case_id] = rows
         store.save_rows(case_id, "commitments", rows, "commitment_id")
+        self.sync_commitment_count(case_id)
+
+    def sync_commitment_count(self, case_id: str) -> None:
+        """Keep the case's denormalised commitment count level with its commitments.
+
+        Commitments are a subcollection, so counting them means reading the case
+        aggregate. Carrying the number on the case itself is what lets a caseload
+        listing answer "is this draft waiting on anyone?" without doing that once
+        per case.
+
+        Written only when it has drifted, so this costs nothing on the ordinary
+        path and quietly corrects cases stored before the field existed.
+        """
+        case = self.cases.get(case_id)
+        if case is None:
+            return
+        counted = len(self.commitments.get(case_id, []))
+        if case.get("commitment_count") != counted:
+            case["commitment_count"] = counted
+            store.save_case(case_id, case)
 
     def put_grants(self, case_id: str, grants: list[dict[str, Any]]) -> None:
         self.grants[case_id] = grants
@@ -340,6 +366,20 @@ class Workspace:
         with self._lock_for(case_id):
             self.load(case_id)
             return self.approvals.get(case_id, [])
+
+    def pending_approvals(self, case_id: str) -> list[dict[str, Any]]:
+        """What is waiting on a person for this case, without opening the case.
+
+        `list_approvals` re-syncs the whole aggregate, which is right for a
+        caller that is about to work on the case. A sweep across every case
+        asking only "is anything waiting here?" is not: paying an aggregate load
+        per case is what made the approvals queue the slowest read on the
+        control plane by an order of magnitude.
+        """
+        if store.enabled():
+            return store.list_pending_approvals(case_id)
+        with self._lock_for(case_id):
+            return [a for a in self.approvals.get(case_id, []) if a.get("decision") == "pending"]
 
     def put_checkpoint(self, workflow_id: str, body: dict[str, Any]) -> None:
         self.checkpoints[workflow_id] = body
