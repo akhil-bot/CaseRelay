@@ -1,0 +1,24 @@
+# What must never reach the build context.
+#
+# `.env*` is the one that matters. `next build` reads .env.local if it finds
+# one, and anything NEXT_PUBLIC_ in there is compiled into the client bundle —
+# so a developer's local control plane, or worse a local credential, would ship
+# inside the image. The deploy script passes what the build needs explicitly.
+.env
+.env.*
+
+# Rebuilt inside the image, and copying a host build in would defeat the
+# lockfile install and drag macOS-native binaries onto a linux base.
+node_modules
+.next
+*.tsbuildinfo
+
+.git
+.gitignore
+.DS_Store
+npm-debug.log*
+
+# Documentation and editor instructions have no bearing on the build.
+README.md
+AGENTS.md
+CLAUDE.md

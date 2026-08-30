@@ -114,6 +114,12 @@ export interface CreatedCase {
   summary: string;
 }
 
+/** One advocate a case can be handed to. */
+export interface Advocate {
+  volunteer_id: string;
+  volunteer_name: string;
+}
+
 export interface RunRef {
   run_id: string;
   case_id: string;
@@ -163,6 +169,30 @@ export async function createCase(
   if (dueIn) body.due_in = dueIn;
   if (volunteerId) body.volunteer_id = volunteerId;
   if (volunteerName) body.volunteer_name = volunteerName;
+  return request("/v1/cases", { method: "POST", body: JSON.stringify(body) });
+}
+
+export async function listAdvocates(): Promise<Advocate[]> {
+  return request("/v1/advocates");
+}
+
+export interface CloneOptions {
+  /** Who the new case belongs to. Omitted, the control plane derives one from the case id. */
+  volunteerId?: string;
+  dueIn?: string;
+}
+
+/**
+ * Create a case seeded from one that already exists.
+ *
+ * The copy is a case in its own right — its own id, its own referral ids, its own deadlines —
+ * and it appears in the caseload alongside every other. What it keeps from the source is the
+ * scenario, so it still runs the way the source does.
+ */
+export async function cloneCase(sourceCaseId: string, opts: CloneOptions = {}): Promise<CreatedCase> {
+  const body: Record<string, string> = { clone_from: sourceCaseId };
+  if (opts.volunteerId) body.volunteer_id = opts.volunteerId;
+  if (opts.dueIn) body.due_in = opts.dueIn;
   return request("/v1/cases", { method: "POST", body: JSON.stringify(body) });
 }
 

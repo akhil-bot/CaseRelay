@@ -130,8 +130,14 @@ export async function controlPlaneAuthHeaders(): Promise<
   }
 
   const client = await auth.getIdTokenClient(target);
-  const h = await client.getRequestHeaders();
-  return Object.fromEntries(Object.entries(h));
+  // google-auth-library returns a Headers instance here, whose values live
+  // behind the Web API rather than on the object — so Object.entries() finds
+  // nothing on it and returns {}. That failure is silent and total: the proxy
+  // sends no Authorization at all and Cloud Run answers 403 with an HTML page
+  // that says nothing about tokens. Going through Headers copes with either
+  // shape, should the library ever hand back a plain object again.
+  const headers = await client.getRequestHeaders();
+  return Object.fromEntries(new Headers(headers as HeadersInit).entries());
 }
 
 export function controlPlaneUrl(): string {

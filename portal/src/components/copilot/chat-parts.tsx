@@ -53,6 +53,7 @@ const STEP_COPY: Record<string, { doing: string; done: string }> = {
     doing: "Checking which cases you can start",
     done: "Checked which cases you can start",
   },
+  list_cases: { doing: "Reading your caseload", done: "Read your caseload" },
   create_case: { doing: "Setting up the case", done: "Set up the case" },
   start_outreach: {
     doing: "Starting outreach to the providers",
@@ -76,7 +77,7 @@ const STEP_FALLBACK = { doing: "Working on it", done: "Finished that step" };
  * a widget has to earn its way out of that. Names listed here are skipped by the
  * step line, so a card is never captioned by a sentence saying the same thing.
  */
-const WIDGET_TOOLS = new Set(["list_scenarios", "create_case", "case_report"]);
+const WIDGET_TOOLS = new Set(["list_scenarios", "list_cases", "create_case", "case_report"]);
 
 /**
  * The steps whose card is the entire answer.

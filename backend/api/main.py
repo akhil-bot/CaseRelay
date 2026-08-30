@@ -507,6 +507,22 @@ def get_trace(trace_id: str) -> dict:
 # ---------------------------------------------------------------------------
 
 
+def _advocate(volunteer_id: str | None) -> dict[str, str] | None:
+    """The roster row for an advocate id, or None if the caller named nobody.
+
+    Checked against the roster rather than taken at its word: a case handed to an id that
+    belongs to no one is a case that appears in nobody's list and is chased by nobody.
+    """
+    if not volunteer_id:
+        return None
+    from backend.state.fixtures import advocates
+
+    for row in advocates():
+        if row.get("volunteer_id") == volunteer_id:
+            return row
+    raise HTTPException(status_code=400, detail=f"unknown advocate {volunteer_id!r}")
+
+
 @app.post(
     "/v1/cases",
     status_code=201,
@@ -517,11 +533,25 @@ def get_trace(trace_id: str) -> dict:
     },
 )
 def create_case(body: dict[str, Any]) -> dict:
+    """Ingest a new draft case from a scenario, from an existing case, or from a raw packet.
+
+    `clone_from` names a case already in the store to seed this one from, and `volunteer_id`
+    the advocate to hand it to. That pair is what the data lab uses to add a case to the
+    caseload without inventing one: the copy keeps the source's scenario, so it still runs the
+    way the source does, but every id and deadline on it is its own.
+    """
     scenario_name = body.get("scenario")
+    clone_from = body.get("clone_from")
     due_in_str = body.get("due_in")
     case_id = body.get("case_id") or dataset.synthetic.new_case_id()
 
-    if scenario_name:
+    if clone_from:
+        dataset.clone_case(clone_from, case_id, volunteer=_advocate(body.get("volunteer_id")))
+        # The deadline a clone falls back to is the one its scenario asks for. A copy of a
+        # Maya case is still a Maya case, and reading that off the packet rather than the
+        # request is what keeps it so when the caller names no deadline of their own.
+        scenario_name = workspace.packet(case_id).get("scenario")
+    elif scenario_name:
         spec = _scenarios_mod.get_scenario(scenario_name)
         if spec is None:
             raise HTTPException(status_code=400, detail=f"unknown scenario {scenario_name!r}")
@@ -552,11 +582,18 @@ def create_case(body: dict[str, Any]) -> dict:
     from backend.state import store
     store.save_case(case_id, case)
 
+    if clone_from:
+        origin = f" from case {clone_from}"
+    elif scenario_name:
+        origin = f" from scenario '{scenario_name}'"
+    else:
+        origin = ""
+
     return {
         "case_id": case_id,
         "scenario": scenario_name,
         "due_at": cp["due_at"].isoformat() if isinstance(cp["due_at"], datetime) else str(cp["due_at"]),
-        "summary": f"Case {case_id} created" + (f" from scenario '{scenario_name}'" if scenario_name else ""),
+        "summary": f"Case {case_id} created{origin}",
     }
 
 
@@ -785,6 +822,18 @@ async def pubsub_push(request: Request) -> JSONResponse:
 @app.get("/v1/scenarios")
 def list_scenarios() -> list[dict]:
     return [s.to_dict() for s in _scenarios_mod.all_scenarios().values()]
+
+
+@app.get("/v1/advocates")
+def list_advocates() -> list[dict]:
+    """The advocates a new case can be handed to, as `volunteer_id`/`volunteer_name` rows.
+
+    The same roster synthetic cases are dealt out of, served so that a caller creating a case
+    can choose an advocate instead of accepting whichever one the case id happens to land on.
+    """
+    from backend.state.fixtures import advocates
+
+    return advocates()
 
 
 @app.delete(

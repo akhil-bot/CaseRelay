@@ -1,0 +1,27 @@
+# Builds the portal image inside Google Cloud rather than on a laptop.
+#
+# The alternative is `docker buildx --platform linux/amd64` on a developer
+# machine, which on Apple silicon compiles the whole Next.js build under QEMU
+# and pushes the result over a home connection. Building here is natively amd64
+# and needs nothing locally beyond gcloud.
+#
+# Driven by infra/deploy_portal.sh; not meant to be run on its own.
+steps:
+  - name: gcr.io/cloud-builders/docker
+    args:
+      - build
+      # Compiled into the browser bundle, so it has to be set now rather than
+      # on the Cloud Run service. See the note in portal/Dockerfile.
+      - --build-arg=NEXT_PUBLIC_COPILOT_ENABLED=${_COPILOT_ENABLED}
+      - --tag=${_IMAGE}
+      - .
+
+images:
+  - ${_IMAGE}
+
+options:
+  # Next.js type-checks and bundles the whole app in one step, which is slow on
+  # the default single-core worker.
+  machineType: E2_HIGHCPU_8
+  # Builds triggered by a user credential have no logs bucket of their own.
+  logging: CLOUD_LOGGING_ONLY

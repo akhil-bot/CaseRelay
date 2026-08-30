@@ -33,6 +33,11 @@ import type { Domain } from "@/lib/types";
  * answered — which is the one thing a volunteer is scanning for. Resting on a
  * service tells you what happened there in the words the case itself recorded.
  *
+ * Every service the product knows about holds its place in the ring from the
+ * first paint, so the figure never grows a node or rotates the others as more
+ * commitments land. A service this case has asked nothing of is drawn as the
+ * empty slot it is, and says so when you rest on it.
+ *
  * Nothing here is generated prose. The sentence in the panel is the message the
  * control plane wrote for that event; where the case has recorded nothing, the
  * panel says so rather than describing an absence as if it were a state.
@@ -103,6 +108,8 @@ interface OrbitNode {
   stage: number;
   events: RunEvent[];
   deadline: number | null;
+  /** The case carries a commitment here at all, rather than holding the slot open. */
+  tracked: boolean;
   /** Nothing is coming back on its own: the line to the centre is drawn broken. */
   stalled: boolean;
   x: number;
@@ -113,10 +120,21 @@ interface OrbitNode {
 
 const DOMAIN_ORDER = Object.keys(DOMAIN_META);
 
-/** Where a service sits in the ring. Anything the product has no glyph for goes last. */
-function rank(type: string): number {
-  const at = DOMAIN_ORDER.indexOf(type);
-  return at === -1 ? DOMAIN_ORDER.length : at;
+/**
+ * Which services the ring holds a place for, in a fixed order.
+ *
+ * Every domain the product has a glyph for, always, whether or not this case
+ * has asked anything of it — a case's commitments are extracted a service at a
+ * time, and a ring built from only the ones that have arrived rearranges itself
+ * on every poll until the last one lands. Anything the control plane names that
+ * the product does not know about is appended, alphabetically so that two polls
+ * cannot disagree about the order.
+ */
+function slots(commitments: Record<string, string>): string[] {
+  const extra = Object.keys(commitments)
+    .filter((type) => !(type in DOMAIN_META))
+    .sort();
+  return [...DOMAIN_ORDER, ...extra];
 }
 
 function buildNodes(
@@ -136,13 +154,12 @@ function buildNodes(
     else byDomain.set(domain, [ev]);
   }
 
-  // Ordered by the shared domain list rather than by whatever order the control
-  // plane returned, so a case does not rearrange itself between two polls.
-  const types = Object.keys(commitments).sort((a, b) => rank(a) - rank(b));
+  const types = slots(commitments);
 
   return types.map((type, i) => {
     const meta = DOMAIN_META[type as Domain];
     const label = meta?.label ?? type.replace(/_/g, " ");
+    const tracked = type in commitments;
     const status = commitments[type] ?? "";
     const domainEvents = byDomain.get(type) ?? [];
     const deadline = deadlines.get(type as Domain) ?? null;
@@ -180,7 +197,11 @@ function buildNodes(
       stage: stagesReached(domainEvents, status),
       events: domainEvents,
       deadline,
-      stalled: status === "blocked" || status === "unresolved" || overdue || status === "",
+      tracked,
+      // An empty slot is not a service that has gone quiet, so it is not drawn
+      // as one: it gets its own faint treatment below instead.
+      stalled:
+        tracked && (status === "blocked" || status === "unresolved" || overdue || status === ""),
       x,
       y,
       spoke: `M ${from.x} ${from.y} Q ${control.x} ${control.y} ${to.x} ${to.y}`,
@@ -203,7 +224,9 @@ function headlineFor(node: OrbitNode): string {
     const message = node.events[i].message;
     if (typeof message === "string" && message) return message;
   }
-  return "Nothing has been recorded against this service yet.";
+  return node.tracked
+    ? "Nothing has been recorded against this service yet."
+    : "This case has asked nothing of this service.";
 }
 
 // ─── The card laid over the figure ────────────────────────────────────────────
@@ -216,7 +239,7 @@ function Detail({ node }: { node: OrbitNode }) {
         <span
           className={cx(
             "flex size-7 shrink-0 items-center justify-center rounded-control border",
-            tone[node.variant].badge,
+            tone[node.tracked ? node.variant : "neutral"].badge,
           )}
         >
           <Icon name={node.icon} size={15} />
@@ -276,8 +299,12 @@ export const CommitmentOrbit = memo(function CommitmentOrbit({
     return null;
   }, [events, streaming]);
 
-  const closed = nodes.filter((n) => isClosed(n.status)).length;
-  const total = nodes.length;
+  // Counted over the commitments the case actually carries, not over the slots
+  // in the ring: an empty slot is nothing anyone is waiting on, and counting it
+  // as outstanding would leave every case reading as barely started.
+  const asked = nodes.filter((n) => n.tracked);
+  const closed = asked.filter((n) => isClosed(n.status)).length;
+  const total = asked.length;
 
   return (
     // The figure is the whole of this section's height, and it is square, so the
@@ -290,9 +317,11 @@ export const CommitmentOrbit = memo(function CommitmentOrbit({
           <div className="min-w-0">
             <p className={type_.label}>What the case is owed</p>
             <p className="mt-1 text-[13.5px] text-ink-soft">
-              {total - closed === 0
-                ? "Every service has come back."
-                : `${closed} of ${total} closed.`}
+              {total === 0
+                ? "Nothing has been asked of a service yet."
+                : closed === total
+                  ? "Every service has come back."
+                  : `${closed} of ${total} closed.`}
             </p>
           </div>
           <p className={cx("hidden items-center gap-1.5 @sm:flex", type_.meta)}>
@@ -330,16 +359,23 @@ export const CommitmentOrbit = memo(function CommitmentOrbit({
                   key={node.type}
                   className={cx("transition-opacity duration-200", dim && "opacity-35")}
                 >
+                  {/* An empty slot's line is dotted and colourless: it is the
+                      shape of a service that could be asked, not a service
+                      that was asked and has not answered. */}
                   <path
                     d={node.spoke}
                     fill="none"
                     strokeWidth={active?.type === node.type ? 2.75 : 1.75}
                     strokeLinecap="round"
-                    strokeDasharray={node.stalled ? "1 9" : undefined}
+                    strokeDasharray={!node.tracked ? "1 7" : node.stalled ? "1 9" : undefined}
                     className={cx(
                       "transition-[stroke-width]",
-                      node.stalled ? tone[node.statusTone].stroke : tone[node.variant].stroke,
-                      !node.stalled && "opacity-45",
+                      !node.tracked
+                        ? "stroke-line-strong"
+                        : node.stalled
+                          ? tone[node.statusTone].stroke
+                          : tone[node.variant].stroke,
+                      node.tracked && !node.stalled && "opacity-45",
                     )}
                   />
                   <circle
@@ -435,7 +471,11 @@ export const CommitmentOrbit = memo(function CommitmentOrbit({
                   // stated here — with the state, which is otherwise carried
                   // only by an arc and a colour.
                   aria-label={
-                    node.status ? `${node.title}: ${statusLabel(node.status)}` : node.title
+                    !node.tracked
+                      ? `${node.title}: nothing asked`
+                      : node.status
+                        ? `${node.title}: ${statusLabel(node.status)}`
+                        : node.title
                   }
                   aria-pressed={held === node.type}
                   onPointerEnter={() => setHovered(node.type)}
@@ -447,12 +487,16 @@ export const CommitmentOrbit = memo(function CommitmentOrbit({
                     isActive ? "scale-110 shadow-pop" : "shadow-card",
                     dim && "opacity-45",
                     held === node.type ? tone[node.variant].border : "border-line",
+                    !node.tracked && "border-dashed bg-surface-muted shadow-none",
                   )}
                 >
                   <Icon
                     name={node.icon}
                     size={21}
-                    className={cx("shrink-0", tone[node.variant].text)}
+                    className={cx(
+                      "shrink-0",
+                      node.tracked ? tone[node.variant].text : "text-ink-muted",
+                    )}
                   />
                   {node.mark && (
                     <span
@@ -468,7 +512,11 @@ export const CommitmentOrbit = memo(function CommitmentOrbit({
                 <span
                   className={cx(
                     "absolute top-full left-1/2 mt-2 -translate-x-1/2 whitespace-nowrap text-[11.5px] font-medium transition-opacity duration-200",
-                    dim ? "text-ink-muted opacity-45" : "text-ink",
+                    dim
+                      ? "text-ink-muted opacity-45"
+                      : node.tracked
+                        ? "text-ink"
+                        : "text-ink-muted",
                   )}
                 >
                   {node.label}

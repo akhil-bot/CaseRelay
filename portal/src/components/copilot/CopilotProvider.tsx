@@ -6,6 +6,7 @@ import type { ReactFrontendTool } from "@copilotkit/react-core/v2";
 import type { ReactNode } from "react";
 import { z } from "zod";
 import {
+  CaseListWidget,
   CaseReviewWidget,
   ChildChoiceWidget,
   ReportWidget,
@@ -17,6 +18,7 @@ import { COPILOT_RUNTIME_URL, isRuntimeAvailable } from "@/lib/copilot/config";
 import { ConversationsProvider } from "@/lib/copilot/conversations";
 import { useBeginOutreach } from "@/lib/copilot/outreach";
 import { buildReport, reportToMarkdown } from "@/lib/copilot/report";
+import { useMyCases } from "@/lib/copilot/my-cases";
 import { ReportStoreProvider, useReportStore } from "@/lib/copilot/report-store";
 import { UnknownChild, useTakeOnCase } from "@/lib/copilot/take-on";
 import { ToolEventsProvider, useToolEvents } from "@/lib/copilot/tool-events";
@@ -48,6 +50,7 @@ function CopilotProviderInner({ children }: { children: ReactNode }) {
   const { put: putReport } = useReportStore();
   const beginOutreach = useBeginOutreach();
   const takeOnCase = useTakeOnCase();
+  const myCases = useMyCases();
 
   // Every one of these is read through a ref so the frontendTools memo can keep
   // a zero-length dependency array — CopilotKit requires a stable array, and
@@ -56,10 +59,12 @@ function CopilotProviderInner({ children }: { children: ReactNode }) {
   const putReportRef = useRef(putReport);
   const beginOutreachRef = useRef(beginOutreach);
   const takeOnCaseRef = useRef(takeOnCase);
+  const myCasesRef = useRef(myCases);
   useEffect(() => { findCaseRef.current = findCase; }, [findCase]);
   useEffect(() => { putReportRef.current = putReport; }, [putReport]);
   useEffect(() => { beginOutreachRef.current = beginOutreach; }, [beginOutreach]);
   useEffect(() => { takeOnCaseRef.current = takeOnCase; }, [takeOnCase]);
+  useEffect(() => { myCasesRef.current = myCases; }, [myCases]);
 
   const frontendTools = useMemo(
     () => [
@@ -85,6 +90,32 @@ function CopilotProviderInner({ children }: { children: ReactNode }) {
         // volunteer typing back a name that is already on screen.
         render: ({ status, result }: WidgetProps) => (
           <ChildChoiceWidget status={status} result={result} />
+        ),
+      },
+      {
+        name: "list_cases",
+        description:
+          "List the cases assigned to the volunteer you are talking to. Call this whenever they ask about their own caseload — \"my cases\", \"what am I working on\", \"what's open\", \"anything overdue\", \"how many cases do I have\" — and before answering any question that depends on which cases are theirs. It returns only their cases, never the whole programme's, so treat what comes back as the complete answer. The cases are drawn for them as a list they can open, so do not repeat the names back; reply with one short line, such as what stands out or what needs them next.",
+        parameters: z.object({}),
+        handler: async () => {
+          try {
+            const mine = await myCasesRef.current();
+            return JSON.stringify({
+              cases: mine.map((item) => ({
+                case_id: item.caseId,
+                child_name: item.childName,
+                status: item.status,
+              })),
+              total: mine.length,
+            });
+          } catch (err) {
+            return `Couldn't read your caseload: ${err instanceof Error ? err.message : String(err)}`;
+          }
+        },
+        // A caseload is a list of places to go, so each row is a way into the
+        // case rather than a name the volunteer has to type back.
+        render: ({ status, result }: WidgetProps) => (
+          <CaseListWidget status={status} result={result} />
         ),
       },
       {

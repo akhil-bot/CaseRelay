@@ -110,6 +110,10 @@ NAMES = ["Maya", "Noah", "Amara", "Diego", "Priya", "Ellis", "Rosa", "Kai", "Lei
 # Default days from referral to each service's due date.
 DUE_OFFSETS = {"education": 17, "health": 24, "legal": 14, "shelter": 31, "family_services": 36}
 
+# How long ago the referrals went out. A packet dated today would have no elapsed time in it
+# and nothing for a chase to be late against.
+REFERRAL_AGE_DAYS = 17
+
 # Child name keyed by scenario id so tests are legible.
 _SCENARIO_CHILD = {
     "noah": "Noah",
@@ -129,7 +133,8 @@ def new_case_id() -> str:
     return f"CR-{datetime.now(timezone.utc).strftime('%m%d%H%M%S')}"
 
 
-def _suffix(case_id: str) -> str:
+def case_suffix(case_id: str) -> str:
+    """The digits a case's own record ids are derived from."""
     digits = "".join(ch for ch in case_id if ch.isdigit())
     return digits or "0000"
 
@@ -155,7 +160,7 @@ def advocate_for(case_id: str) -> tuple[str, str]:
         return scripted["volunteer_id"], scripted["volunteer_name"]
 
     roster = advocates()
-    row = roster[int(_suffix(case_id)) % len(roster)]
+    row = roster[int(case_suffix(case_id)) % len(roster)]
     return row["volunteer_id"], row["volunteer_name"]
 
 
@@ -169,9 +174,9 @@ def build_packet(case_id: str, scenario: str | None = None) -> dict[str, Any]:
     from backend.state.scenarios import get_scenario
 
     spec = get_scenario(scenario) if scenario else None
-    suffix = _suffix(case_id)
+    suffix = case_suffix(case_id)
     rng = random.Random(f"{suffix}-{scenario or ''}")
-    referral_date = datetime.now(timezone.utc) - timedelta(days=17)
+    referral_date = datetime.now(timezone.utc) - timedelta(days=REFERRAL_AGE_DAYS)
 
     # Per-scenario due-date offsets override the defaults.
     due_offsets = dict(DUE_OFFSETS)
@@ -246,7 +251,7 @@ def build_packet(case_id: str, scenario: str | None = None) -> dict[str, Any]:
 
 
 def build_commitments(packet: dict[str, Any]) -> list[dict[str, Any]]:
-    suffix = _suffix(packet["case_id"])
+    suffix = case_suffix(packet["case_id"])
     by_type = {r["type"]: r for r in packet["referrals"]}
     rows = []
     for service, ref_prefix, _g, _i, _p, _f, _b in SERVICES:
@@ -268,7 +273,7 @@ def build_commitments(packet: dict[str, Any]) -> list[dict[str, Any]]:
 
 
 def build_grants(packet: dict[str, Any]) -> list[dict[str, Any]]:
-    suffix = _suffix(packet["case_id"])
+    suffix = case_suffix(packet["case_id"])
     grants = []
     for _service, _ref, grant_prefix, identity, purpose, fields, basis in SERVICES:
         grants.append(

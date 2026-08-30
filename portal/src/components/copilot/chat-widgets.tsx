@@ -1,8 +1,10 @@
 "use client";
 
+import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { Icon, type IconName } from "@/components/icons";
-import { cx, surface, type as type_ } from "@/design/tokens";
+import { cx, row, surface, type as type_ } from "@/design/tokens";
+import { statusMeta } from "@/lib/caseload";
 import {
   BACKGROUND_BLANKS,
   CLOSING_BLANKS,
@@ -266,7 +268,15 @@ function items(value: unknown): string[] {
  * A list of nine names followed by "which would you like?" is a question with
  * nine answers, and prose is the wrong medium for that: it asks the volunteer to
  * type back something already on screen, and to spell it the way the assistant
- * did. Drawn as a row of choices, the answer is the click.
+ * did. Drawn as rows, the answer is the click.
+ *
+ * Rows rather than a wrapped run of chips. Chips put a border and a fill around
+ * each name, which is the treatment the product reserves for a card, so nine of
+ * them read as nine objects to weigh up rather than one list to scan; and with
+ * names of uneven length, no two lines start in the same place. Hairline-divided
+ * rows are what the rest of the app uses for a list of people — see the note on
+ * `row` in tokens.ts — and one name per line gives the eye a single column to
+ * run down.
  *
  * The list is whatever the handler returned rather than a fixed set, so a
  * scenario added to the control plane appears here without this component
@@ -317,35 +327,166 @@ export function ChildChoiceWidget({ status, result }: WidgetProps) {
       subtitle={`${children.length} ${children.length === 1 ? "child" : "children"} whose referrals are ready. Pick one to open the case.`}
       footer={error ? <span className="text-[12px] text-danger">{error}</span> : undefined}
     >
-      <div className="flex flex-wrap gap-1.5">
+      {/*
+        Bled past the shell's inset so the hairlines reach both edges, which is
+        what makes a run of rows read as one list rather than a stack of tiles.
+      */}
+      <ul className={cx("-mx-3.5 border-t border-line", row.divide)}>
         {children.map((child) => {
           const busy = taking === child;
           return (
-            <button
-              key={child}
-              type="button"
-              onClick={() => void choose(child)}
-              // One at a time. Two cases opening at once from one list is never
-              // what was meant, and the second would land on a card the first
-              // has already replaced.
-              disabled={taking !== null}
-              aria-label={`Take on ${child}'s case`}
-              className={cx(
-                "inline-flex items-center gap-1.5 rounded-control border px-2.5 py-1.5",
-                "text-[12.5px] font-medium transition-colors disabled:opacity-40",
-                busy
-                  ? "border-brand bg-brand-soft text-brand-deep"
-                  : "border-line-strong bg-surface text-ink hover:border-brand hover:bg-brand-soft hover:text-brand-deep",
-              )}
-            >
-              {busy && (
-                <span className="size-3 shrink-0 animate-spin rounded-full border-2 border-brand border-t-transparent" />
-              )}
-              {child}
-            </button>
+            <li key={child}>
+              <button
+                type="button"
+                onClick={() => void choose(child)}
+                // One at a time. Two cases opening at once from one list is
+                // never what was meant, and the second would land on a card the
+                // first has already replaced.
+                disabled={taking !== null}
+                aria-label={`Take on ${child}'s case`}
+                className={cx(
+                  "group flex w-full items-center gap-2.5 px-3.5 py-2.5 text-left transition-colors",
+                  // `row.hover` tints towards `surface-soft`, which is already
+                  // the shell's own fill here — so the lift goes the other way,
+                  // towards the plain surface, to be visible at all.
+                  busy ? "bg-brand-soft/60" : "hover:bg-surface disabled:opacity-40",
+                )}
+              >
+                <span
+                  className={cx(
+                    "flex size-6 shrink-0 items-center justify-center rounded-full",
+                    "text-[11px] font-semibold transition-colors",
+                    busy ? "bg-brand text-white" : "bg-brand-soft text-brand-deep",
+                  )}
+                  aria-hidden
+                >
+                  {child.slice(0, 1).toUpperCase()}
+                </span>
+
+                <span className="min-w-0 flex-1 truncate text-[13px] font-medium text-ink">
+                  {child}
+                </span>
+
+                {busy ? (
+                  <span className="size-3.5 shrink-0 animate-spin rounded-full border-2 border-brand border-t-transparent" />
+                ) : (
+                  <Icon
+                    name="chevronRight"
+                    size={14}
+                    className="shrink-0 text-ink-muted transition-colors group-hover:text-brand"
+                  />
+                )}
+              </button>
+            </li>
           );
         })}
-      </div>
+      </ul>
+    </WidgetShell>
+  );
+}
+
+// ─── The advocate's own caseload, as a list to open ──────────────────────────
+
+/** A case as the handler passes it along: already narrowed to the viewer. */
+interface ListedCase {
+  caseId: string;
+  childName: string;
+  status: string;
+}
+
+function listedCases(value: unknown): ListedCase[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map((entry) => {
+      const row_ = entry as Record<string, unknown>;
+      return {
+        caseId: str(row_.case_id),
+        childName: str(row_.child_name),
+        status: str(row_.status),
+      };
+    })
+    .filter((entry) => entry.caseId !== "");
+}
+
+/**
+ * The cases belonging to whoever is signed in.
+ *
+ * Only theirs. The narrowing is `ownedBy` in lib/caseload.ts, the same rule the
+ * My Cases screen applies, and it is shared rather than repeated so the chat
+ * cannot turn into a way to read a case that screen withheld. A supervisor or an
+ * admin has no `volunteerId` and so owns the whole team's caseload — that is the
+ * point of those roles, not a hole in the rule.
+ *
+ * Rows carry the child, not the case id. An advocate knows the child's name; the
+ * id is scaffolding, and it is already in the link this row opens.
+ */
+export function CaseListWidget({ status, result }: WidgetProps) {
+  const router = useRouter();
+
+  if (status !== "complete") return <Pending title="Reading your caseload…" />;
+
+  const parsed = parseResult(result);
+  if (!parsed) return <Failed message={result || "Your caseload could not be read."} />;
+
+  const cases = listedCases(parsed.cases);
+
+  if (cases.length === 0) {
+    return (
+      <WidgetShell
+        icon="cases"
+        title="No cases yet"
+        subtitle="Nothing is assigned to you. Ask who needs an advocate to take one on."
+      />
+    );
+  }
+
+  return (
+    <WidgetShell
+      icon="cases"
+      title="Your cases"
+      subtitle={`${cases.length} ${cases.length === 1 ? "case" : "cases"} assigned to you. Open one to see where it stands.`}
+    >
+      <ul className={cx("-mx-3.5 border-t border-line", row.divide)}>
+        {cases.map((item) => {
+          const meta = statusMeta(item.status);
+          return (
+            <li key={item.caseId}>
+              <button
+                type="button"
+                onClick={() => router.push(`/cases/${item.caseId}`)}
+                aria-label={`Open ${item.childName || item.caseId}'s case`}
+                className={cx(
+                  "group flex w-full items-center gap-2.5 px-3.5 py-2.5 text-left",
+                  "transition-colors hover:bg-surface",
+                )}
+              >
+                <span
+                  className={cx(
+                    "flex size-6 shrink-0 items-center justify-center rounded-full",
+                    "bg-brand-soft text-[11px] font-semibold text-brand-deep",
+                  )}
+                  aria-hidden
+                >
+                  {(item.childName || item.caseId).slice(0, 1).toUpperCase()}
+                </span>
+
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate text-[13px] font-medium text-ink">
+                    {item.childName || item.caseId}
+                  </span>
+                  <span className={cx("block truncate", type_.meta)}>{meta.label}</span>
+                </span>
+
+                <Icon
+                  name="chevronRight"
+                  size={14}
+                  className="shrink-0 text-ink-muted transition-colors group-hover:text-brand"
+                />
+              </button>
+            </li>
+          );
+        })}
+      </ul>
     </WidgetShell>
   );
 }

@@ -1,0 +1,21 @@
+# What is not uploaded when the portal is built in Cloud Build.
+#
+# Without this file gcloud infers the list from .gitignore, which happens to be
+# close enough today. Stating it here instead means the upload cannot start
+# including a developer's .env.local because someone edited a gitignore.
+.env
+.env.*
+
+# Reinstalled and rebuilt inside the image. Uploading node_modules would send
+# hundreds of megabytes of macOS-native binaries to build a linux container.
+node_modules
+.next
+*.tsbuildinfo
+
+.git
+.DS_Store
+npm-debug.log*
+
+README.md
+AGENTS.md
+CLAUDE.md

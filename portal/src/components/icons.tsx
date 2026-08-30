@@ -56,6 +56,7 @@ export type IconName =
   | "list"
   | "grid"
   | "plus"
+  | "copy"
   | "history"
   | "trash"
   | "download"
@@ -325,6 +326,12 @@ const PATHS: Record<IconName, React.ReactNode> = {
     </>
   ),
   plus: <path d="M12 5.5v13M5.5 12h13" />,
+  copy: (
+    <>
+      <rect x="9" y="9" width="10.8" height="10.8" rx="1.8" />
+      <path d="M15 6.6V6a1.8 1.8 0 0 0-1.8-1.8H6A1.8 1.8 0 0 0 4.2 6v7.2A1.8 1.8 0 0 0 6 15h.6" />
+    </>
+  ),
   history: (
     <>
       <path d="M3.6 12a8.4 8.4 0 1 0 2.7-6.2" />

@@ -53,6 +53,10 @@ export default function AdminPage() {
   const [starting, setStarting] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [dueIn, setDueIn] = useState("10s");
+  // Bumped whenever this page adds or removes a case, so the lists that show the caseload
+  // re-read it. They page the control plane rather than holding a copy, and a create that
+  // left them alone would leave the operator looking at a list their new case is missing from.
+  const [caseListToken, setCaseListToken] = useState(0);
   const esRef = useRef<EventSource | null>(null);
 
   const reset = useCallback(() => {
@@ -78,6 +82,7 @@ export default function AdminPage() {
         const result = await createCase(scenario.id, dueIn || undefined, profile.volunteerId, profile.name);
         setCreatedCase(result);
         setPhase("created");
+        setCaseListToken((n) => n + 1);
         // `start_outreach` resolves a case only through this registry, so
         // without this the case exists on the control plane but the chat cannot
         // name it — "run it" would answer that no case was created.
@@ -150,6 +155,7 @@ export default function AdminPage() {
         setCreatedCase(result);
         setPhase("created");
         setError(null);
+        setCaseListToken((n) => n + 1);
       },
       onRunStarted: (ref: RunRef, caseId: string) => {
         setRunStatus({ run_id: ref.run_id, state: "queued" } as RunStatus);
@@ -171,6 +177,7 @@ export default function AdminPage() {
     try {
       await deleteCase(createdCase.case_id);
       reset();
+      setCaseListToken((n) => n + 1);
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -245,11 +252,15 @@ export default function AdminPage() {
       )}
 
       {/* Case created — ready to run */}
-      {phase === "created" && createdCase && selectedScenario && (
-        <Card icon="cases" title={`Case ${createdCase.case_id}`} subtitle={`Scenario: ${selectedScenario.title}`}>
+      {phase === "created" && createdCase && (
+        <Card
+          icon="cases"
+          title={`Case ${createdCase.case_id}`}
+          subtitle={selectedScenario ? `Scenario: ${selectedScenario.title}` : undefined}
+        >
           <dl className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
             <Fact label="Case ID" value={createdCase.case_id} mono />
-            <Fact label="Scenario" value={createdCase.scenario} />
+            {createdCase.scenario && <Fact label="Scenario" value={createdCase.scenario} />}
             <Fact label="Due at" value={new Date(createdCase.due_at).toLocaleString()} />
             <Fact label="Status" value="Ready to run" />
           </dl>
@@ -269,7 +280,7 @@ export default function AdminPage() {
         </Card>
       )}
 
-      <CaseManagementCard />
+      <CaseManagementCard reloadToken={caseListToken} />
 
       {/* Streaming / done */}
       {(phase === "streaming" || phase === "done") && (
@@ -595,26 +606,22 @@ function EventLog({ events, streaming }: { events: RunEvent[]; streaming: boolea
   );
 }
 
-function CaseManagementCard() {
+function CaseManagementCard({ reloadToken }: { reloadToken: number }) {
   const [items, setItems] = useState<CaseListItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [fetchError, setFetchError] = useState<string | null>(null);
   const [confirmId, setConfirmId] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [deleteErrors, setDeleteErrors] = useState<Record<string, string>>({});
+  const [manualToken, setManualToken] = useState(0);
 
   const refresh = useCallback(() => {
     setLoading(true);
-    setFetchError(null);
-    listCases({ limit: 100 })
-      .then(({ items: fetched }) => setItems(fetched))
-      .catch((err: unknown) =>
-        setFetchError(err instanceof Error ? err.message : String(err)),
-      )
-      .finally(() => setLoading(false));
+    setManualToken((n) => n + 1);
   }, []);
 
-  // Initial load — setState only in async callbacks to satisfy the linter rule.
+  // Re-reads on mount, whenever the page adds or removes a case, and on Refresh.
+  // setState only in async callbacks, to satisfy the linter rule.
   useEffect(() => {
     listCases({ limit: 100 })
       .then(({ items: fetched }) => {
@@ -625,7 +632,7 @@ function CaseManagementCard() {
         setFetchError(err instanceof Error ? err.message : String(err)),
       )
       .finally(() => setLoading(false));
-  }, []);
+  }, [reloadToken, manualToken]);
 
   const handleDelete = useCallback(
     async (caseId: string) => {

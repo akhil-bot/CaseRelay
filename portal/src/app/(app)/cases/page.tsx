@@ -2,11 +2,21 @@
 
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
-import { Suspense, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import {
+  Suspense,
+  useCallback,
+  useEffect,
+  useId,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 import { Icon, type IconName } from "@/components/icons";
 import { Avatar, Badge, Card, Dot, EmptyState, Loading, Rows, cx } from "@/components/ui/primitives";
-import { control, layout, row, surface, type Tone, type as type_ } from "@/design/tokens";
+import { control, layout, row, surface, type as type_ } from "@/design/tokens";
 import { CASE_PAGE, listCases } from "@/lib/api";
+import { ownedBy, statusMeta, summarise } from "@/lib/caseload";
 import { useViewer } from "@/lib/viewer";
 
 /**
@@ -63,11 +73,7 @@ function instant(value: unknown): number | null {
 
 function toRecord(raw: Record<string, unknown>, now: number): CaseRecord {
   const packet = fields(raw.referral_packet);
-  const id = text(raw.case_id) || text(packet.case_id);
-  const name = text(raw.child_name) || text(fields(packet.child).name);
-  const status = text(raw.status) || "unknown";
-  const advocateId = text(raw.volunteer_id) || text(packet.volunteer_id);
-  const advocateName = text(raw.volunteer_name) || text(packet.volunteer_name);
+  const { caseId: id, childName: name, status, advocateId, advocateName } = summarise(raw);
 
   const deadlines = (Array.isArray(packet.referrals) ? packet.referrals : [])
     .map((entry) => instant(fields(entry).due_date))
@@ -107,9 +113,16 @@ function advocateLabel(item: CaseRecord): string {
 }
 
 interface AdvocateGroup {
-  key: string;
+  /** Stable identity: React's key, and what remembers the group collapsed. */
+  id: string;
   label: string;
   items: CaseRecord[];
+  /**
+   * How many of them are waiting on a supervisor. Counted here rather than at
+   * render time because it describes the whole group, not the rows paged in so
+   * far, and a header that shrank as you scrolled would be describing neither.
+   */
+  awaiting: number;
 }
 
 /**
@@ -117,45 +130,32 @@ interface AdvocateGroup {
  *
  * A run rather than a bucket: the list is already ordered by advocate, so this
  * only has to notice where one ends. That means a group can never contain a case
- * the sort placed elsewhere, and paging can stay a slice of one flat list.
+ * the sort placed elsewhere.
  */
 function groupByAdvocate(items: CaseRecord[]): AdvocateGroup[] {
   const groups: AdvocateGroup[] = [];
   for (const item of items) {
-    const key = advocateKey(item);
-    const open = groups.at(-1);
-    if (open && open.key === key) open.items.push(item);
-    else groups.push({ key, label: advocateLabel(item), items: [item] });
+    const id = advocateKey(item) || UNASSIGNED;
+    let open = groups.at(-1);
+    if (!open || open.id !== id) {
+      open = { id, label: advocateLabel(item), items: [], awaiting: 0 };
+      groups.push(open);
+    }
+    open.items.push(item);
+    if (item.status === "draft") open.awaiting += 1;
   }
   return groups;
 }
 
-/**
- * The four states a case can hold, from the control plane's own transition table.
- *
- * `quiet` is the difference between a badge and a dot: a case that is simply
- * running is the norm across a caseload, and a badge every row carries is a
- * badge that says nothing. Only the states that are not "running normally" —
- * one waiting on a supervisor, one already finished — are worth the ink.
- */
-const STATUS_META: Record<string, { label: string; variant: Tone; icon: IconName; quiet?: boolean }> =
-  {
-    draft: { label: "Awaiting activation", variant: "warn", icon: "clock" },
-    active: { label: "Starting up", variant: "brand", icon: "activity", quiet: true },
-    monitoring: { label: "CaseRelay is watching", variant: "brand", icon: "activity", quiet: true },
-    closed: { label: "Completed", variant: "seal", icon: "checkCircle" },
-  };
-
-function statusMeta(status: string) {
-  return (
-    STATUS_META[status] ?? {
-      label: status.replace(/_/g, " "),
-      variant: "neutral" as Tone,
-      icon: "activity" as IconName,
-      quiet: true,
-    }
-  );
+/** One group as it is actually drawn: which of its rows the page budget reached. */
+interface PagedGroup {
+  group: AdvocateGroup;
+  items: CaseRecord[];
+  collapsed: boolean;
 }
+
+/** Nothing collapsed. A stable identity, so setting it back does not re-render the list. */
+const NO_KEYS: ReadonlySet<string> = new Set();
 
 interface CaseFilter {
   id: string;
@@ -264,6 +264,10 @@ function CaseList({ handoff }: { handoff: string }) {
   const [filter, setFilter] = useState("all");
   const [sort, setSort] = useState<SortId>("urgency");
   const [visible, setVisible] = useState(PAGE);
+  // Which advocates are folded away. Collapsed rather than expanded keys, so a
+  // caseload opens with every group showing and an advocate who appears later —
+  // a case reassigned, a new person on the team — appears open like the rest.
+  const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(NO_KEYS);
 
   /**
    * The caseload arrives a page at a time, and every page that lands is drawn.
@@ -328,24 +332,14 @@ function CaseList({ handoff }: { handoff: string }) {
 
   const loaded = load.state === "loaded" ? load.cases : EMPTY;
 
-  /**
-   * "My cases" has to mean mine.
-   *
-   * `GET /v1/cases` takes no volunteer filter and answers with the whole system,
-   * so an advocate's own list is narrowed here. A case that names no advocate at
-   * all is kept: it cannot be shown to belong to someone else, and dropping it
-   * would hide a case from the only person who might chase it.
-   */
+  // "My cases" has to mean mine. The rule is `ownedBy` in lib/caseload.ts,
+  // shared with the assistant so the two cannot disagree about which cases are
+  // this advocate's. Untouched for a role that owns the whole team's caseload,
+  // which keeps the array identity the memos below prefer.
   const all = useMemo(() => {
-    const mine = profile.volunteerId;
-    if (!mine) return loaded;
-    return loaded.filter(
-      (item) =>
-        (!item.advocateId && !item.advocateName) ||
-        item.advocateId === mine ||
-        item.advocateName === profile.name,
-    );
-  }, [loaded, profile.volunteerId, profile.name]);
+    if (!profile.volunteerId) return loaded;
+    return loaded.filter((item) => ownedBy(item, profile));
+  }, [loaded, profile]);
 
   const searched = useMemo(() => {
     const needle = query.trim().toLowerCase();
@@ -370,23 +364,46 @@ function CaseList({ handoff }: { handoff: string }) {
     });
   }, [searched, filter, sort, grouped]);
 
+  const groups = useMemo(() => (grouped ? groupByAdvocate(rows) : []), [rows, grouped]);
+
+  const toggleGroup = useCallback((id: string) => {
+    setCollapsed((current) => {
+      const next = new Set(current);
+      if (!next.delete(id)) next.add(id);
+      return next;
+    });
+  }, []);
+
+  const allCollapsed = groups.length > 0 && groups.every((group) => collapsed.has(group.id));
+
   /**
-   * How large each advocate's group really is, so a header describes the group
-   * rather than only the rows paged in so far. `awaiting` is drawn out because it
-   * is the one number in the group the supervisor can actually act on.
+   * Which rows are on screen, group by group, and how many there are to page
+   * through at all.
+   *
+   * A collapsed group contributes to neither, and that is the point of being able
+   * to close one: on a caseload long enough to page, folding away the advocate at
+   * the top does not merely hide their rows, it spends the page budget on the
+   * advocates below them instead. Headers are drawn from the whole list rather
+   * than from the rows paged in, so a group that is closed — or one the budget
+   * has not reached yet — still says who it is and how much they are holding.
    */
-  const groupSizes = useMemo(() => {
-    const sizes = new Map<string, { total: number; awaiting: number }>();
-    if (!grouped) return sizes;
-    for (const item of rows) {
-      const key = advocateKey(item);
-      const entry = sizes.get(key) ?? { total: 0, awaiting: 0 };
-      entry.total += 1;
-      if (item.status === "draft") entry.awaiting += 1;
-      sizes.set(key, entry);
+  const paged = useMemo<{ groups: PagedGroup[]; shown: number; pageable: number }>(() => {
+    if (!grouped) {
+      return { groups: [], shown: Math.min(visible, rows.length), pageable: rows.length };
     }
-    return sizes;
-  }, [rows, grouped]);
+
+    let budget = visible;
+    let pageable = 0;
+    const drawn = groups.map((group) => {
+      if (collapsed.has(group.id)) return { group, items: EMPTY, collapsed: true };
+      pageable += group.items.length;
+      const take = Math.min(group.items.length, budget);
+      budget -= take;
+      return { group, items: group.items.slice(0, take), collapsed: false };
+    });
+
+    return { groups: drawn, shown: visible - budget, pageable };
+  }, [grouped, groups, collapsed, visible, rows.length]);
 
   /**
    * Counts follow the search rather than the whole caseload, so each entry in the
@@ -405,11 +422,14 @@ function CaseList({ handoff }: { handoff: string }) {
   );
 
   // A narrower list is a different list, and the page you had reached in the old
-  // one means nothing in it.
+  // one means nothing in it. Groups open again for the same reason: what you have
+  // just searched for should not be sitting behind an advocate you folded away
+  // before you went looking for it.
   function narrowing<T>(apply: (value: T) => void) {
     return (value: T) => {
       apply(value);
       setVisible(PAGE);
+      setCollapsed(NO_KEYS);
     };
   }
 
@@ -449,11 +469,10 @@ function CaseList({ handoff }: { handoff: string }) {
     );
   }
 
-  const shown = rows.slice(0, visible);
   const narrowed = rows.length !== all.length;
 
   const total = `${all.length} ${all.length === 1 ? "case" : "cases"}`;
-  const advocateCount = groupSizes.size;
+  const advocateCount = groups.length;
   const subtitle = narrowed
     ? `${rows.length} of ${all.length} cases`
     : grouped && advocateCount > 0
@@ -506,6 +525,25 @@ function CaseList({ handoff }: { handoff: string }) {
           className="pointer-events-none absolute top-1/2 right-2.5 -translate-y-1/2 opacity-70"
         />
       </label>
+
+      {/* One team, one control. With a single advocate on screen there is nothing
+          for it to do that their own header does not already do. */}
+      {grouped && groups.length > 1 && (
+        <button
+          type="button"
+          onClick={() =>
+            setCollapsed(allCollapsed ? NO_KEYS : new Set(groups.map((group) => group.id)))
+          }
+          className={control.select}
+        >
+          <Icon
+            name="chevronDown"
+            size={15}
+            className={cx("transition-transform", allCollapsed && "-rotate-90")}
+          />
+          {allCollapsed ? "Expand all" : "Collapse all"}
+        </button>
+      )}
     </div>
   );
 
@@ -530,35 +568,36 @@ function CaseList({ handoff }: { handoff: string }) {
         <>
           <ColumnHeader copy={copy} />
           {grouped ? (
-            groupByAdvocate(shown).map((group) => (
-              <div key={group.key || group.label}>
-                <AdvocateHeader label={group.label} size={groupSizes.get(group.key)} />
-                <Rows>
-                  {group.items.map((item) => (
-                    <CaseRow key={item.id} item={item} now={load.now} copy={copy} />
-                  ))}
-                </Rows>
-              </div>
+            paged.groups.map((entry) => (
+              <AdvocateSection
+                key={entry.group.id}
+                group={entry.group}
+                items={entry.items}
+                collapsed={entry.collapsed}
+                onToggle={toggleGroup}
+                now={load.now}
+                copy={copy}
+              />
             ))
           ) : (
             <Rows>
-              {shown.map((item) => (
+              {rows.slice(0, visible).map((item) => (
                 <CaseRow key={item.id} item={item} now={load.now} copy={copy} />
               ))}
             </Rows>
           )}
-          {shown.length < rows.length && (
+          {paged.shown < paged.pageable && (
             <div className="flex flex-wrap items-center justify-center gap-3 border-t border-line px-5 py-4">
               <button
                 type="button"
                 onClick={() => setVisible((count) => count + PAGE)}
                 className={control.secondary}
               >
-                Show {Math.min(PAGE, rows.length - shown.length)} more
+                Show {Math.min(PAGE, paged.pageable - paged.shown)} more
                 <Icon name="chevronDown" size={14} />
               </button>
               <span className={type_.meta}>
-                Showing {shown.length} of {rows.length}
+                Showing {paged.shown} of {paged.pageable}
               </span>
             </div>
           )}
@@ -569,49 +608,91 @@ function CaseList({ handoff }: { handoff: string }) {
 }
 
 /**
- * Who the cases beneath it belong to.
+ * One advocate's cases, behind a header that folds them away.
+ *
+ * A supervisor holding several advocates is usually asking about one of them,
+ * and a flat list makes them scroll past everybody else to get there. So the
+ * header is the control: it opens and closes the group under it, and it carries
+ * enough of the group — who, how many, how many are waiting — to be worth
+ * reading while it is shut.
  *
  * Counts describe the whole group, not the rows paged in so far, so the header
  * does not appear to shrink as you scroll. "Waiting on you" is a badge rather
  * than another count because it is the only figure here the supervisor can act
  * on, and it should read differently from the ones they cannot.
  */
-function AdvocateHeader({
-  label,
-  size,
+function AdvocateSection({
+  group,
+  items,
+  collapsed,
+  onToggle,
+  now,
+  copy,
 }: {
-  label: string;
-  size?: { total: number; awaiting: number };
+  group: AdvocateGroup;
+  items: CaseRecord[];
+  collapsed: boolean;
+  onToggle: (id: string) => void;
+  now: number;
+  copy: ReturnType<typeof useViewer>["copy"];
 }) {
-  const unassigned = label === UNASSIGNED;
+  const panelId = useId();
+  const unassigned = group.label === UNASSIGNED;
+  const total = group.items.length;
 
   return (
-    <div className="flex items-center gap-3 border-b border-line bg-surface-soft/70 px-5 py-2.5">
-      {unassigned ? (
-        <span className="flex size-7 shrink-0 items-center justify-center rounded-full border border-dashed border-line-strong text-ink-muted">
-          <Icon name="user" size={14} />
-        </span>
-      ) : (
-        <Avatar name={label} size={28} variant="accent" />
-      )}
-      <span
-        className={cx(
-          "min-w-0 flex-1 truncate text-[12.5px] font-semibold",
-          unassigned ? "text-ink-muted italic" : "text-ink",
-        )}
-      >
-        {label}
-      </span>
-      {size && size.awaiting > 0 && (
-        <Badge variant="warn" icon="clock">
-          {size.awaiting} waiting on you
-        </Badge>
-      )}
-      {size && (
-        <span className={cx("shrink-0 tabular-nums", type_.meta)}>
-          {size.total} {size.total === 1 ? "case" : "cases"}
-        </span>
-      )}
+    <div>
+      <h3>
+        <button
+          type="button"
+          onClick={() => onToggle(group.id)}
+          aria-expanded={!collapsed}
+          aria-controls={panelId}
+          className={cx(
+            "flex w-full items-center gap-3 border-b border-line bg-surface-soft/70 px-5 py-2.5 text-left",
+            "transition-colors hover:bg-surface-soft focus-visible:outline-none focus-visible:bg-surface-soft",
+          )}
+        >
+          <Icon
+            name="chevronDown"
+            size={15}
+            className={cx(
+              "shrink-0 text-ink-muted transition-transform",
+              collapsed && "-rotate-90",
+            )}
+          />
+          {unassigned ? (
+            <span className="flex size-7 shrink-0 items-center justify-center rounded-full border border-dashed border-line-strong text-ink-muted">
+              <Icon name="user" size={14} />
+            </span>
+          ) : (
+            <Avatar name={group.label} size={28} variant="accent" />
+          )}
+          <span
+            className={cx(
+              "min-w-0 flex-1 truncate text-[12.5px] font-semibold",
+              unassigned ? "text-ink-muted italic" : "text-ink",
+            )}
+          >
+            {group.label}
+          </span>
+          {group.awaiting > 0 && (
+            <Badge variant="warn" icon="clock">
+              {group.awaiting} waiting on you
+            </Badge>
+          )}
+          <span className={cx("shrink-0 tabular-nums", type_.meta)}>
+            {total} {total === 1 ? "case" : "cases"}
+          </span>
+        </button>
+      </h3>
+      <div id={panelId} hidden={collapsed}>
+        <Rows>
+          {items.map((item) => (
+            <CaseRow key={item.id} item={item} now={now} copy={copy} />
+          ))}
+        </Rows>
+      </div>
     </div>
   );
 }
