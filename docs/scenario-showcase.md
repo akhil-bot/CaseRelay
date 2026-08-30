@@ -74,7 +74,7 @@ and `caserelay-control-plane-00073-wan` (second pass). Both passes agreed on eve
 | **Rosa** | Works | ~2 min | A partner asking for data outside the referral's scope, refused at fan-out, then recovered |
 | **Theo** | Works | 2–3 min | A partner reply that cannot be parsed at all, recovered by the same follow-up ladder |
 | **Noah** | Works as specified | ~1.5 min | The clean path — the control that shows the ladder only fires when something is wrong |
-| Kai | Partly — see below | ~2.5 min | Two simultaneous failures; one recovers, one is dropped silently |
+| Kai | Partly — see below | ~2.5 min | Two simultaneous failures; health escalates to supervisor; see below |
 | Diego | Does not demonstrate its claim | 1.5–3 min | — |
 | Ellis | Does not demonstrate its claim | ~2 min | — |
 | Amara | Not demonstrable under compression | ~2 min | — |
@@ -512,26 +512,30 @@ These four are defined in `backend/state/scenarios.py` and run without crashing,
 demonstrates what its definition claims. They are listed here rather than quietly dropped, because
 a judge who finds one of them in the source and runs it should find this section first.
 
-**Kai — cascade.** Claims two simultaneous partner failures with one human escalation. Two
-failures do occur: legal returns garbage and health times out. Legal recovers through the nudge.
-Health never does — and no escalation is raised for it, on either verified run. The cause is a
-missing deadline override: Priya compresses its health referral's due date so the commitment goes
-overdue and gets chased, and Kai does not, so Kai's health commitment is never overdue, never
-chased, and therefore never reaches the unanswered rung. It ends `partial_failure` with health
-`pending` and nothing in front of a human. As written, Kai is Priya with the escalation silently
-removed, which makes it the most misleading of the four.
+**Kai — cascade.** Claims two simultaneous partner failures with one human escalation. Two failures
+do occur: legal returns garbage and health times out. The `due_offsets={"health": 10}` override was
+added to `scenarios.py` so Kai's health referral is treated as overdue on the same pass that Priya's
+is, and the health escalation now fires — approval `apr-8f1a5a53` is the unanswered-follow-up notice
+the original description said never appeared. The fresh run closed 3 of 5 commitments with 2 still
+pending; legal did not recover through the nudge in this run, so the scenario ends with both open
+commitments unresolved rather than the single health escalation its spec claims.
 
-**Diego — hallucinated status.** Claims the education specialist falsely reports enrollment and a
-reconciliation guard reverts it. The simulated school under the `hallucinate` behaviour returns
-`enrollment_found: true`, and there is no second source of truth to contradict it, so the agent
-correctly reports what it was told and the commitment closes as confirmed. Both verified runs
-closed education cleanly with no revert and no approval request. There is no reconciliation guard
-of the kind described.
+**Diego — hallucinated status.** The SIS returns `enrollment_found: false` with no confirmed
+school. The fresh run closed 5 of 5 commitments, with the education specialist reporting the
+commitment fulfilled against that false SIS reply. There is no runtime reconciliation guard — the
+`ScenarioSpec` no longer claims one. That education closes at all, against a false SIS, is the
+hallucination the scenario is designed to surface; whether the specialist arrived there by
+confabulation or by ignoring the SIS field is what GEAP Agent Evaluation HALLUCINATION /
+Incorrect Tool Output Processing scores. The run completes and closes cleanly; nothing in the
+activity feed identifies the false basis. Do not narrate this as a demonstrated failure — it is
+evaluation fodder, not a visible guardrail.
 
 **Ellis — duplicate callback.** Claims a partner update arrives twice and idempotency logic
 discards the second. The `duplicate` branch in the partner simulator is a no-op that falls through
-to the normal reply, so the callback only ever arrives once. The run is indistinguishable from
-Noah's — same phases, same audit events, same outcome.
+to the normal reply, so the callback only ever arrives once and the idempotency path is never
+reached. The fresh run closed 4 of 5 commitments with 1 still pending (health), which is not the
+same outcome as Noah's 5/5 clean close. The claimed behaviour — a duplicate arriving and being
+discarded — was not observed.
 
 **Amara — long horizon.** Claims three staggered deadlines across several weeks with the fleet
 sleeping between wakes and carrying memory across sessions. Under the compressed deadline the

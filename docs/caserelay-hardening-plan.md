@@ -359,7 +359,7 @@ the fleet has to make real decisions rather than walk one branch.
 
 | Scenario | Child | What it exercises |
 |---|---|---|
-| `maya` | Maya | **The flagship.** Stalled enrollment at day 17, prompt injection on the school callback, quarantine, supervisor approval, a scoped re-request the district can only answer honestly (it still has nothing), and finally a follow-up that closes the commitment and names the coordinator who took it on. The current CR-1042 story, generated rather than fixtured. The scenario's own `description` and `expected_outcome` strings in `backend/state/scenarios.py` still promise "a clean re-callback"; the commitment is closed by the follow-up, not by a second callback. |
+| `maya` | Maya | **The flagship.** A school that asks for more time at fan-out rather than answering, a run that ends on its checkpoints and is restarted by the scheduler with nobody watching, prompt injection on the school's reply to that check-back, quarantine, a supervisor gate holding an enrollment that is still open, a scoped re-request the district can only answer honestly (it still has nothing), and finally a follow-up that closes the commitment and names the coordinator who took it on. The current CR-1042 story, generated rather than fixtured. |
 | `kai` | Kai | **Cascade.** Two partners fail at once — one times out, one lies. Reconciliation catches both, one escalates to a human, and the other three commitments still close. Failure tolerance under load. |
 | `amara` | Amara | **Long horizon.** Three staggered deadlines, several wakes over weeks, memory recalled across sessions with no user present. This is the scenario that substantiates "safely hold context across weeks of asynchronous operation". |
 
