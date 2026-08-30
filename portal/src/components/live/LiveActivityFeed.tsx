@@ -160,23 +160,31 @@ const WEIGHT_ICON_SIZE: Record<Weight, number> = {
 
 // ─── Terminal-state helpers ───────────────────────────────────────────────────
 
-function terminalStateLabel(state: string): string {
+function terminalStateLabel(state: string, failedPhases?: string[]): string {
   if (state === "completed") return "All steps complete";
-  if (state === "partial_failure") return "Some steps still open";
+  if (state === "partial_failure") {
+    return failedPhases && failedPhases.length > 0
+      ? "Some steps still open"
+      : "Waiting on partners";
+  }
   if (state === "failed") return "Could not complete";
   return state.replace(/_/g, " ");
 }
 
-function terminalBadgeVariant(state: string): Tone {
+function terminalBadgeVariant(state: string, failedPhases?: string[]): Tone {
   if (state === "completed") return "brand";
-  if (state === "partial_failure") return "warn";
+  if (state === "partial_failure") {
+    return failedPhases && failedPhases.length > 0 ? "warn" : "accent";
+  }
   if (state === "failed") return "danger";
   return "neutral";
 }
 
-function terminalIcon(state: string): IconName {
+function terminalIcon(state: string, failedPhases?: string[]): IconName {
   if (state === "completed") return "checkCircle";
-  if (state === "partial_failure") return "alert";
+  if (state === "partial_failure") {
+    return failedPhases && failedPhases.length > 0 ? "alert" : "clock";
+  }
   if (state === "failed") return "close";
   return "clock";
 }
@@ -510,8 +518,11 @@ export const LiveActivityFeed = memo(function LiveActivityFeed({ run }: { run: L
       Waiting
     </Badge>
   ) : run.terminalState ? (
-    <Badge variant={terminalBadgeVariant(run.terminalState)} icon={terminalIcon(run.terminalState)}>
-      {terminalStateLabel(run.terminalState)}
+    <Badge
+      variant={terminalBadgeVariant(run.terminalState, run.runStatus?.failed_phases)}
+      icon={terminalIcon(run.terminalState, run.runStatus?.failed_phases)}
+    >
+      {terminalStateLabel(run.terminalState, run.runStatus?.failed_phases)}
     </Badge>
   ) : run.streaming ? (
     <span className="flex items-center gap-2 text-[12px] text-brand">
