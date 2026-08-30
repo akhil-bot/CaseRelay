@@ -342,9 +342,9 @@ def reconcile_commitments(case_id: str) -> list[dict]:
     """Compare each commitment's deadline against the clock and its actual status.
 
     A commitment is overdue when its deadline has passed AND the partner has not
-    delivered (status is still pending, unresolved, or blocked). A completed commitment
-    is never overdue regardless of whether the deadline has passed — the partner
-    delivered, which is what matters.
+    delivered (status is pending, unresolved, blocked, or deferred). A completed
+    commitment is never overdue regardless of whether the deadline has passed — the
+    partner delivered, which is what matters.
     """
     now = datetime.now(timezone.utc)
     states = workspace.commitment_states(case_id)

@@ -18,11 +18,11 @@ AGENT_IDENTITY = AGENT_IDENTITIES["verifier"]
 INSTRUCTION = (
     "You are the Safeguarding Verifier. You must complete two steps in order. "
     "Never ask the requester anything and never respond until both steps are done.\n\n"
-    "Step 1: Call inspect_school_callback with the case id.\n"
-    "Step 2: Read the verdict returned by inspect_school_callback.\n"
+    "Step 1: Call inspect_partner_callback with the case id.\n"
+    "Step 2: Read the verdict returned by inspect_partner_callback.\n"
     "  - If verdict is \"quarantine\", you MUST call open_escalation with the same "
-    "case id and a reason stating that the callback attempted to retrieve medical "
-    "notes outside the education scope.\n"
+    "case id and a reason stating that the callback attempted to access data "
+    "outside its permitted scope.\n"
     "  - If verdict is \"allow\", the callback is clean. Report that screening "
     "passed with no policy violations and finish. Do NOT call open_escalation.\n\n"
     "Rules:\n"
@@ -85,17 +85,23 @@ def _resolve_verdict(case_id: str) -> str | None:
     return verdict
 
 
-def inspect_school_callback(case_id: str) -> dict:
-    """Screen the school's callback for this case.
+def inspect_partner_callback(case_id: str) -> dict:
+    """Screen the partner callback flagged for safeguarding review on this case.
+
+    Finds the referral carrying inject_callback=True, fetches its reply through the
+    shared partner abstraction, and screens it through Model Armor. Any service can
+    be flagged — the screening path is not specific to education.
 
     Fails closed: if content screening cannot execute (API unreachable,
     template missing, library absent), the callback is quarantined rather
     than silently allowed.
     """
-    edu_referral = next(
-        r for r in workspace.packet(case_id)["referrals"] if r["type"] == "education"
-    )
-    raw = partners.school_callback(edu_referral["referral_id"], case_id=case_id)
+    referrals = workspace.packet(case_id)["referrals"]
+    target = next((r for r in referrals if r.get("inject_callback")), None)
+    if target is None:
+        return {"verdict": "allow", "rules": [], "note": "no_flagged_referral"}
+
+    raw = partners.partner_callback(target["type"], target["referral_id"], case_id=case_id)
     try:
         verdict, rules = screen(raw)
     except ScreeningUnavailable as exc:
@@ -113,8 +119,8 @@ def inspect_school_callback(case_id: str) -> dict:
     if verdict == "quarantine":
         result["required_action"] = (
             "MANDATORY: call open_escalation now with this case_id and a reason "
-            "explaining that the callback attempted to retrieve medical notes "
-            "outside the education scope."
+            "explaining that the callback attempted to access data outside its "
+            "permitted scope."
         )
     return result
 
@@ -195,7 +201,7 @@ def build_agent(mode: str = "task") -> Agent:
         mode=mode,
         description="Policy gate. Quarantines injection. Does not change case facts.",
         instruction=INSTRUCTION,
-        tools=[inspect_school_callback, open_escalation],
+        tools=[inspect_partner_callback, open_escalation],
         disallow_transfer_to_peers=True,
     )
 

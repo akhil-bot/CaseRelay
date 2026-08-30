@@ -13,6 +13,11 @@ process can serve nothing else.
 import asyncio
 import json
 import os
+
+# The deployed image has no CASERELAY_STATE env var (see Dockerfile). Infra scripts
+# that source .env locally set it to "memory" for offline development — that must not
+# bleed into a deployed reasoning engine where Firestore persistence is required.
+os.environ.setdefault("CASERELAY_STATE", "firestore")
 from pathlib import Path
 from typing import Any, Union
 

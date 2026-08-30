@@ -47,6 +47,27 @@ def _cross_scope_refused(case_id: str) -> bool:
     )
 
 
+def partner_callback(service: str, referral_id: str, case_id: str | None = None) -> dict:
+    """Generic partner callback dispatch — routes to the per-service callback.
+
+    Education has a dedicated callback path because it is the service that currently
+    carries adversarial inject scenarios. Every other service falls back to its status
+    endpoint, which is correct when no inject behaviour is configured. The dispatch
+    is open: add a service-specific callback function here when a new scenario warrants it.
+    """
+    if service == "education":
+        return school_callback(referral_id, case_id=case_id)
+    if service == "health":
+        return clinic_status(referral_id, case_id=case_id)
+    if service == "legal":
+        return legal_status(referral_id, case_id=case_id)
+    if service == "shelter":
+        return shelter_status(referral_id, case_id=case_id)
+    if service == "family_services":
+        return family_status(referral_id, case_id=case_id)
+    return {"service": service, "referral_id": referral_id, "note": "unknown_service"}
+
+
 def followup(service: str, referral_id: str, case_id: str | None = None) -> dict:
     """The provider's answer when CaseRelay chases an outstanding referral.
 

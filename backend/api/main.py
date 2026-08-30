@@ -1078,7 +1078,7 @@ class _Narrator:
             if "checkpoint" in phase:
                 return f"Reminder set — {child}'s open commitments will be chased automatically."
             if "wake" in phase:
-                return f"Followed up on {child}'s open commitments."
+                return f"Checked back on {child}'s open commitments."
             if "quarantine" in phase:
                 return (
                     "The safeguarding verifier stopped that reply — it reached outside "
@@ -1542,10 +1542,13 @@ def _run_background(
                         recon = reconcile_commitments(case_id)
                         overdue = [r for r in recon if r.get("overdue")]
                         blocked_overdue = [r for r in overdue if r.get("status") == "blocked"]
-                        plain_overdue = [r for r in overdue if r.get("status") != "blocked"]
+                        deferred_overdue = [r for r in overdue if r.get("status") == "deferred"]
+                        plain_overdue = [r for r in overdue if r.get("status") not in ("blocked", "deferred")]
                         parts: list[str] = []
                         if blocked_overdue:
                             parts.append(f"{len(blocked_overdue)} blocked")
+                        if deferred_overdue:
+                            parts.append(f"{len(deferred_overdue)} awaiting check-back")
                         if plain_overdue:
                             parts.append(f"{len(plain_overdue)} overdue")
                         on_track = len(recon) - len(overdue)

@@ -215,6 +215,27 @@ def family_status(referral_id: str, case_id: str | None = None) -> dict:
     return _call_tool_sync("family_status", {"referral_id": referral_id, "case_id": case_id or ""})
 
 
+def partner_callback(service: str, referral_id: str, case_id: str | None = None) -> dict:
+    """Fetch the partner's callback payload for the given service.
+
+    Routes to the service-specific callback function so the caller does not need to
+    know which service it is dealing with. The per-service functions already handle
+    MCP/sim routing, so no new transport path is needed here.
+    """
+    if service == "education":
+        return school_callback(referral_id, case_id=case_id)
+    if service == "health":
+        return clinic_status(referral_id, case_id=case_id)
+    if service == "legal":
+        return legal_status(referral_id, case_id=case_id)
+    if service == "shelter":
+        return shelter_status(referral_id, case_id=case_id)
+    if service == "family_services":
+        return family_status(referral_id, case_id=case_id)
+    _log.warning("partner_callback: unknown service %r", service)
+    return {"service": service, "referral_id": referral_id, "note": "unknown_service"}
+
+
 def followup(service: str, referral_id: str, case_id: str | None = None) -> dict:
     if not _mcp_enabled():
         from backend.partners import sim
