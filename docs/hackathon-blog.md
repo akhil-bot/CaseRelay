@@ -177,7 +177,7 @@ Maya's packet is seventeen days old. I could not wait seventeen days to see if t
 
 The other thing that bit us was treating a running process as the case. Redeploy Cloud Run and the activity feed went empty, even though the case was still there. So each run event became its own Firestore document, and the wake is Scheduler → Pub/Sub → a new run against that store. Agent Runtime hosts the engines. It is not what held Maya while nobody was looking.
 
-We also dropped the `/demo/maya` shortcuts and the silent in-process fallback. If the control plane cannot reach a specialist, it fails at startup. The laptop can still assemble the fleet in one process. Cloud Run cannot pretend it did.
+We also dropped the pre-seeded case shortcuts and the silent in-process fallback. If the control plane cannot reach a specialist, it fails at startup. The laptop can still assemble the fleet in one process. Cloud Run cannot pretend it did.
 
 ## The same rule, two other failures
 

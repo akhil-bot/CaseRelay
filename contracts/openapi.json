@@ -29,18 +29,60 @@
     "/v1/cases": {
       "get": {
         "summary": "List Cases",
+        "description": "A page of cases, with enough of each to list a caseload without opening it.\n\n`volunteer_id`/`volunteer_name` are part of the projection because a\nsupervisor's caseload is grouped by advocate, and without them that grouping\nwould need one read per case.\n\n`status` narrows the set before it is paged, which is the difference between\nthe approvals queue fetching the drafts it is about to examine and fetching\nthe whole system to throw most of it away. It is not a security boundary:\nthis endpoint is still unscoped, and every caller may ask for every case.\n\n`X-Total-Count` carries the size of the narrowed set, before paging.",
         "operationId": "list_cases_v1_cases_get",
+        "parameters": [
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Status"
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 0,
+              "title": "Offset"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 500,
+              "minimum": 1,
+              "default": 20,
+              "title": "Limit"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "description": "Successful Response",
             "content": {
               "application/json": {
                 "schema": {
-                  "items": {
-                    "additionalProperties": true,
-                    "type": "object"
-                  },
                   "type": "array",
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": true
+                  },
                   "title": "Response List Cases V1 Cases Get"
                 }
               }
@@ -51,23 +93,34 @@
           },
           "404": {
             "description": "Not found"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
           }
         }
       },
       "post": {
         "summary": "Create Case",
+        "description": "Ingest a new draft case from a scenario, from an existing case, or from a raw packet.\n\n`clone_from` names a case already in the store to seed this one from, and `volunteer_id`\nthe advocate to hand it to. That pair is what the data lab uses to add a case to the\ncaseload without inventing one: the copy keeps the source's scenario, so it still runs the\nway the source does, but every id and deadline on it is its own.",
         "operationId": "create_case_v1_cases_post",
         "requestBody": {
+          "required": true,
           "content": {
             "application/json": {
               "schema": {
-                "additionalProperties": true,
                 "type": "object",
+                "additionalProperties": true,
                 "title": "Body"
               }
             }
-          },
-          "required": true
+          }
         },
         "responses": {
           "201": {
@@ -75,8 +128,8 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
                   "type": "object",
+                  "additionalProperties": true,
                   "title": "Response Create Case V1 Cases Post"
                 }
               }
@@ -199,6 +252,7 @@
     "/v1/cases/{case_id}/audit": {
       "get": {
         "summary": "Get Audit",
+        "description": "One case's audit, in the order it was written. `X-Total-Count` is the whole of it.\n\nAppend order, not newest-first: this is a case's own record read end to end,\nand the fleet-wide view at `/v1/audit` is the one that answers \"what just\nhappened\".",
         "operationId": "get_audit_v1_cases__case_id__audit_get",
         "parameters": [
           {
@@ -241,6 +295,29 @@
               ],
               "title": "Event Type"
             }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 0,
+              "title": "Offset"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 500,
+              "minimum": 1,
+              "default": 20,
+              "title": "Limit"
+            }
           }
         ],
         "responses": {
@@ -261,6 +338,78 @@
           },
           "404": {
             "description": "Case not found"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/audit": {
+      "get": {
+        "summary": "List Fleet Audit",
+        "description": "Everything recorded, across every case, newest first.\n\nAudit is stored per case, so before this existed a fleet-wide trail could\nonly be assembled by a client asking every case in turn \u2014 one request per\ncase, every poll, and no way to read the newest hundred events without\nfirst reading all of them. The fan-out still happens, but it happens here,\nonce, on the side of the wire that already holds the data.\n\nThe summary is counted over the whole trail rather than over the page, so a\nreader who has been handed fifty rows is still told how many there are, how\nmany were refusals, and which kinds exist to filter by. Those figures are\nthe reason this returns an envelope instead of an array: a page of events\ncannot describe the set it came from, and a client that had to fetch every\npage to total them would be back where it started.\n\n`total` follows `event_type`; the summary deliberately does not, because it\nis what the filter controls are *built* from.",
+        "operationId": "list_fleet_audit_v1_audit_get",
+        "parameters": [
+          {
+            "name": "event_type",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Event Type"
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 0,
+              "title": "Offset"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 500,
+              "minimum": 1,
+              "default": 20,
+              "title": "Limit"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response List Fleet Audit V1 Audit Get"
+                }
+              }
+            }
           },
           "422": {
             "description": "Validation Error",
@@ -322,6 +471,7 @@
     "/v1/approvals": {
       "get": {
         "summary": "List Approvals",
+        "description": "Every quarantined action still waiting on a person.\n\nEach carries the child's name as well as the case id. A queue of approvals\nis read by a supervisor, and \"Riley Chen\" is the thing they recognise; the\nname is already to hand here, and without it the portal would have to open\nevery gated case just to caption a card.\n\nBuilt off the stored caseload rather than off whichever cases this process\nhas happened to load, and asking each of them only for its pending\napprovals. Reading the full aggregate per case to answer this made the route\nthe slowest on the control plane \u2014 ten seconds and more against a caseload\nthat is not large \u2014 because it fetched every case's commitments, grants and\naudit trail to look at none of them.",
         "operationId": "list_approvals_v1_approvals_get",
         "responses": {
           "200": {
@@ -640,6 +790,30 @@
         }
       }
     },
+    "/v1/advocates": {
+      "get": {
+        "summary": "List Advocates",
+        "description": "The advocates a new case can be handed to, as `volunteer_id`/`volunteer_name` rows.\n\nThe same roster synthetic cases are dealt out of, served so that a caller creating a case\ncan choose an advocate instead of accepting whichever one the case id happens to land on.",
+        "operationId": "list_advocates_v1_advocates_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "additionalProperties": true,
+                    "type": "object"
+                  },
+                  "type": "array",
+                  "title": "Response List Advocates V1 Advocates Get"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/cases/{case_id}/runs": {
       "post": {
         "summary": "Submit Run",
@@ -733,7 +907,7 @@
     "/v1/cases/{case_id}/events": {
       "get": {
         "summary": "List Case Events",
-        "description": "All run events across every run for a case, in chronological order.\n\nThe portal uses this to stitch a continuous timeline across the pre-checkpoint\nand post-wake runs, reading a single case's full history regardless of how\nmany runs it spans.",
+        "description": "All run events across every run for a case, in the order they were narrated.\n\nServed as AG-UI events, the same vocabulary the live stream uses, so the portal\nreads a replayed history and a live one through one decoder.\n\nThe portal uses this to stitch a continuous timeline across the pre-checkpoint\nand post-wake runs, reading a single case's full history regardless of how\nmany runs it spans, and regardless of whether this instance is the one that\nproduced them.\n\nRuns are emitted oldest first and each run's events are kept in the order they were\nrecorded, which is the order their sequence numbers were assigned. Merging every run's\nevents into one list and sorting that on the timestamp string would be a weaker\nguarantee twice over: it would depend on wall-clock stamps never colliding or drifting,\nand it could interleave two runs, which breaks the run-gap divider the portal draws\nwherever run_id changes.",
         "operationId": "list_case_events_v1_cases__case_id__events_get",
         "parameters": [
           {
@@ -825,7 +999,7 @@
     "/v1/runs/{run_id}/events": {
       "get": {
         "summary": "Stream Run Events",
-        "description": "SSE stream of run events. Lasts as long as the run does.\n\nThe stream terminates when the run reaches a terminal state (completed,\nfailed, partial_failure). Heartbeat comments are sent every 15 s to keep\nthe connection alive through proxies. A 30-minute safety valve prevents\nleaked connections; if it fires, an explicit stream_timeout event is sent.\n\nClient disconnect is handled at the ASGI layer: uvicorn cancels the response\ntask (raising CancelledError in asyncio.sleep), cleanly stopping the generator.\nStarlette's Request.is_disconnected() is not used because it deadlocks under\nanyio-shielded cancel scopes in TestClient and older Starlette builds.",
+        "description": "SSE stream of run events, as AG-UI events. Lasts as long as the run does.\n\nThe stream terminates when the run reaches a terminal state (completed,\nfailed, partial_failure). Heartbeat comments are sent every 15 s to keep\nthe connection alive through proxies. A 30-minute safety valve prevents\nleaked connections; if it fires, an explicit stream_timeout event is sent.\n\nThe stream's own control frames go out in the same envelope as the narrated\nevents, so every frame a client parses is an AG-UI event.\n\nClient disconnect is handled at the ASGI layer: uvicorn cancels the response\ntask (raising CancelledError in asyncio.sleep), cleanly stopping the generator.\nStarlette's Request.is_disconnected() is not used because it deadlocks under\nanyio-shielded cancel scopes in TestClient and older Starlette builds.",
         "operationId": "stream_run_events_v1_runs__run_id__events_get",
         "parameters": [
           {
