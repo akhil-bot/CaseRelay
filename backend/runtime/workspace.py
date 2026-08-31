@@ -300,9 +300,27 @@ class Workspace:
                     return grant
             return None
 
-    def set_commitment(self, case_id: str, commitment_id: str, status: str) -> None:
+    def set_commitment(self, case_id: str, commitment_id: str, status: str) -> dict | None:
+        """Write a commitment status.
+
+        Returns None on success.  Returns a refusal dict and writes the
+        commitment as ``blocked`` when the deterministic commitment guard
+        detects an explicit contradiction between the partner tool response
+        and a ``completed`` claim.
+        """
         if status not in COMMITMENT_STATES:
             raise ValueError(f"status must be one of {sorted(COMMITMENT_STATES)}, got {status!r}")
+
+        from backend.guards.commitment_guard import (
+            build_approval,
+            build_audit_event,
+            check as _guard_check,
+            resolve_service_type,
+        )
+
+        service = resolve_service_type(commitment_id)
+        refusal = _guard_check(case_id, service or commitment_id, status) if service else None
+
         with self._lock_for(case_id):
             self.load(case_id)
             prefix_types = {"edu": "education", "hlth": "health", "leg": "legal", "shl": "shelter", "fam": "family_services"}
@@ -313,10 +331,28 @@ class Workspace:
                     or row.get("type") == commitment_id
                     or (want and row.get("type") == want)
                 ):
-                    row["status"] = status
+                    if refusal:
+                        row["status"] = "blocked"
+                        row["guard_refusal"] = refusal
+                    else:
+                        row["status"] = status
+                        row.pop("guard_refusal", None)
                     row["last_update"] = _now().isoformat()
                     store.append_row(case_id, "commitments", row, str(row["commitment_id"]))
-                    return
+
+                    if refusal and service:
+                        packet = self.cases.get(case_id, {}).get("referral_packet", {})
+                        org = ""
+                        for ref in packet.get("referrals", []):
+                            if ref.get("type") == service:
+                                org = ref.get("target_org", "")
+                                break
+                        self.add_approval(case_id, build_approval(case_id, service, refusal, org))
+                        try:
+                            self.append_audit(case_id, build_audit_event(service, refusal))
+                        except Exception:
+                            pass
+                    return refusal
             raise ValueError(
                 f"no commitment matching {commitment_id!r} in case {case_id}"
             )

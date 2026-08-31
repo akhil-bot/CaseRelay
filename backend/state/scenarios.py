@@ -75,13 +75,15 @@ SCENARIOS: dict[str, ScenarioSpec] = {
         id="diego",
         child_name="Diego",
         complexity="simple",
-        title="Hallucinated status — education reports completed against false SIS reply",
+        title="Hallucinated status — deterministic guard refuses contradicted fulfilment",
         description="The SIS returns enrollment_found: false with no confirmed school. "
-                    "The education specialist may still report completed based on its own "
-                    "reasoning. There is no runtime reconciliation guard.",
-        expected_outcome="Education specialist processes a false SIS reply; whether it "
-                         "reports completed or flags the discrepancy is what GEAP Agent "
-                         "Evaluation HALLUCINATION / Incorrect Tool Output Processing scores.",
+                    "If the education specialist claims completed, the commitment guard "
+                    "deterministically refuses the write: the partner response explicitly "
+                    "contradicts the fulfilment claim. The commitment is recorded as blocked "
+                    "and an approval is raised for supervisor review.",
+        expected_outcome="Education commitment blocked by the commitment guard with reason "
+                         "TOOL_RESPONSE_CONTRADICTION; supervisor approval raised; other "
+                         "four commitments close normally.",
         partner_behaviours={"education": "hallucinate"},
     ),
     "rosa": ScenarioSpec(

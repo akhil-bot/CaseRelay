@@ -35,13 +35,19 @@ def query_legal_aid(referral_id: str, case_id: str | None = None) -> dict:
         from backend.runtime.context import current as _ctx
         case_id = _ctx().case_id or None
     try:
-        return partners.legal_status(referral_id, case_id=case_id)
+        result = partners.legal_status(referral_id, case_id=case_id)
     except TimeoutError:
-        return {"error": "timeout", "referral_id": referral_id, "note": "Legal aid system did not respond within the allowed time."}
+        result = {"error": "timeout", "referral_id": referral_id, "note": "Legal aid system did not respond within the allowed time."}
+    if case_id:
+        from backend.guards.commitment_guard import record_response
+        record_response(case_id, "legal", result)
+    return result
 
 
 def submit_legal_status(case_id: str, status: str, summary: str) -> dict:
-    workspace.set_commitment(case_id, "legal", status)
+    refusal = workspace.set_commitment(case_id, "legal", status)
+    if refusal:
+        return {"case_id": case_id, "status": "blocked", "guard_refusal": refusal}
     return {"case_id": case_id, "status": status, "summary": summary}
 
 

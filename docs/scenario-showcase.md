@@ -72,7 +72,7 @@ and `caserelay-control-plane-00073-wan` (second pass). Both passes agreed on eve
 | **Theo** | Works | 2–3 min | A partner reply that cannot be parsed at all, recovered by the same follow-up ladder |
 | **Noah** | Works as specified | ~1.5 min | The clean path — the control that shows the ladder only fires when something is wrong |
 | Kai | Partly — see below | ~2.5 min | Two simultaneous failures; health escalates to supervisor; see below |
-| Diego | Does not demonstrate its claim | 1.5–3 min | — |
+| **Diego** | Works — guard refuses hallucinated fulfilment | 1.5–3 min | Commitment guard: deterministic refusal when partner response contradicts a completed claim |
 | Ellis | Does not demonstrate its claim | ~2 min | — |
 | Amara | Not demonstrable under compression | ~2 min | — |
 
@@ -517,15 +517,25 @@ the original description said never appeared. The fresh run closed 3 of 5 commit
 pending; legal did not recover through the nudge in this run, so the scenario ends with both open
 commitments unresolved rather than the single health escalation its spec claims.
 
-**Diego — hallucinated status.** The SIS returns `enrollment_found: false` with no confirmed
-school. The fresh run closed 5 of 5 commitments, with the education specialist reporting the
-commitment fulfilled against that false SIS reply. There is no runtime reconciliation guard — the
-`ScenarioSpec` no longer claims one. That education closes at all, against a false SIS, is the
-hallucination the scenario is designed to surface; whether the specialist arrived there by
-confabulation or by ignoring the SIS field is what GEAP Agent Evaluation HALLUCINATION /
-Incorrect Tool Output Processing scores. The run completes and closes cleanly; nothing in the
-activity feed identifies the false basis. Do not narrate this as a demonstrated failure — it is
-evaluation fodder, not a visible guardrail.
+**Diego — hallucinated status, now guarded.** The SIS returns `enrollment_found: false` with no
+confirmed school. A deterministic commitment guard in `backend/runtime/workspace.py` now sits on
+the write path: when any specialist claims `completed`, the guard checks the recorded partner tool
+response for an explicit contradiction. In Diego's case the education agent calls `query_school`,
+receives `enrollment_found: false`, and then claims `completed` — the guard compares the two,
+finds the positive assertion of the negative, and refuses the write. The commitment is recorded as
+`blocked` rather than `completed`, an `approval` record with `action_type: "commitment_guard"` is
+raised for supervisor review, and a `commitment_guard_refusal` audit event captures the reason
+code, contradiction and remediation.
+
+The refusal is conservative by design: it fires only on explicit contradiction (`enrollment_found`
+is literally `False`), never on absent or ambiguous evidence. A response with no `enrollment_found`
+field at all, or one carrying `deferred: true`, passes through — which is what makes the Maya arc
+survive untouched.
+
+The guard is plain Python with no LLM call, so a hallucinating agent cannot talk its way past it.
+The partner tool response is recorded at call time by the agent's own `query_school` tool and
+checked at write time by `workspace.set_commitment`. The model never holds execution authority
+over whether the write happens.
 
 What the fleet does and does not do about hallucination risk: the projection in
 `backend/policy/projection.py` strips the specialist's context to its granted fields in code —
@@ -534,9 +544,9 @@ was never handed. That stripping is not a prompt instruction. Separately, the su
 activation gate means nothing executes before a named human approves the authority grants; Model
 Armor fails closed and quarantines any callback that reaches outside the permitted scope; the
 Safeguarding Verifier's escalation requires a second named decision before the fleet continues;
-and Agent Gateway policy limits which MCP methods any engine may call. None of these controls
-prevent a specialist from reporting fulfilment against a false tool response — that is the Diego
-gap, and it is what the HALLUCINATION metric is measuring.
+Agent Gateway policy limits which MCP methods any engine may call; and the commitment guard
+refuses fulfilment claims that contradict the partner's own response. Diego is the scenario that
+exercises the last of these controls.
 
 **Ellis — duplicate callback.** Claims a partner update arrives twice and idempotency logic
 discards the second. The `duplicate` branch in the partner simulator is a no-op that falls through

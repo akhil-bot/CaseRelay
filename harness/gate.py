@@ -322,6 +322,15 @@ def _(c: Ctx) -> None:
     c.add(rc == 0, "14 state-machine unit tests pass", out[-2000:])
 
 
+@gate("t3.3")
+def _(c: Ctx) -> None:
+    rc, out = c.sh(
+        f"CASERELAY_STATE=memory {PY} -m pytest tests/test_commitment_guard.py -v --tb=short",
+        timeout=60,
+    )
+    c.add(rc == 0, "commitment guard unit tests pass", out[-2000:])
+
+
 @gate("t4.1")
 def _(c: Ctx) -> None:
     c.exists("backend/runtime/context.py")

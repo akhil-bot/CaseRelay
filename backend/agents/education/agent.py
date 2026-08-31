@@ -31,14 +31,20 @@ def get_authorized_context(case_id: str) -> dict:
 def query_school(referral_id: str, case_id: str | None = None) -> dict:
     """Call the school SIS. Behaviour is determined by the case's scenario configuration."""
     try:
-        return partners.school_callback(referral_id, case_id=case_id)
+        result = partners.school_callback(referral_id, case_id=case_id)
     except TimeoutError:
-        return {"error": "timeout", "referral_id": referral_id, "note": "School SIS did not respond within the allowed time."}
+        result = {"error": "timeout", "referral_id": referral_id, "note": "School SIS did not respond within the allowed time."}
+    if case_id:
+        from backend.guards.commitment_guard import record_response
+        record_response(case_id, "education", result)
+    return result
 
 
 def submit_enrollment_status(case_id: str, status: str, summary: str) -> dict:
     """Record the agent's decision. status: unresolved | completed | blocked | deferred."""
-    workspace.set_commitment(case_id, "education", status)
+    refusal = workspace.set_commitment(case_id, "education", status)
+    if refusal:
+        return {"case_id": case_id, "status": "blocked", "guard_refusal": refusal}
     return {"case_id": case_id, "status": status, "summary": summary}
 
 

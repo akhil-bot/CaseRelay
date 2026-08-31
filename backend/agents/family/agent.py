@@ -35,13 +35,19 @@ def query_family_services(referral_id: str, case_id: str | None = None) -> dict:
         from backend.runtime.context import current as _ctx
         case_id = _ctx().case_id or None
     try:
-        return partners.family_status(referral_id, case_id=case_id)
+        result = partners.family_status(referral_id, case_id=case_id)
     except TimeoutError:
-        return {"error": "timeout", "referral_id": referral_id, "note": "Family services system did not respond within the allowed time."}
+        result = {"error": "timeout", "referral_id": referral_id, "note": "Family services system did not respond within the allowed time."}
+    if case_id:
+        from backend.guards.commitment_guard import record_response
+        record_response(case_id, "family_services", result)
+    return result
 
 
 def submit_family_status(case_id: str, status: str, summary: str) -> dict:
-    workspace.set_commitment(case_id, "family_services", status)
+    refusal = workspace.set_commitment(case_id, "family_services", status)
+    if refusal:
+        return {"case_id": case_id, "status": "blocked", "guard_refusal": refusal}
     return {"case_id": case_id, "status": status, "summary": summary}
 
 

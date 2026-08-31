@@ -107,6 +107,8 @@ def nudge_overdue(case_id: str) -> list[dict[str, Any]]:
         referral = referrals.get(service) or {}
         disclosed = _allowed_fields(case_id, service)
         reply = partners.followup(service, referral.get("referral_id", ""), case_id=case_id)
+        from backend.guards.commitment_guard import record_response
+        record_response(case_id, service, reply)
         answered = bool(reply.get("responded"))
         owner = reply.get("owner") or {}
 

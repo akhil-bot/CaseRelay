@@ -946,6 +946,17 @@ class _Narrator:
     def raised(self, service: str) -> str:
         return f"A supervisor has been told {self.child}'s {self._subject(service)} is unanswered."
 
+    def guard_refusal(self, service: str, refusal: dict) -> str:
+        """A commitment was refused by the deterministic guard because the
+        partner response explicitly contradicts the fulfilment claim."""
+        subject = self._subject(service)
+        contradiction = refusal.get("contradiction", "partner response contradicts the claim")
+        remediation = refusal.get("remediation", "Escalate to supervisor for manual verification")
+        return (
+            f"Guard refused {self.child}'s {subject} — {contradiction}. "
+            f"{remediation}."
+        )
+
     def deferred(self, service: str) -> str:
         return f"{self._org(service)} asked for more time on {self.child}'s {self._subject(service)} — the fleet will check back."
 
@@ -1083,6 +1094,9 @@ class _Narrator:
                 if status == "completed":
                     return f"{self._who(service)} has confirmed {child}'s {subject}."
                 if status == "blocked":
+                    for _row in workspace.commitments.get(self.case_id, []):
+                        if _row.get("type") == service and _row.get("guard_refusal"):
+                            return self.guard_refusal(service, _row["guard_refusal"])
                     return (
                         f"{self._org(service)}'s reply asked for information outside the "
                         f"{_SERVICE_WORDS.get(service, service)} scope — "
