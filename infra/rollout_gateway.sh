@@ -61,6 +61,8 @@ CANARY_AGENT="${CASERELAY_CANARY_AGENT:-health}"
 STOP_ON_FAILURE="${CASERELAY_STOP_ON_FAILURE:-1}"
 DEPLOY_TIMEOUT="${CASERELAY_DEPLOY_TIMEOUT:-1800}"
 MAX_IAM_RETRIES="${CASERELAY_MAX_IAM_RETRIES:-5}"
+# Default 0 keeps idle burn near zero. To warm for judges: CASERELAY_MIN_INSTANCES=1 bash infra/deploy_all.sh
+MIN_INSTANCES="${CASERELAY_MIN_INSTANCES:-0}"
 PHASE=""
 
 LEAF_AGENTS=(education health legal shelter family verifier)
@@ -234,7 +236,7 @@ _deploy_gw_engine() {
       --service-name "$svc" \
       --agent-gateway-egress "$CASERELAY_AGENT_GATEWAY" \
       --update-env-vars "CASERELAY_AGENT=${agent},CASERELAY_STATE=firestore,CASERELAY_PROJECT_ID=${PROJECT},GOOGLE_CLOUD_PROJECT=${PROJECT},GOOGLE_CLOUD_LOCATION=global,GOOGLE_GENAI_USE_VERTEXAI=true,GOOGLE_API_USE_CLIENT_CERTIFICATE=true,GOOGLE_CLOUD_AGENT_ENGINE_ENABLE_TELEMETRY=true,OTEL_SEMCONV_STABILITY_OPT_IN=gen_ai_latest_experimental,PYTHONPATH=/app${extra},MODEL_ARMOR_TEMPLATE=projects/${PROJECT}/locations/${REGION}/templates/caserelay-screen,MODEL_ARMOR_LOCATION=${REGION}" \
-      --cpu 1 --memory 2Gi --min-instances 1 --max-instances 2 \
+      --cpu 1 --memory 2Gi --min-instances ${MIN_INSTANCES} --max-instances 2 \
       >> "$log" 2>&1
     deploy_rc=$?
 

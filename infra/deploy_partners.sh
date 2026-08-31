@@ -16,6 +16,8 @@ PROJECT="${CASERELAY_PROJECT:-caserelay}"
 REGION="${CASERELAY_REGION:-us-central1}"
 SERVICE_NAME="caserelay-partners"
 IMAGE="us-central1-docker.pkg.dev/${PROJECT}/caserelay/${SERVICE_NAME}:latest"
+# Default 0 keeps idle burn near zero. To warm for judges: CASERELAY_MIN_INSTANCES=1 bash infra/deploy_all.sh
+MIN_INSTANCES="${CASERELAY_MIN_INSTANCES:-0}"
 
 SKIP_BUILD=0
 REGISTER_ONLY=0
@@ -51,7 +53,7 @@ if [ "$REGISTER_ONLY" -eq 0 ]; then
     --allow-unauthenticated=false \
     --set-env-vars="CASERELAY_STATE=firestore,CASERELAY_PROJECT_ID=${PROJECT},GOOGLE_CLOUD_PROJECT=${PROJECT}" \
     --cpu=1 --memory=512Mi \
-    --min-instances=1 --max-instances=4 \
+    --min-instances=${MIN_INSTANCES} --max-instances=4 \
     --port=8090 \
     --quiet
 

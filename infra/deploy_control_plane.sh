@@ -14,6 +14,8 @@ PROJECT="${CASERELAY_PROJECT:-caserelay}"
 REGION="${CASERELAY_REGION:-us-central1}"
 IMAGE="us-central1-docker.pkg.dev/${PROJECT}/caserelay/control-plane:latest"
 SERVICE="caserelay-control-plane"
+# Default 0 keeps idle burn near zero. To warm for judges: CASERELAY_MIN_INSTANCES=1 bash infra/deploy_all.sh
+MIN_INSTANCES="${CASERELAY_MIN_INSTANCES:-0}"
 
 # Service account used by the Next.js portal to call the control plane.
 # If this SA doesn't exist yet, create it first:
@@ -117,7 +119,7 @@ CASERELAY_CHAT_MODEL=gemini-3.5-flash" \
   --port=8080 \
   --memory=1Gi \
   --cpu=1 \
-  --min-instances=1 \
+  --min-instances=${MIN_INSTANCES} \
   --max-instances=1 \
   --timeout=900 \
   --no-cpu-throttling \
