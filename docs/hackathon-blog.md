@@ -1,154 +1,158 @@
 ---
-title: A volunteer inherits a case that is already late
+title: "CaseRelay: A governed agent fleet that follows up on a child's court ordered services for weeks"
 published: false
 tags: gemini, googlecloud, agents, hackathon
 canonical_url:
 ---
 
-A CASA volunteer does not start a child's services. They inherit them.
+## CaseRelay: A governed agent fleet that follows up on a child's court ordered services for weeks
 
-Someone else already called the school, the clinic, legal aid, the shelter, and family services. The volunteer sits down with a file that is seventeen days old and has to find out which of those five promises still have an owner. Nobody has a cell phone number. Nobody asked if the school's counsellor is even free this week. The file is just a list of commitments and dates. Most of the dates have already passed.
+Imagine a nine year old named Maya. She is in foster care. A court has ordered five things for her: a school seat, a clinic appointment, legal aid, a shelter bed, and a family assessment. Those are **five promises, in five different systems**. Most of the dates have already passed.
 
-That is the job I built CaseRelay for.
+Elena is her **CASA volunteer**: Court Appointed Special Advocate. One person, appointed to check that those orders actually happened. She has **no single place to look**. She calls the school, then the clinic, then legal aid. The school is waiting on the clinic. The clinic never got the referral. Nobody has a named owner she can call back.
+
+That is the daily job. We built **CaseRelay** so Elena does not have to do the chase by hand. We wanted her to see the whole picture at once, **approve what gets shared** before anything moves, and have someone pick it back up on time, even if nobody remembers to call.
 
 ## The problem
 
-The real task is not "send five emails." It is:
+What Elena is actually doing:
 
-1. **Inherit promises someone else already made** — the referrals are old, the deadlines are lapsing, and you have no record of who was contacted or when.
-2. **Track which ones still have a named owner** — a coordinator, a doctor's scheduler, a social worker — without handing the school a medical file, and without your system deciding the answer for you.
-3. **Wait for a person before you contact anyone** — a court-appointed volunteer has to approve every outreach. And do it again when a reply arrives out of scope. And come back on its own schedule when the week is up, without anyone staring at a screen.
+1. **Picking up work someone else started**: referrals already sent, deadlines already slipping, no log of who was contacted.
+2. **Finding who still owns each promise**: a coordinator, a scheduler, a caseworker, without handing the school a medical file.
+3. **Coming back later**: if the clinic said two weeks, someone has to call on week two. If nobody is at the desk, it slips again.
 
-No chatbot has to do these three things. CaseRelay had to.
+## The solution
 
-## How we built it
+To solve that, we built CaseRelay around **eight scoped agents**. They follow up, hand work to the right specialist, pause when an agency needs more time, and come back later without Elena refreshing a dashboard.
 
-Eight agents chase those agencies. Twice in the run below they stop and wait for a person to click. Once, nobody is at the keyboard and the case starts itself.
+Under the hood, it is a governed fleet: each agent has its own identity, each action is monitored through guardrails and audit logs, and supervisor approval sits in front of anything consequential.
 
-The control plane (Cloud Run) orchestrates phases. Each specialist runs on its own [Agent Runtime](https://docs.cloud.google.com/gemini-enterprise-agent-platform/build/runtime) engine and talks to the others over [A2A](https://docs.cloud.google.com/gemini-enterprise-agent-platform/build/agent-to-agent-communication). State and wake-times live in Firestore. Cloud Scheduler sweeps every minute and fires Pub/Sub messages to resume waiting cases.
+All of it surfaces in one portal, where Elena can see where each commitment stands and do the work by asking the **CaseRelay copilot**. The copilot is not just a chat box: it can list assigned cases, open the live view, start outreach, and generate reports through **browser actions**.
 
-![CaseRelay multi-agent mesh](diagrams/caserelay-multi-agent-mesh.png)
+![CaseRelay portal with case status and copilot](diagrams/platform_image.png)
 
-## The eight agents
+This is the CASA volunteer's view: assigned cases on the left, live commitment status in the middle, and the **CaseRelay copilot** on the right to help drive the workflow.
 
-All eight run `gemini-3.5-flash`. Each is its own [Agent Runtime](https://docs.cloud.google.com/gemini-enterprise-agent-platform/build/runtime) engine. Six of them wire over A2A during the Maya run; two run in-process on the control plane for this scenario.
+## How it works behind the scenes
 
-| Agent | What it does on Maya | What it must NOT do |
-|-------|---------------------|-------------------|
-| **Continuity orchestrator** | Drive the phases. Hold no raw partner records. | Contact an agency. Approve anything. |
-| **Intake** | Read the packet. Extract five commitments. Propose five authority grants. | Activate the case. |
-| **Education** | Ask Lincoln Unified about enrollment. Name, DOB, referral id. | Read health, legal, or family fields. |
-| **Health** | Ask the clinic about the appointment. | Diagnose. Read clinical notes. |
-| **Legal** | Ask legal aid about the referral. | Give advice or strategy. |
-| **Shelter** | Ask about a bed. | Rank placements. |
-| **Family services** | Ask about the assessment slot. | Score risk. Publish findings. |
-| **Safeguarding verifier** | Screen the school callback. Open the escalation. | Clear its own quarantine. |
+Let's walk through Maya's case from Elena's view, then show what CaseRelay is doing underneath.
 
-## The features, mapped to GEAP
+### 1. Elena starts from her assigned cases
 
-### Discovery: Agent Registry
+Elena opens CaseRelay and asks the **CaseRelay Copilot** to pull up Maya's case. The portal shows which commitments are still open, blocked, or waiting for approval, while the copilot can **trigger the next action** from the same screen.
 
-[Agent Registry](https://docs.cloud.google.com/gemini-enterprise-agent-platform/govern/agent-registry) is the org's catalogue of agents and their routes. Nothing in a run looks it up—the catalogue is for discovery only, not routing.
+On the system side, CaseRelay reads Elena's assigned case state from Firestore, restores the session context, and lets the copilot act as the entry point to the agent system. [CopilotKit](https://docs.copilotkit.ai/) frontend tools connect the chat to browser actions like opening a case, starting outreach, and preparing a report, while [Agent Runtime](https://docs.cloud.google.com/gemini-enterprise-agent-platform/build/runtime) hosts the reasoning engine that powers it.
 
-### State and Wake
+### 2. Human approval sets the boundary
 
-[Agent Runtime](https://docs.cloud.google.com/gemini-enterprise-agent-platform/build/runtime) runs the engines. Firestore holds the case: commitments, grants, and wake-times. When education needs more time, the orchestrator writes five checkpoints with staggered due dates and ends the run. The case is not.
+Before anything is sent outside the system, Elena and Dana approve what the fleet is allowed to do and what each agent can access.
 
-[Cloud Scheduler](https://cloud.google.com/scheduler) sweeps every minute, finds checkpoints that have come due, and publishes to [Pub/Sub](https://cloud.google.com/pubsub). An authenticated push resumes a waiting case. No browser click. On the reference run the gap was 25 seconds; in the filmed run it was about ten; it can be anything up to a minute.
+For Maya's case, that approval is not just a button in the UI. [Agent Identity](https://docs.cloud.google.com/gemini-enterprise-agent-platform/govern/agent-identity-overview) and scoped grants make every approval traceable and keep each agent limited to the fields it needs. Firestore records who approved and when.
 
-[Memory Bank](https://docs.cloud.google.com/gemini-enterprise-agent-platform/scale/memory-bank) receives a session write at the end. Facts scoped to the `case_id` are recalled on the next run. Maya's notes don't leak to another child. On a two-minute demo run, almost nothing is useful to recall yet. The write is real. Recall that changes later decisions comes on longer-lived cases.
+### 3. The agent fleet follows up
 
-### Security
+The orchestrator sends work to the right specialist agents. They contact agencies, exchange status, and hand off tasks when one agency depends on another.
 
-Each specialist gets its own [Agent Identity](https://docs.cloud.google.com/gemini-enterprise-agent-platform/govern/agent-identity-overview) — a platform principal, not a shared service account. The education engine cannot answer as the health engine. Later escalations name the verifier, not "system."
+Inside the fleet, [Agent Runtime](https://docs.cloud.google.com/gemini-enterprise-agent-platform/build/runtime) hosts the agents, and [A2A](https://docs.cloud.google.com/gemini-enterprise-agent-platform/build/agent-to-agent-communication) handles controlled agent to agent coordination.
 
-Each specialist also sees only its allowed fields. Education gets name, DOB, referral ID. Not medical notes or legal strategy. We built this as an authority gateway in our code; it is not [Agent Gateway](https://docs.cloud.google.com/gemini-enterprise-agent-platform/govern/gateways/agent-gateway-overview), which is Google's egress control point.
+### 4. The case pauses and wakes later
 
-The school's reply goes through [Model Armor](https://docs.cloud.google.com/model-armor/overview) — Google's screen for injection, jailbreak, and sensitive-data patterns. Our template is `caserelay-screen`. It flags "retrieve Maya's medical notes" but not "medical notes" in a summary. Screening fails closed. The verifier opens an escalation in its own identity. The request never runs.
+When an agency asks for more time, CaseRelay does not depend on someone remembering to come back. The case is parked and resumed when the deadline arrives.
+
+When Maya's follow up is not ready yet, Firestore checkpoints, [Cloud Scheduler](https://cloud.google.com/scheduler), [Pub/Sub](https://cloud.google.com/pubsub), and [Memory Bank](https://docs.cloud.google.com/gemini-enterprise-agent-platform/scale/memory-bank) keep the long running case alive across sessions.
+
+### 5. Guardrails decide when to stop
+
+If a reply asks for something out of scope, CaseRelay stops the action and routes it to a supervisor instead of letting the model continue.
+
+When a reply crosses the boundary, [Model Armor](https://docs.cloud.google.com/model-armor/overview), gateway policies, audit logs, and human in the loop escalation keep the workflow governed.
+
+![CaseRelay multi agent mesh](diagrams/caserelay-multi-agent-mesh.png)
+
+This is the technical view of the same Maya workflow: Copilot at the front, orchestration in the middle, and GEAP runtime, identity, guardrails, memory, and observability around the fleet.
+
+## How CaseRelay became an enterprise agent fleet
+
+The walkthrough above is what Elena sees. Underneath it, GEAP gave us the pieces to make the fleet reusable, governed, and able to wake back up later.
+
+### How do agents discover and work with each other?
+
+This matters beyond Maya's case. [Agent Registry](https://docs.cloud.google.com/gemini-enterprise-agent-platform/govern/agent-registry) gives the organization a catalogue of approved agents and their routes. Nothing in a run looks it up: the catalogue is for discovery only, not routing. You find an agent in the Registry; you wire it via [A2A](https://docs.cloud.google.com/gemini-enterprise-agent-platform/build/agent-to-agent-communication).
+
+### How does a case last when nobody is watching?
+
+For Elena, the important part is that the work survives after she closes the browser. [Agent Runtime](https://docs.cloud.google.com/gemini-enterprise-agent-platform/build/runtime) runs each specialist engine. Firestore holds the case: commitments, grants, and wake times. When an agency needs more time, CaseRelay writes checkpoints, ends the run, and waits for the next due date. [Cloud Scheduler](https://cloud.google.com/scheduler) finds due work and publishes to [Pub/Sub](https://cloud.google.com/pubsub). An authenticated push resumes the waiting case. No browser click.
+
+[Memory Bank](https://docs.cloud.google.com/gemini-enterprise-agent-platform/scale/memory-bank) receives a session write at the end. Facts scoped to the `case_id` are recalled on the next run, so Maya's notes stay with Maya's case and do not leak into another child's work.
+
+### Who is allowed to see what, and what happens when a reply goes wrong?
+
+For Maya's record, access has to stay narrow. Each specialist gets its own [Agent Identity](https://docs.cloud.google.com/gemini-enterprise-agent-platform/govern/agent-identity-overview): a platform principal, not a shared service account. The education engine cannot answer as the health engine. Later escalations name the verifier, not "system."
+
+The school's reply goes through [Model Armor](https://docs.cloud.google.com/model-armor/overview): Google's screen for injection, jailbreak, and sensitive data patterns. Our template is `caserelay-screen`. It flags "retrieve Maya's medical notes" but not "medical notes" in a summary. Screening fails closed. The verifier opens an escalation in its own identity. The request never runs.
 
 [Agent Gateway](https://docs.cloud.google.com/gemini-enterprise-agent-platform/govern/gateways/agent-gateway-overview) intercepts every outbound call. MCP method names are parsed and checked against policy.
 
-### Observability
+### What evidence does the run leave behind?
 
-[Cloud Trace](https://docs.cloud.google.com/trace) shows the calls leaving the engines and Model Armor ruling on them. The filmed Cloud Trace captures in the GCP coda are genuine evidence taken during MCP-enabled runs — trace `442a845a56a86c50ee5d35be1891cdd7` from 2026-08-31 is the same waterfall: `MCP send tools/call family_status` as the root span, `apply_guardrail "Google Cloud Model Armor"` nested beneath it. The fleet's default configuration routes partner calls through the in-process simulator (`CASERELAY_PARTNER_MCP=0`). Agent Gateway remains active for all engine egress regardless of the MCP flag — it is the partner-call leg specifically that bypasses the gateway in the default configuration. [Agent Observability](https://docs.cloud.google.com/gemini-enterprise-agent-platform/optimize/observability/overview) collects the spans. [Cloud Logging](https://docs.cloud.google.com/logging) holds the gateway request log. This is not a picture of the agents thinking—ADK does not export execution traces. It is a picture of the perimeter.
-
-## Maya's scenario step by step
-
-This is what happens in the video. Each row maps to the phase boundary and the GEAP feature enforcing it.
-
-| Event | Feature enforced |
-|-------|------------------|
-| Intake extracts five commitments and proposes grants. | [Agent Runtime](https://docs.cloud.google.com/gemini-enterprise-agent-platform/build/runtime) — one reasoning loop for intake, separate from orchestrator. |
-| Waiting for approval gate: "approve activation for Maya." | [Agent Identity](https://docs.cloud.google.com/gemini-enterprise-agent-platform/govern/agent-identity-overview) + authority grants — Firestore writes `granted_by: advocate` (a named principal, not a system actor). No agent approves its own work. |
-| Five agencies contacted over A2A. Four confirm. School defers. | [Agent Runtime](https://docs.cloud.google.com/gemini-enterprise-agent-platform/build/runtime) + [A2A](https://docs.cloud.google.com/gemini-enterprise-agent-platform/build/agent-to-agent-communication) — each specialist is its own engine. Orchestrator fans out and waits. |
-| Run ends: "Checkpoint saved — 5 scheduled pushes will resume." | Firestore + [Cloud Scheduler](https://cloud.google.com/scheduler) + [Pub/Sub](https://cloud.google.com/pubsub) — durable state is written before the run dies. |
-| No activity for up to 60 seconds (sweep gap). | [Cloud Scheduler](https://cloud.google.com/scheduler) checks once a minute. Randomness is real. |
-| "Checked back _Ns_ later" — a new run resumes. Chase the school. | [Cloud Scheduler](https://cloud.google.com/scheduler) + [Pub/Sub](https://cloud.google.com/pubsub) — no user action. The checkpoint from the previous run (its staggered deadline, not the school's) fired it. |
-| School reply: "retrieve Maya's medical records." | [Model Armor](https://docs.cloud.google.com/model-armor/overview) + [Sensitive Data Protection](https://docs.cloud.google.com/sensitive-data-protection/docs/sensitive-data-protection-overview) — fails closed. Escalation opens in verifier's identity. |
-| Waiting for escalation approval gate: "approve escalation for Maya." | [Agent Identity](https://docs.cloud.google.com/gemini-enterprise-agent-platform/govern/agent-identity-overview) — second gate. Firestore writes `decided_by: advocate`. The commitment is still open. |
-| Run resumes. School is chased. "Sarah Miller has taken on Maya's school enrollment." | [Agent Runtime](https://docs.cloud.google.com/gemini-enterprise-agent-platform/build/runtime) + authority grants — the name is written back to the case. Five for five. |
-| Session written to [Memory Bank](https://docs.cloud.google.com/gemini-enterprise-agent-platform/scale/memory-bank). | [Memory Bank](https://docs.cloud.google.com/gemini-enterprise-agent-platform/scale/memory-bank) — facts scoped to `case_id`. Next time this case wakes, the fleet remembers. |
-
-<!-- Captions: GCP console screenshots — Agent Runtime engines list, Firestore checkpoint document, Cloud Scheduler job config, Model Armor template, Cloud Trace waterfall, Agent Registry Agents tab -->
+For us, the run also had to leave evidence. [Cloud Trace](https://docs.cloud.google.com/trace) shows the calls leaving the engines and Model Armor ruling on them. The recorded Cloud Trace captures in the GCP console show an MCP enabled run: an outbound partner call appears as the root span, with `apply_guardrail "Google Cloud Model Armor"` nested beneath it. [Agent Observability](https://docs.cloud.google.com/gemini-enterprise-agent-platform/optimize/observability/overview) collects the spans. [Cloud Logging](https://docs.cloud.google.com/logging) holds the gateway request log. This is not a picture of the agents thinking. ADK does not export execution traces. It is a picture of the perimeter.
 
 ## Problems we faced
 
-**Couldn't wait 17 days.** The demo tells the story in two minutes, not weeks. We needed a real checkpoint with a short due time, let Cloud Scheduler sweep it, and resume from Firestore. That's why the film uses a 10-second window. The packet is still inherited; the clock is just compressed.
+**Scoped access had to be more than a prompt.** Each specialist should see only the fields needed for its job, not the whole case file. We handled that with an authority gateway in our code, separate from [Agent Gateway](https://docs.cloud.google.com/gemini-enterprise-agent-platform/govern/gateways/agent-gateway-overview), which controls outbound traffic.
 
-**Cloud Run redeploy cleared the feed.** Running a case inside a live process meant redeployment = lost history. So each run event became its own Firestore document. Wake is now Scheduler → Pub/Sub → a new run against that store. Agent Runtime is the reasoning engine. Firestore is what remembers.
+**Redeployment cleared the feed.** Early on, a case ran inside a single process. When we redeployed the control plane, that process died and the case history vanished. We fixed it by making every run event its own Firestore document. Now a run is wake, Scheduler to Pub/Sub message, then new execution against stored state. The history survives restarts because Firestore does.
 
-**Silent fallbacks cost us hours.** We dropped the fallback where the control plane could assemble a specialist locally if Cloud Run was unreachable. That was hiding bugs. Now if the control plane can't reach a specialist, it fails at startup. The laptop can still assemble everything in one process. Cloud Run cannot and should not pretend it can.
+**Silent fallbacks hide bugs.** We had a fallback where if Cloud Run was unreachable, the control plane would assemble a specialist agent in process. That silently hid connection problems. Now if a specialist is unreachable at startup, we fail hard and immediately. The laptop can still run everything in one process for testing; Cloud Run cannot pretend it can.
 
-## What I learned
+**Evaluation helped us stop old bugs from coming back.** While implementing the agents, we hit bugs that only showed up in certain case scenarios. Google ADK evals gave us a way to turn those scenarios into repeatable checks, so before a major change or deployment gate we could run them again and make sure the important flows still completed successfully.
 
-**Wake is architecture, not duration.** A long-running agent is not a long-running call—it's Firestore checkpoints, Cloud Scheduler sweeps, and Pub/Sub messages resuming parked work. If the process dies, that's not a feature; it's what happens when the call ends. We checkpoint before returning.
+## What we liked
 
-**Governance lives in the tool surface, not the prompt.** The orchestrator had an `activate_case` tool and the prompt said the supervisor signed off. The model approved its own work anyway. Removing the tool from `CONTROL_PLANE_TOOLS` fixed it—you cannot invoke what the model cannot see.
+We came into GEAP and Google Cloud with almost no practical experience. At first the surface area felt big: agents, runtime, identity, gateway, memory, observability, deployment, and a portal that still had to feel simple for a CASA volunteer.
 
-**Guardrails need a stated failure mode.** The Google sample for Model Armor uses `failOpen: true`, which timeouts allow traffic through. For child records, that's wrong. Our gateway extension `caserelay-ma-authz-ext` uses `failOpen: false`. Armor errors quarantine the request as a value, not raise—the ADK model can continue past exceptions.
+The Google ecosystem helped us turn that into a build path. `agents-cli` and `gcloud` made deployment repeatable. ADK and Agent Runtime gave us a real place to run the agents. Agent Identity, Agent Gateway, Model Armor, Memory Bank, Firestore, Scheduler, Pub/Sub, and Cloud Trace gave us the pieces for access control, safety, wake ups, and proof.
 
-**Measurements that are wrong last longer than wrong code.** We traced with OpenTel headers, but engines start fresh trace IDs on each resumed run. Our custom eval scored 1.0 on hand-written fixtures and 0.0 on the real trace—data said "perfect" when it wasn't. We now key the verifier on its function response and test that it can fail.
+That mattered because it let us spend more time on the problem itself: how a volunteer follows up **without sharing too much data**, how a supervisor stays in the loop, and how a case can go quiet **without being forgotten**.
 
-## The stack
+## What we used
 
 | Layer | What we used |
 |-------|------------|
-| **Models** | Gemini 3.5 Flash on Vertex AI. Gemma 4 drafts short summaries on some records (not shown). |
+| **Models** | Gemini 3.5 Flash on Vertex AI for the agents. Gemma 4 drafts session summaries that the CaseRelay copilot and report flow can surface. Gemini Nano Banana helped create visuals for the demo video and architecture diagrams. |
+| **Frameworks** | Google ADK for the agent fleet. CopilotKit for the portal copilot experience. |
+| **Protocols** | A2A for agent to agent coordination. MCP for partner tool calls. AG UI for chat and the run event stream. |
 | **Agents** | Google ADK. Eight reasoning engines on [Agent Runtime](https://docs.cloud.google.com/gemini-enterprise-agent-platform/build/runtime) in `us-central1`. A2A to the specialists. |
 | **Platform** | [Agent Identity](https://docs.cloud.google.com/gemini-enterprise-agent-platform/govern/agent-identity-overview), [Agent Gateway](https://docs.cloud.google.com/gemini-enterprise-agent-platform/govern/gateways/agent-gateway-overview), [Agent Registry](https://docs.cloud.google.com/gemini-enterprise-agent-platform/govern/agent-registry), [Sessions](https://docs.cloud.google.com/gemini-enterprise-agent-platform/scale/sessions), [Memory Bank](https://docs.cloud.google.com/gemini-enterprise-agent-platform/scale/memory-bank), Model Armor, [Observability](https://docs.cloud.google.com/gemini-enterprise-agent-platform/optimize/observability/overview). |
-| **Backend** | Python, FastAPI, Cloud Run (auth-required). |
-| **State** | Firestore. Cloud Scheduler every minute. Pub/Sub to resume parked cases. |
-| **Frontend** | Next.js, Cloud Run (behind HTTP Basic auth). AG-UI for chat and the run stream. |
-| **Partners** | Simulated. Not live systems. |
-
-The model can draft the next chase. It cannot approve a case, clear a quarantine, or read a field it was not granted.
+| **Backend** | Python, FastAPI, Cloud Run (requires auth). |
+| **State** | Firestore. Cloud Scheduler on a recurring sweep. Pub/Sub to resume parked cases. |
+| **Frontend** | Next.js, Cloud Run (behind HTTP Basic auth). AG UI for chat and the run stream. |
+| **Partners** | Simulated partner agencies exposed through MCP tools. Not live systems. |
 
 ## Disclosures
 
-**Mock data.** Maya, Rosa, and Priya are fictional. The agencies are fixtures. No real child data.
+**Mock data.** Maya, Rosa, and Priya are fictional. The agencies are fixtures. We cannot use real child welfare records in a public hackathon demo video: the data is sensitive, the consent path is strict, and the point of the demo is to prove the workflow without exposing a real child, family, volunteer, court, or provider.
 
 **No endorsement.** This is a hackathon prototype, not endorsed by CASA or any court.
 
-**Authority gateway.** Field-level access control lives in our code. [Agent Gateway](https://docs.cloud.google.com/gemini-enterprise-agent-platform/govern/gateways/agent-gateway-overview) is Google's egress control point. We call ours the "authority gateway" to avoid confusion.
+**Compressed timeline.** A case like this can run for weeks: agencies ask for more time, checkpoints are written, Cloud Scheduler sweeps them, and the fleet wakes on time. The demo video uses a shortened window to show the same architecture quickly. The case is still inherited; only the deadline is compressed.
 
-**Memory Bank.** It works, but a two-minute run has almost nothing useful to recall yet. The write is real. Meaningful recall comes on cases that run for weeks.
+**Authority gateway.** Field level access control lives in our code. [Agent Gateway](https://docs.cloud.google.com/gemini-enterprise-agent-platform/govern/gateways/agent-gateway-overview) is Google's egress control point. We call ours the "authority gateway" to avoid confusion.
 
-**Portal is deployed, behind a password.** [`caserelay-portal-6nwo7o4bbq-uc.a.run.app`](https://caserelay-portal-6nwo7o4bbq-uc.a.run.app) — Cloud Run, HTTP Basic auth. Credentials on request. The [GitHub repo](https://github.com/akhil-bot/CaseRelay) may be private. Setup is in the [README](https://github.com/akhil-bot/CaseRelay/blob/main/README.md).
+**Portal is deployed, behind a password.** [`caserelay-portal-6nwo7o4bbq-uc.a.run.app`](https://caserelay-portal-6nwo7o4bbq-uc.a.run.app): Cloud Run, HTTP Basic auth. Credentials on request. Setup is in the [README](https://github.com/akhil-bot/CaseRelay/blob/main/README.md).
 
-**AI use during building.** Gemini 3.5 Flash helped with architecture and ADK API docs. The work is ours; the foundation is theirs.
+**AI use during building.** We used an agentic IDE while developing the code, Gemini for architecture help and ADK/API guidance, and Gemini Nano Banana for visuals used around the demo and architecture story. AI also helped us shape supporting assets such as image generation, Google Cloud integration notes, demo narration, and voiceover drafts. The product decisions, implementation, and final submission are ours.
 
 ## Resources
 
-**Demo video:** [not recorded yet — add YouTube/Vimeo URL before submission]
+**Demo video:** [Watch on YouTube](https://www.youtube.com/watch?v=Bp2PKUXg_PQ)
 
-**Repo:** [github.com/akhil-bot/CaseRelay](https://github.com/akhil-bot/CaseRelay) (may be private)
+**Repo:** [github.com/akhil-bot/CaseRelay](https://github.com/akhil-bot/CaseRelay)
 
-**Control plane:** [caserelay-control-plane-6nwo7o4bbq-uc.a.run.app](https://caserelay-control-plane-6nwo7o4bbq-uc.a.run.app) — Cloud Run, auth-required.
-
-**Portal:** [`caserelay-portal-6nwo7o4bbq-uc.a.run.app`](https://caserelay-portal-6nwo7o4bbq-uc.a.run.app) — Cloud Run, behind HTTP Basic auth. Credentials on request.
+**Portal:** [`caserelay-portal-6nwo7o4bbq-uc.a.run.app`](https://caserelay-portal-6nwo7o4bbq-uc.a.run.app): Cloud Run, behind HTTP Basic auth. Credentials on request.
 
 ---
 
 I created this piece of content for the purposes of entering the All Things Agentic Hackathon. #AllThingsAgenticHackathon
 
-CaseRelay is my [Fortified Enterprise Fleet](https://allthingsagentichackathon.devpost.com/) entry.
+CaseRelay is our [Fortified Enterprise Fleet](https://allthingsagentichackathon.devpost.com/) entry.
