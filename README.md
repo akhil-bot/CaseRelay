@@ -38,19 +38,25 @@ Clone and run — no GCP project, no service account, no API key:
 ```bash
 git clone git@github.com:akhil-bot/CaseRelay.git && cd CaseRelay
 uv sync && source .venv/bin/activate
+cd portal && npm install && cd ..   # needed for t2.3 (TypeScript typecheck)
 python harness/gate.py --all
 ```
 
-Expected output: **33 passed, 0 failed, 3 skipped**. The 3 skips are marked `slow=True` in the
+Expected output: **34 passed, 0 failed, 3 skipped**. The 3 skips are marked `slow=True` in the
 source and name themselves; they talk to Vertex, Cloud Run and Cloud Scheduler and are excluded
 unless you pass `--slow`. A skip is never counted as a pass.
 
-What the 33 offline gates verify:
+**Without `npm install`** (skip the `cd portal` step): t2.3 announces itself as a skip and the
+result is **33 passed, 0 failed, 4 skipped**. **Without a Docker daemon** running: t12.1
+announces itself as a skip; without both it is **32 passed, 0 failed, 5 skipped**. No gate
+silently fails because a prerequisite is absent.
+
+What the 34 offline gates verify:
 
 | Gates | What they prove |
 |---|---|
 | t2.1 – t2.3 | No false model-version claims; no leaked answer key; TypeScript compiles |
-| t3.1 | Store selects Firestore by default; `CASERELAY_STATE=memory` overrides it |
+| t3.1 – t3.2 | Store selects Firestore by default; `CASERELAY_STATE=memory` overrides it; 14 state-machine unit tests pass |
 | t4.1 – t4.4 | `RunContext` carries all four IDs; context isolates between concurrent tasks; trace ids are real OTel hex strings; gateway disclosures emit the three `caserelay.*` span attributes |
 | t5.1 – t5.3 | Two cases get distinct checkpoints; checkpoints carry a tz-aware `due_at`; Firestore index covers `state + due_at` |
 | t6.1 | Audit log rejects duplicate `event_id` (immutability enforced in code, not policy) |
@@ -62,7 +68,6 @@ What the 33 offline gates verify:
 | t13.1, t14.1 | Checked-in OpenAPI contract matches the live app schema; admin spec names all required endpoints |
 
 To run a single gate: `python harness/gate.py t5.1`. To run a stage: `python harness/gate.py --stage 1`.
-The 14-test state-machine unit suite is separate: `CASERELAY_STATE=memory pytest tests/test_case_machine.py -v` (no PYTHONPATH needed — configured in `pyproject.toml`).
 
 ---
 

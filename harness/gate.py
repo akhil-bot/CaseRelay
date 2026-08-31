@@ -8,14 +8,16 @@ between an unattended loop and another round of work that looks finished.
 
     python harness/gate.py t5.1          # one task
     python harness/gate.py --stage 1     # every gate in a stage
-    python harness/gate.py --all         # 33 gates, no credentials required
+    python harness/gate.py --all         # 34 gates, no credentials required
     python harness/gate.py --all --slow  # + 3 cloud gates (Vertex, Cloud Run, Scheduler)
     python harness/gate.py t5.1 --json   # machine-readable, for the driver
 
-Offline path: ``python harness/gate.py --all`` passes 33 gates and skips 3 on a
-fresh clone with no GCP credentials, no service account and no CASERELAY_* env
-vars set.  The 3 slow gates (t8.1, t11.5, t12.2) require a live GCP project;
-they announce themselves as SKIP, never as PASS.
+Offline path: ``python harness/gate.py --all`` passes 34 gates and skips 3 on a
+clone where ``uv sync``, ``cd portal && npm install`` and a Docker daemon are
+available.  Without npm install t2.3 skips (33 pass, 4 skip); without Docker
+t12.1 also skips.  The 3 slow gates (t8.1, t11.5, t12.2) require a live GCP
+project; all environment-conditional and slow gates announce themselves as
+SKIP, never as PASS.
 """
 
 from __future__ import annotations
@@ -88,7 +90,8 @@ class GateResult:
     @property
     def summary(self) -> str:
         if self.status == SKIP:
-            return f"{self.task_id}: skipped (slow gate, pass --slow to run)"
+            reason = self.next_actions[0] if self.next_actions else "slow gate, pass --slow to run"
+            return f"{self.task_id}: skipped ({reason})"
         failed = [c for c in self.checks if not c.ok]
         if not failed:
             return f"{self.task_id}: {len(self.checks)}/{len(self.checks)} checks passed"
@@ -109,6 +112,17 @@ class Ctx:
 
     def __init__(self) -> None:
         self.checks: list[Check] = []
+        self._skip_reason: str | None = None
+
+    def skip(self, reason: str) -> None:
+        """Signal that this gate cannot run in the current environment.
+
+        A skipped gate is never counted as a pass or a fail.  Call this and
+        return from the gate function when a hard prerequisite (npm install,
+        Docker daemon, …) is absent so the gate announces itself clearly
+        instead of showing a spurious failure.
+        """
+        self._skip_reason = reason
 
     def add(self, ok: bool, label: str, detail: str = "") -> bool:
         self.checks.append(Check(bool(ok), label, detail.strip()[:1200]))
@@ -256,7 +270,7 @@ def _(c: Ctx) -> None:
     c.rg_absent(r"evt-2051|26 correlated spans", "portal/src/", "invented proof strings are gone")
     tsc = ROOT / "portal" / "node_modules" / ".bin" / "tsc"
     if not tsc.exists():
-        c.add(False, "portal typechecks", "portal/node_modules missing - run npm install in portal/")
+        c.skip("portal/node_modules missing — run: cd portal && npm install")
         return
     rc, out = c.sh("./node_modules/.bin/tsc --noEmit", timeout=300, cwd=ROOT / "portal")
     c.add(rc == 0, "portal typechecks after the deletions", out[-1500:])
@@ -297,6 +311,15 @@ def _(c: Ctx) -> None:
         """,
         "CASERELAY_STATE=memory still opts out",
     )
+
+
+@gate("t3.2")
+def _(c: Ctx) -> None:
+    rc, out = c.sh(
+        f"CASERELAY_STATE=memory {PY} -m pytest tests/test_case_machine.py -v --tb=short",
+        timeout=60,
+    )
+    c.add(rc == 0, "14 state-machine unit tests pass", out[-2000:])
 
 
 @gate("t4.1")
@@ -1218,6 +1241,10 @@ def _(c: Ctx) -> None:
 
 @gate("t12.1")
 def _(c: Ctx) -> None:
+    rc_d, _ = c.sh("docker info", timeout=15)
+    if rc_d != 0:
+        c.skip("docker daemon unavailable — start Docker Desktop or install Docker Engine")
+        return
     rc, out = c.sh("docker build -f backend/Dockerfile -t caserelay-control-plane:gate .", timeout=1200)
     c.add(rc == 0, "docker build succeeds", out[-2500:])
     if rc != 0:
@@ -1362,6 +1389,8 @@ def run_gate(task_id: str, allow_slow: bool) -> GateResult:
     except Exception as e:  # noqa: BLE001 - a crashing gate is a failing gate
         import traceback
         c.add(False, "gate ran without crashing", traceback.format_exc()[-1500:])
+    if c._skip_reason is not None:
+        return GateResult(task_id, SKIP, [], [c._skip_reason])
     status = PASS if c.checks and all(ck.ok for ck in c.checks) else FAIL
     res = GateResult(task_id, status, c.checks)
     if status == FAIL:
