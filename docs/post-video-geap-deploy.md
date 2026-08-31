@@ -98,7 +98,7 @@ Two changes still outstanding, plus a redeploy:
 
 The agent instruction change has been made to all five specialist agents (`education`, `shelter`, `health`, `legal`, `family`) in the current working tree. It does not take effect in the cloud until the fleet is redeployed. The two outstanding changes (`scenarios.py` and the `main.py` override block) must still be written and deployed — without them, the control-plane override is still active and the new agent instruction is never exercised.
 
-Requires a **fleet redeploy** (education engine minimum) plus control-plane redeploy — fold both into whichever deploy happens first after the outstanding code changes are applied.
+Requires a **fleet redeploy first** (education engine minimum), then a **control-plane redeploy** to remove the override. The fleet must go first — removing the `first_contact_defer` override before the specialist can report `deferred` leaves nothing producing a deferral and breaks the Maya arc. Do not shift control-plane traffic until the education engine's A2A card confirms the new code is serving.
 
 **Verify after:** run a fresh maya case and confirm the fan-out row still reads as a deferral, that it now originates from the specialist rather than the override, and that the check-back still produces the quarantine. If education comes back `unresolved` at fan-out, the instruction change did not land on the engine.
 
@@ -137,7 +137,7 @@ With:
 "its granted fields. Then stop."
 ```
 
-Requires a **fleet redeploy** (orchestrator engine only) to take effect in the cloud.
+Requires a **control-plane redeploy** to take effect in the cloud. `backend/runtime/fleet.py` ships in the control-plane image, not the fleet engines.
 
 **Verify after:** run a full Maya case through to the escalation-resume beat. Confirm:
 1. The orchestrator calls `get_commitment_states` exactly once.
@@ -145,6 +145,10 @@ Requires a **fleet redeploy** (orchestrator engine only) to take effect in the c
 3. No duplicate specialist calls appear — the orchestrator must not re-ask a specialist whose commitment is already resolved.
 
 If the orchestrator chases both or neither specialist, or calls `get_commitment_states` more than once in the same session, the prompt is still producing nondeterministic routing and should be reverted again pending further refinement.
+
+### 9. Model Armor 403 on the 11-memory phase (unresolved)
+
+Roughly 29% of runs fail at the `11-memory` phase with a Model Armor 403, surfacing as `run_partial_failure` in the run record. Tracked as gate `t8.1` (skipped, `slow=True`) and documented in `docs/demo-day-checklist.md`. There is no current fix — if it fires during a take, abandon the run and start a fresh case.
 
 ---
 

@@ -58,9 +58,7 @@ want() { [[ "$STEP" == all || "$STEP" == "$1" ]]; }
 # --------------------------------------------------------------------------------------
 # Preconditions worth reading before you run anything
 # --------------------------------------------------------------------------------------
-# 1. All eight engines are currently UNBOUND (verified 2026-08-28). Until at least one is
-#    PATCH-bound to caserelay-egress, none of this governs a single request. See Phase 1.4
-#    of docs/agent-gateway-adoption-plan.md.
+# 1. All eight engines are bound to caserelay-egress. These policies govern live traffic.
 # 2. The partner MCP server is not registered in Agent Registry yet (mcp-servers list was
 #    empty as of 2026-08-28), so the partner IAM step will no-op until
 #    infra/deploy_partners.sh has run.

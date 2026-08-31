@@ -682,7 +682,7 @@ A useful pairing for demos: `--keep`, then `python infra/case_cli.py show <case_
 
 ### Portal status
 
-The portal runs locally via `npm run dev`. `caserelay-portal.web.app` is not live. Per the official hackathon rules, a hosted URL is optional ("Your app does not need to be publicly accessible or live at the exact moment of submission or judging").
+The portal is deployed at [`caserelay-portal-6nwo7o4bbq-uc.a.run.app`](https://caserelay-portal-6nwo7o4bbq-uc.a.run.app) on Cloud Run, behind HTTP Basic auth. Credentials on request. `caserelay-portal.web.app` is not live.
 
 Persona switching (advocate vs. platform view) is UI-only and carries no authentication or access-control implications. There is no end-user authentication.
 
