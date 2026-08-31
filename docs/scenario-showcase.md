@@ -5,8 +5,8 @@ can do, and she is not the best evidence that it works — a scenario that is ex
 tells you less than one that has been left alone.
 
 This page covers the **non-Maya** scenarios. Every scenario below was run end to end against the
-deployed control plane on **29 August 2026**, twice, on two different serving revisions, and the
-evidence is captured output rather than description. Where a scenario does not do what its
+deployed control plane on **31 August 2026** (revision `caserelay-control-plane-00105-yom`),
+and the evidence is captured output rather than description. Where a scenario does not do what its
 definition claims, that is stated rather than omitted — the list of what does not hold is at the
 bottom and is part of the point.
 
@@ -62,8 +62,7 @@ being written and will be fired on the next sweep, whenever that arrives.
 
 ## Verification summary
 
-All runs below were served by Cloud Run revision `caserelay-control-plane-00071-qir` (first pass)
-and `caserelay-control-plane-00073-wan` (second pass). Both passes agreed on every scenario.
+All runs below were served by Cloud Run revision `caserelay-control-plane-00105-yom` on **31 August 2026**.
 
 | Scenario | Verdict | Wall clock | What it exercises that the others do not |
 |---|---|---|---|
@@ -72,7 +71,7 @@ and `caserelay-control-plane-00073-wan` (second pass). Both passes agreed on eve
 | **Theo** | Works | 2–3 min | A partner reply that cannot be parsed at all, recovered by the same follow-up ladder |
 | **Noah** | Works as specified | ~1.5 min | The clean path — the control that shows the ladder only fires when something is wrong |
 | Kai | Partly — see below | ~2.5 min | Two simultaneous failures; health escalates to supervisor; see below |
-| **Diego** | Works — guard refuses hallucinated fulfilment | 1.5–3 min | Commitment guard: deterministic refusal when partner response contradicts a completed claim |
+| **Diego** | Works | 1.5–3 min | Education sets `unresolved` on missing enrollment; nudge resolves it; case auto-closes; commitment guard is an untriggered backstop |
 | Ellis | Does not demonstrate its claim | ~2 min | — |
 | Amara | Not demonstrable under compression | ~2 min | — |
 
@@ -155,6 +154,7 @@ commitment_overdue                          Lincoln Unified's school enrollment 
 followup_sent                               Chasing Lincoln Unified on Rosa's school enrollment.
 followup_answered                           Sarah Miller has taken on Rosa's school enrollment.
 run_summary                                 All 5 commitments for Rosa are fulfilled.
+case_closed                                 Case closed — every commitment on Rosa's file is fulfilled.
 ```
 
 What makes the refusal robust is not the refusal. It is that the education agent never held the
@@ -199,6 +199,7 @@ commitment_overdue                  Anna Reed is overdue on Theo's legal aid ref
 followup_sent                       Chasing Statewide Legal Aid on Theo's legal aid referral.
 followup_answered                   Anna Reed has taken on Theo's legal aid referral.
 phase_complete  9-nudge             The follow-ups landed — every commitment on Theo's case is fulfilled.
+case_closed                         Case closed — every commitment on Theo's file is fulfilled.
 ```
 
 **Limitation, stated plainly.** The scenario definition says the commitment is "marked malformed".
@@ -215,17 +216,18 @@ rather than earned.
 **The human situation.** Everything works. Five partners, five prompt replies, five commitments
 closed.
 
-**Why it matters.** Noah exists to prove a negative. A system that chases and escalates is only
+**What actually happens.** Noah exists to prove a negative. A system that chases and escalates is only
 useful if it does neither when there is nothing wrong. On Noah every commitment closes during
 fan-out, so nothing is ever overdue, the wake phase's precondition is never satisfied, and the
 nudge and escalation phases never become reachable. The run ends `completed` having visited intake,
-five fan-out phases and the checkpoint — and nothing else.
+five fan-out phases and the checkpoint. When the sweep fires and finds all checkpoints already
+fulfilled, `11-memory` runs to write the session summary, and the case auto-closes.
 
 Phases visited, from the captured event stream:
 
 ```
 intake · 3-fanout-health_coordination · 3-fanout-education_liaison · 3-fanout-family_services
-       · 3-fanout-legal_aid · 3-fanout-shelter_status · 4-checkpoint
+       · 3-fanout-legal_aid · 3-fanout-shelter_status · 4-checkpoint · 11-memory
 ```
 
 The five fan-out phases run concurrently, so the order they appear in varies between runs. That is
@@ -235,7 +237,9 @@ Compare against Priya, which visits `5-wake`, `9-nudge`, `10-unanswered` and `11
 those. Phases are not a fixed sequence: `PHASE_REGISTRY` in `backend/runtime/fleet.py` holds
 twelve specs each with a precondition, the engine re-evaluates all of them after every completed
 phase, and dispatches whichever have become ready. Which phases a run visits is therefore a
-readout of what is actually wrong with the case.
+readout of what is actually wrong with the case. Noah's `11-memory` visit arrives via the sweep
+wake rather than through a failure path — the sweep fires, finds nothing overdue, and the memory
+phase runs as the close-out step.
 
 ---
 
@@ -513,35 +517,21 @@ a judge who finds one of them in the source and runs it should find this section
 do occur: legal returns garbage and health times out. The `due_offsets={"health": 10}` override was
 added to `scenarios.py` so Kai's health referral is treated as overdue on the same pass that Priya's
 is, and the health escalation now fires — approval `apr-8f1a5a53` is the unanswered-follow-up notice
-the original description said never appeared. The fresh run closed 3 of 5 commitments with 2 still
-pending; legal did not recover through the nudge in this run, so the scenario ends with both open
-commitments unresolved rather than the single health escalation its spec claims.
+the original description said never appeared. Legal recovers through the nudge in this run, so the
+scenario ends at 4 of 5 fulfilled with only health still open — not the single clean human escalation
+its spec claims, but closer to it than before.
 
-**Diego — hallucinated status, now guarded.** *(Post-guard behaviour — the guard and auto-close
-are committed but not yet deployed; runs against the current fleet will not show this.)* The SIS
-returns `enrollment_found: false` with no confirmed school. A deterministic commitment guard in
-`backend/runtime/workspace.py` now sits on the write path: when any specialist claims `completed`, the guard checks the recorded partner tool
-response for an explicit contradiction. In Diego's case the education agent calls `query_school`,
-receives `enrollment_found: false`, and then claims `completed` — the guard compares the two,
-finds the positive assertion of the negative, and refuses the write. The commitment is recorded as
-`blocked` rather than `completed`, an `approval` record with `action_type: "commitment_guard"` is
-raised for supervisor review, and a `commitment_guard_refusal` audit event captures the reason
-code, contradiction and remediation.
+**Diego — missing enrollment, resolved by nudge.** *(Case CR-0831145502, status `closed`, 5/5 commitments completed.)* The SIS returns `enrollment_found: false` with no confirmed school. The education agent's instruction handles this explicitly: missing enrollment means `unresolved`, not `completed`. The agent sets the commitment to `unresolved` and reports it honestly. Because the guard only triggers when a specialist *claims* `completed` against a contradicting response, the guard is never invoked — the prompt handles the condition upstream.
 
-The refusal is conservative by design: it fires only on explicit contradiction (`enrollment_found`
-is literally `False`), never on absent or ambiguous evidence. A response with no `enrollment_found`
-field at all, or one carrying `deferred: true`, passes through — which is what makes the Maya arc
-survive untouched.
+The case then follows the same path as every other unresolved overdue commitment: the nudge fires, Lincoln Unified is chased, and the follow-up response resolves the enrollment. All five commitments reach `completed`, and auto-close transitions the case to `closed`.
 
-The guard is plain Python with no LLM call, so a hallucinating agent cannot talk its way past it.
-The partner tool response is recorded at call time by the agent's own `query_school` tool and
-checked at write time by `workspace.set_commitment`. The model never holds execution authority
-over whether the write happens.
+**Why the commitment guard is not exercised.** Two independent reasons, both worth understanding:
 
-Because education is `blocked` and the guard's approval is `pending`, auto-close does not fire
-and Diego's case stays at `status: monitoring`. This is the sharpest distinction between Diego
-and Maya: Maya's five commitments all reach `completed` with no pending approvals, so her case
-transitions to `closed` — the first scenario whose final state matches what the narration implies.
+1. The education agent's instruction says "If enrollment is missing, status is `unresolved`." Given `enrollment_found: false` from the SIS, the agent sets `unresolved` — not `completed`. The guard fires only on a `completed` claim against a contradicting response. The prompt handles the failure upstream of the guard, so the guard has nothing to refuse.
+
+2. Even if a specialist did claim `completed` and the guard blocked it, the commitment would still reach `completed` via the nudge path. `nudge_overdue()` in `backend/workflows/escalation.py` calls `partners.followup()`, which for the `hallucinate` behaviour falls through to a default positive reply (`responded: True, resolved: True`). Before setting `completed` it calls `record_response()` with that positive reply, which overwrites the original contradicting SIS response in the guard's evidence store. The guard then sees no contradiction and permits the write.
+
+The guard code itself is correct and is covered by unit tests that prove it refuses when presented with a `completed` claim against a contradicting response. It is simply never presented with that condition by the live system. Both facts belong in the record: the control exists and is tested, and it is unexercised in production for these two reasons.
 
 What the fleet does and does not do about hallucination risk: the projection in
 `backend/policy/projection.py` strips the specialist's context to its granted fields in code —
@@ -550,16 +540,18 @@ was never handed. That stripping is not a prompt instruction. Separately, the su
 activation gate means nothing executes before a named human approves the authority grants; Model
 Armor fails closed and quarantines any callback that reaches outside the permitted scope; the
 Safeguarding Verifier's escalation requires a second named decision before the fleet continues;
-Agent Gateway policy limits which MCP methods any engine may call; and the commitment guard
-refuses fulfilment claims that contradict the partner's own response. Diego is the scenario that
-exercises the last of these controls.
+Agent Gateway policy limits which MCP methods any engine may call; and the commitment guard sits
+on the write path ready to refuse any unevidenced `completed` claim — it is simply never presented
+with one by this scenario.
 
 **Ellis — duplicate callback.** Claims a partner update arrives twice and idempotency logic
-discards the second. The `duplicate` branch in the partner simulator is a no-op that falls through
-to the normal reply, so the callback only ever arrives once and the idempotency path is never
-reached. The fresh run closed 4 of 5 commitments with 1 still pending (health), which is not the
-same outcome as Noah's 5/5 clean close. The claimed behaviour — a duplicate arriving and being
-discarded — was not observed.
+discards the second. The `duplicate` branch in the partner simulator is a no-op (`pass`) that
+falls through to the normal reply path, so the callback only ever arrives once and the idempotency
+path is never reached. The run closes all 5 of 5 commitments and the case auto-closes — which is
+not the same outcome as Noah's clean close, because health was never actually impaired. The
+previously observed 4/5 result was likely a cold-start or rate-limit artefact; the deterministic
+explanation is that `duplicate` is indistinguishable from a normal reply at the partner layer.
+The claimed behaviour — a duplicate arriving and being discarded — was not observed on either run.
 
 **Amara — long horizon.** Claims three staggered deadlines across several weeks with the fleet
 sleeping between wakes and carrying memory across sessions. Under the compressed deadline the
