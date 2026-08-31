@@ -1,8 +1,7 @@
 # Hackathon submission checklist
 
-What the Devpost submission still needs. Requirements are from
-[hackathon-rulebook.md](hackathon-rulebook.md) §3–§5, which mirrors the
-[official rules](https://allthingsagentichackathon.devpost.com/rules).
+What the Devpost submission still needs. Requirements are from the
+[official rules](https://allthingsagentichackathon.devpost.com/rules) §3–§5.
 
 **Deadline: Aug 31, 2026, 5:00 PM PDT.** After the submission period closes, no changes to the
 submission are permitted. Drafts can be edited freely until then, so create the Devpost draft
@@ -65,9 +64,9 @@ Four things, per the rules. All four are scored under Demo & Production Readines
 | Proof the backend runs on Google Cloud | Cloud Console: Agent Engines list, Cloud Run dashboard, Firestore documents, Cloud Trace waterfall, Agent Registry. A `.run.app` URL on screen also counts. |
 
 The runtime budget, beat list and console paths are in
-[demo-day-checklist.md](demo-day-checklist.md) and [demo-video-script.md](demo-video-script.md).
+[demo-test-script.md](demo-test-script.md).
 
-**Video blockers previously listed in `demo-day-checklist.md` that are now resolved** — verified by
+**Video blockers that are now resolved** — verified by
 reading the tree on 31 Aug 2026:
 
 - The `case_report` frontend tool exists in `portal/src/components/copilot/CopilotProvider.tsx` with

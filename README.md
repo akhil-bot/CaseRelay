@@ -164,7 +164,6 @@ authentication or access-control implications. There is no end-user authenticati
 | [docs/scenario-showcase.md](docs/scenario-showcase.md) | The non-Maya scenarios with captured cloud evidence — and the ones that do not hold up |
 | [docs/caserelay-walkthrough.md](docs/caserelay-walkthrough.md) | Per-phase detail, expected outputs, the control-plane API surface |
 | [docs/hackathon-blog.md](docs/hackathon-blog.md) | The contest write-up |
-| [docs/hackathon-rulebook.md](docs/hackathon-rulebook.md) | Official rules, scoring and judging criteria, mirrored in-repo |
 | [docs/submission-checklist.md](docs/submission-checklist.md) | What the Devpost submission still needs |
 | [contracts/openapi.json](contracts/openapi.json) | The control-plane OpenAPI contract |
 
