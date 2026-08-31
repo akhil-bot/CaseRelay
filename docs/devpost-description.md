@@ -55,7 +55,7 @@ Agent Platform Sessions hold the operator chat transcript and every orchestrator
 - **Agent Platform Sessions** — `caserelay-chat-sessions` for chat transcripts; `caserelay-orchestrator` engine for agent run transcripts
 - **Memory Bank** — instance `8631858420611284992` via ADK's `VertexAiMemoryBankService`, scoped per case
 - **Model Armor** — template `caserelay-screen` with SDP Advanced Config referencing a Cloud DLP inspect template; fails closed
-- **Agent Observability** — Cloud Trace carries Google-generated spans for MCP tool calls and Model Armor evaluations traversing Agent Gateway; demonstrated end-to-end on 2026-08-31 (trace `442a845a56a86c50ee5d35be1891cdd7`); the current serving configuration routes partner calls through the in-process simulator (`CASERELAY_PARTNER_MCP=0`)
+- **Agent Observability** — Cloud Trace carries Google-generated spans for MCP tool calls and Model Armor evaluations traversing Agent Gateway; demonstrated end-to-end on 2026-08-31 (trace `442a845a56a86c50ee5d35be1891cdd7`); the fleet's default routes partner calls through the in-process simulator (`CASERELAY_PARTNER_MCP=0`) — setting the flag to `1` reproduces fresh gateway spans
 - **ADK** — Agent Development Kit; reasoning engines, A2A, MCP integration
 - **A2A** — Agent-to-Agent communication; authenticated cross-engine routing
 - **Gemini 3.5 Flash** — all eight agents; model string `gemini-3.5-flash`
