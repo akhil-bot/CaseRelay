@@ -22,6 +22,9 @@ dependencies = [
     "mcp>=2.0",
 ]
 
+[tool.pytest.ini_options]
+pythonpath = ["."]
+
 [tool.hatch.build.targets.wheel]
 packages = ["app", "backend", "contracts"]
 

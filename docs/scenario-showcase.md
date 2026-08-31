@@ -526,6 +526,17 @@ Incorrect Tool Output Processing scores. The run completes and closes cleanly; n
 activity feed identifies the false basis. Do not narrate this as a demonstrated failure — it is
 evaluation fodder, not a visible guardrail.
 
+What the fleet does and does not do about hallucination risk: the projection in
+`backend/policy/projection.py` strips the specialist's context to its granted fields in code —
+the education agent receives a three-key dict and cannot hallucinate around or leak a field it
+was never handed. That stripping is not a prompt instruction. Separately, the supervisor
+activation gate means nothing executes before a named human approves the authority grants; Model
+Armor fails closed and quarantines any callback that reaches outside the permitted scope; the
+Safeguarding Verifier's escalation requires a second named decision before the fleet continues;
+and Agent Gateway policy limits which MCP methods any engine may call. None of these controls
+prevent a specialist from reporting fulfilment against a false tool response — that is the Diego
+gap, and it is what the HALLUCINATION metric is measuring.
+
 **Ellis — duplicate callback.** Claims a partner update arrives twice and idempotency logic
 discards the second. The `duplicate` branch in the partner simulator is a no-op that falls through
 to the normal reply, so the callback only ever arrives once and the idempotency path is never

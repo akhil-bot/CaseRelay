@@ -31,6 +31,41 @@ escalate missing handoffs to a named human — without making decisions about ch
 
 ---
 
+## Verify without credentials
+
+Clone and run — no GCP project, no service account, no API key:
+
+```bash
+git clone git@github.com:akhil-bot/CaseRelay.git && cd CaseRelay
+uv sync && source .venv/bin/activate
+python harness/gate.py --all
+```
+
+Expected output: **33 passed, 0 failed, 3 skipped**. The 3 skips are marked `slow=True` in the
+source and name themselves; they talk to Vertex, Cloud Run and Cloud Scheduler and are excluded
+unless you pass `--slow`. A skip is never counted as a pass.
+
+What the 33 offline gates verify:
+
+| Gates | What they prove |
+|---|---|
+| t2.1 – t2.3 | No false model-version claims; no leaked answer key; TypeScript compiles |
+| t3.1 | Store selects Firestore by default; `CASERELAY_STATE=memory` overrides it |
+| t4.1 – t4.4 | `RunContext` carries all four IDs; context isolates between concurrent tasks; trace ids are real OTel hex strings; gateway disclosures emit the three `caserelay.*` span attributes |
+| t5.1 – t5.3 | Two cases get distinct checkpoints; checkpoints carry a tz-aware `due_at`; Firestore index covers `state + due_at` |
+| t6.1 | Audit log rejects duplicate `event_id` (immutability enforced in code, not policy) |
+| t7.1 – t7.3 | All nine scenarios exist; maya injects, noah is clean; simulator resolves behaviour from case state |
+| t9.1 – t9.6 | API routes exist and are wired; scenario-backed create works; 403/404 in schema; agent card tool lists match deployed tools |
+| t10.1 – t10.3 | Run submission returns 202 in under a second; SSE stream delivers events queued before and after connect; control plane fails closed with no specialist endpoints |
+| t11.1 – t11.4, t11.6 | Sweeper returns overdue checkpoints and skips future ones; idempotent double-sweep; wake audit names the scheduler not a volunteer; `due_in` sets a real deadline; case deletion removes checkpoints, locks and run events |
+| t12.1, t12.3 | Docker image builds clean; CORS is configured and not a wildcard-with-credentials |
+| t13.1, t14.1 | Checked-in OpenAPI contract matches the live app schema; admin spec names all required endpoints |
+
+To run a single gate: `python harness/gate.py t5.1`. To run a stage: `python harness/gate.py --stage 1`.
+The 14-test state-machine unit suite is separate: `CASERELAY_STATE=memory pytest tests/test_case_machine.py -v` (no PYTHONPATH needed — configured in `pyproject.toml`).
+
+---
+
 ## Quick start
 
 The local path runs the whole flagship case — intake, activation gate, five-way fan-out,

@@ -8,11 +8,14 @@ between an unattended loop and another round of work that looks finished.
 
     python harness/gate.py t5.1          # one task
     python harness/gate.py --stage 1     # every gate in a stage
-    python harness/gate.py --all
+    python harness/gate.py --all         # 33 gates, no credentials required
+    python harness/gate.py --all --slow  # + 3 cloud gates (Vertex, Cloud Run, Scheduler)
     python harness/gate.py t5.1 --json   # machine-readable, for the driver
 
-Gates marked slow=True talk to Vertex, Firestore or Cloud Run and cost money.
-They are skipped unless --slow is passed, and reported as SKIP (not PASS).
+Offline path: ``python harness/gate.py --all`` passes 33 gates and skips 3 on a
+fresh clone with no GCP credentials, no service account and no CASERELAY_* env
+vars set.  The 3 slow gates (t8.1, t11.5, t12.2) require a live GCP project;
+they announce themselves as SKIP, never as PASS.
 """
 
 from __future__ import annotations
