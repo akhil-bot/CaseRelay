@@ -111,7 +111,7 @@ The video runs the flagship case — intake, activation gate, five-way fan-out, 
 
 **No endorsement.** This is a hackathon prototype, not endorsed by CASA or any court.
 
-**Portal is deployed, behind a session login.** Navigate to `/login`, choose any role, and sign in with email `admin@caserelay.com` and password `***REDACTED***`. The pre-filled email on the role pages is a persona placeholder — use `admin@caserelay.com` regardless of which role you choose.
+**Portal is deployed, behind a session login.** Navigate to `/login`, choose any role, and sign in with email `admin@caserelay.com` and the password supplied in the Devpost submission's testing instructions. The pre-filled email on the role pages is a persona placeholder — use `admin@caserelay.com` regardless of which role you choose.
 
 **Compressed runs use the same machinery.** `due_in` compresses the checkpoint deadlines — not the execution path. The run that writes the checkpoints ends and is recorded `suspended`. Cloud Scheduler sweeps once a minute, finds the due checkpoints, and publishes to Pub/Sub. An authenticated push starts a new run with a new `run_id` and new Firestore records. In the filmed case (`CR-0830203440`) the checkpoint run was `84bd42c6b0c4`; the wake run started by the sweep was `411d07c94595`. The gap is whatever remains of the minute: 25 seconds on the reference run (`CR-0830212122`), about ten in the filmed run, never more than 60.
 

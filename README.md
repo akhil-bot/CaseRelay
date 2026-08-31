@@ -24,7 +24,7 @@ escalate missing handoffs to a named human — without making decisions about ch
 | **Demo video** | *(URL to be added — video recorded, pending upload)* |
 | **Repository** | [github.com/akhil-bot/CaseRelay](https://github.com/akhil-bot/CaseRelay) |
 | **Control plane** | [`caserelay-control-plane-6nwo7o4bbq-uc.a.run.app`](https://caserelay-control-plane-6nwo7o4bbq-uc.a.run.app) — Cloud Run, auth-required (anonymous requests return 403) |
-| **Portal** | [`caserelay-portal-6nwo7o4bbq-uc.a.run.app`](https://caserelay-portal-6nwo7o4bbq-uc.a.run.app) — Cloud Run, behind a session login. Go to `/login`, choose any role, enter email `admin@caserelay.com` and password `***REDACTED***`. |
+| **Portal** | [`caserelay-portal-6nwo7o4bbq-uc.a.run.app`](https://caserelay-portal-6nwo7o4bbq-uc.a.run.app) — Cloud Run, behind a session login. Go to `/login`, choose any role, enter email `admin@caserelay.com` and the password supplied in the Devpost submission's testing instructions. |
 | **Architecture diagram** | The image above, sources in [`docs/diagrams/`](docs/diagrams/) |
 | **Spin-up instructions** | [docs/deploy.md](docs/deploy.md) |
 | **Write-up** | [docs/hackathon-blog.md](docs/hackathon-blog.md) — source of truth for the contest blog. DEV.to: publish from this file (URL TBD). |

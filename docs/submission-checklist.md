@@ -45,11 +45,11 @@ the deployment is private.** Put the login steps in the Devpost submission notes
 1. Go to `https://caserelay-portal-6nwo7o4bbq-uc.a.run.app/login`
 2. Choose any role (e.g. "CASA volunteer advocate")
 3. **Clear the pre-filled email** and enter `admin@caserelay.com`
-4. Enter password `***REDACTED***`
+4. Enter the password supplied in the Devpost submission's testing instructions
 5. Click "Sign in"
 
 The pre-filled email on each role page is a persona placeholder and will not authenticate. Only
-`admin@caserelay.com` with the password above works.
+`admin@caserelay.com` with the Devpost-supplied password works.
 
 Judging runs to **Oct 1, 2026**, so the services need to stay up until then, or the video has to
 carry the proof on its own — which the rules explicitly allow.
