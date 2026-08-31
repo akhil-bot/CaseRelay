@@ -294,3 +294,130 @@ class TestResolveServiceType:
 
     def test_unknown_returns_none(self):
         assert resolve_service_type("random-string") is None
+
+
+# ---------------------------------------------------------------------------
+# Auto-close: workspace.try_close
+# ---------------------------------------------------------------------------
+
+SERVICES = ("education", "health", "legal", "shelter", "family_services")
+
+
+def _make_full_case(case_id: str, *, statuses: dict[str, str] | None = None,
+                    approvals: list[dict] | None = None) -> None:
+    """Create a case at monitoring with five commitment rows."""
+    workspace.create_case(case_id, {
+        "case_id": case_id,
+        "child": {"name": "Test Child", "dob": "2015-01-01"},
+        "test_case": True,
+        "referrals": [{"type": s, "referral_id": f"ref-{s}", "target_org": f"Org-{s}"}
+                      for s in SERVICES],
+    })
+    workspace.commitments[case_id] = [
+        {"commitment_id": f"cmt-{s}", "type": s, "status": (statuses or {}).get(s, "completed")}
+        for s in SERVICES
+    ]
+    workspace.activate(case_id, "supervisor-test")
+    if approvals:
+        for a in approvals:
+            workspace.add_approval(case_id, a)
+
+
+class TestTryClose:
+    """Auto-close fires only when every commitment is completed and nothing is pending."""
+
+    def test_all_completed_no_approvals_closes(self):
+        """Maya-like case: five completed, nothing pending → closes."""
+        _make_full_case("CLOSE-1")
+        assert workspace.try_close("CLOSE-1") is True
+        case = workspace.get_case("CLOSE-1")
+        assert case["status"] == "closed"
+        assert "closed_at" in case
+
+    def test_blocked_commitment_prevents_close(self):
+        """Diego-like case: one blocked by guard → stays open."""
+        _make_full_case("CLOSE-2", statuses={"education": "blocked"})
+        assert workspace.try_close("CLOSE-2") is False
+        assert workspace.get_case("CLOSE-2")["status"] == "monitoring"
+
+    def test_pending_approval_prevents_close(self):
+        """A pending approval of any kind blocks closure, even if all commitments complete."""
+        _make_full_case("CLOSE-3", approvals=[{
+            "approval_id": "apr-test-1",
+            "action_type": "escalation",
+            "decision": "pending",
+        }])
+        assert workspace.try_close("CLOSE-3") is False
+        assert workspace.get_case("CLOSE-3")["status"] == "monitoring"
+
+    def test_decided_approval_does_not_block(self):
+        """An approval that has been decided no longer blocks closure."""
+        _make_full_case("CLOSE-4", approvals=[{
+            "approval_id": "apr-test-2",
+            "action_type": "escalation",
+            "decision": "approve",
+            "decided_by": "supervisor",
+        }])
+        assert workspace.try_close("CLOSE-4") is True
+        assert workspace.get_case("CLOSE-4")["status"] == "closed"
+
+    def test_deferred_commitment_prevents_close(self):
+        """A deferred commitment means a checkpoint is waiting; case must stay open."""
+        _make_full_case("CLOSE-5", statuses={"shelter": "deferred"})
+        assert workspace.try_close("CLOSE-5") is False
+        assert workspace.get_case("CLOSE-5")["status"] == "monitoring"
+
+    def test_pending_commitment_prevents_close(self):
+        _make_full_case("CLOSE-6", statuses={"health": "pending"})
+        assert workspace.try_close("CLOSE-6") is False
+
+    def test_scheduled_commitment_prevents_close(self):
+        _make_full_case("CLOSE-7", statuses={"legal": "scheduled"})
+        assert workspace.try_close("CLOSE-7") is False
+
+    def test_unresolved_commitment_prevents_close(self):
+        """Unresolved means the partner couldn't fulfil it — not the same as done."""
+        _make_full_case("CLOSE-8", statuses={"family_services": "unresolved"})
+        assert workspace.try_close("CLOSE-8") is False
+
+    def test_draft_status_cannot_close(self):
+        """Only monitoring → closed is valid; a draft case must not jump."""
+        workspace.create_case("CLOSE-9", {
+            "case_id": "CLOSE-9",
+            "child": {"name": "Test", "dob": "2015-01-01"},
+            "test_case": True,
+            "referrals": [{"type": "education", "referral_id": "r1", "target_org": "O"}],
+        })
+        workspace.commitments["CLOSE-9"] = [
+            {"commitment_id": "c1", "type": "education", "status": "completed"},
+        ]
+        assert workspace.try_close("CLOSE-9") is False
+
+    def test_no_commitments_prevents_close(self):
+        """A case with zero commitments should not silently close."""
+        workspace.create_case("CLOSE-10", {
+            "case_id": "CLOSE-10",
+            "child": {"name": "Test", "dob": "2015-01-01"},
+            "test_case": True,
+            "referrals": [],
+        })
+        workspace.activate("CLOSE-10", "supervisor-test")
+        assert workspace.try_close("CLOSE-10") is False
+
+    def test_guard_blocked_plus_pending_approval_prevents_close(self):
+        """Diego exact scenario: one blocked commitment + its guard approval pending."""
+        _make_full_case("CLOSE-11", statuses={"education": "blocked"},
+                        approvals=[{
+                            "approval_id": "apr-guard-edu",
+                            "action_type": "commitment_guard",
+                            "commitment_type": "education",
+                            "decision": "pending",
+                        }])
+        assert workspace.try_close("CLOSE-11") is False
+        assert workspace.get_case("CLOSE-11")["status"] == "monitoring"
+
+    def test_idempotent_on_already_closed(self):
+        """Calling try_close on an already-closed case returns False, doesn't error."""
+        _make_full_case("CLOSE-12")
+        assert workspace.try_close("CLOSE-12") is True
+        assert workspace.try_close("CLOSE-12") is False

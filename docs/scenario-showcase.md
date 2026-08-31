@@ -537,6 +537,11 @@ The partner tool response is recorded at call time by the agent's own `query_sch
 checked at write time by `workspace.set_commitment`. The model never holds execution authority
 over whether the write happens.
 
+Because education is `blocked` and the guard's approval is `pending`, auto-close does not fire
+and Diego's case stays at `status: monitoring`. This is the sharpest distinction between Diego
+and Maya: Maya's five commitments all reach `completed` with no pending approvals, so her case
+transitions to `closed` — the first scenario whose final state matches what the narration implies.
+
 What the fleet does and does not do about hallucination risk: the projection in
 `backend/policy/projection.py` strips the specialist's context to its granted fields in code —
 the education agent receives a three-key dict and cannot hallucinate around or leak a field it

@@ -1118,6 +1118,9 @@ class _Narrator:
                 return f"Case notes updated — every status on {child}'s file is recorded."
             return f"Finished a step on {child}'s case."
 
+        if event == "case_closed":
+            return f"Case closed — every commitment on {child}'s file is fulfilled."
+
         if event == "phase_error":
             if service:
                 return f"Could not reach {self._org(service)} about {child}'s {self._subject(service)}."
@@ -1752,6 +1755,12 @@ def _run_background(
                     "event": "run_completed", "run_id": run_id, "case_id": case_id,
                     "commitment_states": commitments,
                     "message": narrator.line("run_completed", "done", commitment_states=commitments),
+                })
+
+            if workspace.try_close(case_id):
+                _push_event({
+                    "event": "case_closed", "run_id": run_id, "case_id": case_id,
+                    "message": narrator.line("case_closed", ""),
                 })
         except Exception as exc:  # noqa: BLE001
             workspace.update_run(run_id, state="failed", error=str(exc))

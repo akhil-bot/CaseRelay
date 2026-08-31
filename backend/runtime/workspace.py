@@ -362,6 +362,32 @@ class Workspace:
             self.load(case_id)
             return {row["type"]: row["status"] for row in self.commitments.get(case_id, [])}
 
+    def try_close(self, case_id: str) -> bool:
+        """Close the case if every commitment is completed and nothing is outstanding.
+
+        Returns True if the case was closed, False if any condition blocked it:
+        case not in ``monitoring``, a commitment not ``completed``, or a pending
+        approval of any kind (guard refusal, quarantine escalation, activation gate).
+        """
+        with self._lock_for(case_id):
+            self.load(case_id)
+            case = self.cases.get(case_id)
+            if not case or case.get("status") != "monitoring":
+                return False
+
+            states = [row["status"] for row in self.commitments.get(case_id, [])]
+            if not states or not all(s == "completed" for s in states):
+                return False
+
+            if any(a.get("decision") == "pending" for a in self.approvals.get(case_id, [])):
+                return False
+
+            assert_transition(case["status"], "closed")
+            case["status"] = "closed"
+            case["closed_at"] = _now().isoformat()
+            store.save_case(case_id, case)
+            return True
+
     def add_approval(self, case_id: str, approval: dict[str, Any]) -> dict[str, Any]:
         with self._lock_for(case_id):
             self.load(case_id)

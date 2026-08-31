@@ -141,6 +141,7 @@ Run 1 is fast — under a minute. If you are waiting three minutes for fan-out, 
 | 11-memory | `phase_started` | "Recording everything that happened for Maya's file." | — | Memory persistence |
 | 11-memory | `phase_complete` | "Case notes updated — every status on Maya's file is recorded." | 5–15s | All scopes written |
 | — | `run_completed` | "All 5 commitments for Maya are fulfilled." (or "4 of 5 commitments fulfilled for Maya." if the follow-up did not land) | — | Terminal state |
+| — | `case_closed` | "Case closed — every commitment on Maya's file is fulfilled." | immediate | Auto-close fires: all five commitments `completed`, no pending approvals. Case status moves from `monitoring` to `closed` |
 
 **Expect `9-nudge` not to fire.** Its precondition is a missed deadline with a commitment still open and no pending escalation — but education is still open when the escalation gate parks run 2, so there is no past deadline without a pending escalation to go with it. Once you approve the escalation, `8-followup` runs first: it makes another scoped request to the district, and if the district answers, education closes without the run ever reaching the nudge. That is what happened on case `CR-0831110100`.
 
@@ -200,7 +201,7 @@ Navigate to: **Console → Firestore → Select database "caserelay"**
 
 | Collection path | What to check |
 |---|---|
-| `cases/{case_id}` | Top-level doc: `status` is `"monitoring"` after a completed run — the `monitoring → closed` transition is defined in the state machine but is not triggered by any code path; monitoring is the terminal state. `child_name` is "Maya" |
+| `cases/{case_id}` | Top-level doc: `status` is `"closed"` after a fully completed run where all five commitments are `completed` and no approvals are pending. `closed_at` is set. `child_name` is "Maya" |
 | `cases/{case_id}/commitments` | 5 docs keyed by type. Education should show `status: "completed"` after a full run — closed by `8-followup` in run 3 |
 | `cases/{case_id}` referral packet | The education referral's `contact` starts null and ends as Sarah Miller, Enrollment Coordinator. That write is the escalation ladder's visible result |
 | `cases/{case_id}/authority_grants` | 5 docs. Each has `granted_to` matching an agent identity, `status: "granted"`, and **`granted_by: "advocate"`** — see below |
