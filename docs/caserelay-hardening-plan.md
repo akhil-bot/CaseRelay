@@ -537,9 +537,10 @@ and dead-lettering, and makes the event backbone in the README true. Delete the 
    is the test that stops the wake silently rotting.
 2. **Live short horizon — the demo.** The deadline offset is a *property of the scenario*, not a
    constant in the code: `maya` carries `due_in: 17d` for a real case, and the demo variant carries
-   `due_in: 10s`. It has to stay that short: `due_in` is the window the five per-commitment
+   `due_in: 10s`. It has to stay that short for the demo: `due_in` is the window the five per-commitment
    checkpoints are spread across, so the earliest lands at a fifth of it, and the wake phase only
-   promotes a checkpoint that is already past due — much longer and nothing wakes at all. Real Cloud
+   promotes a checkpoint that is already past due — much longer and the sweep fires them later, after
+   the full sweep interval, starting a new run then rather than immediately. Real Cloud
    Scheduler, real sweeper, real Pub/Sub, real resume — nothing is faked or shortened in the code
    path, and the case genuinely falls due 10 seconds after creation. Close the
    laptop, come back, it happened. Note what this is *not*: no test-only endpoint rewrites a

@@ -65,9 +65,7 @@ This is not a commitment deadline. It is the window across which the five per-co
 checkpoints are spread, at `now + due_in × (i+1)/5`, computed during the checkpoint phase. The wake
 phase asks for already-due checkpoints seven to twelve seconds later.
 
-At `10s` the earliest checkpoint has fired and the run continues into the wake, quarantine,
-follow-up and memory phases. At `60s` it has not, and the run ends early with the interesting half
-of the arc unreachable. Ten seconds is what makes a seventeen-day story fit in two minutes.
+At `10s` the earliest checkpoint is due at +2s; the sweep fires it in the first sweep cycle and the resumed run reaches the wake, quarantine, follow-up and memory phases within seconds. At `60s` the checkpoints come due a minute after creation — the run that wrote them ends `suspended`, and a new run is started by the sweep when they fire. The arc still completes, but on camera you wait the full sweep interval between run end and wake. Ten seconds is what makes a seventeen-day story fit in two minutes.
 
 Both example scripts default to `DUE_IN=10s`. Overriding it upward is the most common way to get a
 run that looks broken and is not.

@@ -54,7 +54,7 @@ All eight run `gemini-3.5-flash`. Each is its own [Agent Runtime](https://docs.c
 
 [Agent Runtime](https://docs.cloud.google.com/gemini-enterprise-agent-platform/build/runtime) runs the engines. Firestore holds the case: commitments, grants, and wake-times. When education needs more time, the orchestrator writes five checkpoints with staggered due dates and ends the run. The case is not.
 
-[Cloud Scheduler](https://cloud.google.com/scheduler) sweeps every minute, finds checkpoints that have come due, and publishes to [Pub/Sub](https://cloud.google.com/pubsub). An authenticated push resumes a waiting case. No browser click. On the reference run the gap was 23 seconds; it can be anything up to a minute.
+[Cloud Scheduler](https://cloud.google.com/scheduler) sweeps every minute, finds checkpoints that have come due, and publishes to [Pub/Sub](https://cloud.google.com/pubsub). An authenticated push resumes a waiting case. No browser click. On the reference run the gap was 25 seconds; in the filmed run it was about ten; it can be anything up to a minute.
 
 [Memory Bank](https://docs.cloud.google.com/gemini-enterprise-agent-platform/scale/memory-bank) receives a session write at the end. Facts scoped to the `case_id` are recalled on the next run. Maya's notes don't leak to another child. On a two-minute demo run, almost nothing is useful to recall yet. The write is real. Recall that changes later decisions comes on longer-lived cases.
 

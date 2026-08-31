@@ -24,7 +24,7 @@ Deadline control offers:
 - The scenario's real horizon (e.g. `"17d"`)
 - A compressed deadline for demo (`"10s"` — fires without faking the clock)
 
-Default the demo field to `10s` and do not offer a longer compressed value. `due_in` is the window the five per-commitment checkpoints are spread across, at `now + due_in × (i+1)/5`, and the wake phase only promotes a checkpoint that is already past due — so above roughly `10s` nothing wakes and the run ends `partial_failure` short of the quarantine and follow-up phases.
+Default the demo field to `10s` and do not offer a longer compressed value. `due_in` is the window the five per-commitment checkpoints are spread across, at `now + due_in × (i+1)/5`, and the wake phase only promotes a checkpoint that is already past due — so above roughly `10s` the checkpoints are not yet due when the wake phase runs — the run ends `suspended`, and the sweep fires them when they come due, starting a new run that reaches the quarantine and follow-up phases after the full sweep interval.
 
 Response includes `case_id` and `due_at`. Display `due_at` next to the case so the pending wake is visible before it fires.
 

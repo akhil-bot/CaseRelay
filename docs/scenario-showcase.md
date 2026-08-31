@@ -55,11 +55,7 @@ phase. The wake phase asks for already-due checkpoints seven to twelve seconds l
 the earliest checkpoint has fired and the run continues; at `60s` it has not and the run ends
 early. Ten seconds is what makes a seventeen-day story fit in two minutes.
 
-**What is compressed, and what that costs.** Because the deadline window is squeezed into
-seconds, the wake phase runs inside the same run that set the checkpoint. Nothing in these runs
-was woken autonomously by Cloud Scheduler — the one-minute Pub/Sub sweep is the real mechanism
-and it is what runs the uncompressed case, but it is not what you are seeing below. Read these as
-proof that the *ladder* works, not that the *timer* does.
+**What is compressed, and what that means.** `due_in` compresses the checkpoint deadlines, not the execution path. Even at `10s`, the run that writes the checkpoints ends and is recorded `suspended`; Cloud Scheduler sweeps, finds the due checkpoints, publishes to Pub/Sub, and an authenticated push starts a new run. Read these as proof that the ladder works at compressed scale — the same Cloud Scheduler and Pub/Sub path as a seventeen-day case, just a shorter wait.
 
 ---
 

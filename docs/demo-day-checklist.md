@@ -60,7 +60,7 @@ The wiring is further along than it looks, but the last link is missing, so noth
 Mostly working already; this is verification plus one guardrail.
 
 - [ ] `/admin` (`portal/src/app/(app)/admin/page.tsx`) loads scenarios from `GET /v1/scenarios`, creates via `POST /v1/cases`, runs via `POST /v1/cases/{id}/runs`. Walk it once against the deployed control plane.
-- [ ] **Deadline must be `10s`.** The default `dueIn` in the admin page is already `"10s"` — do not raise it for the take. `schedule_wake` spaces checkpoints at `due_in × (i+1)/5`, and anything above ~10s loses the race against the 7–12s the engine takes to reach the wake phase. `docs/demo-video-script.md` has the full explanation and the observed numbers.
+- [ ] **Deadline must be `10s`.** The default `dueIn` in the admin page is already `"10s"` — do not raise it for the take. `schedule_wake` spaces checkpoints at `due_in × (i+1)/5`, and at `10s` the earliest checkpoint is due before the sweep fires. At a longer deadline the checkpoints fire when they come due (the run ends `suspended`, not `partial_failure`), but you wait the full sweep interval on camera — up to a minute of dead air per delayed checkpoint. See `docs/demo-video-script.md` for the observed numbers.
 - [ ] Confirm the Maya scenario id is `maya` and still resolves (`backend/state/scenarios.py:114`).
 - [ ] Do a full dry run of the Maya arc at `10s`: activation gate → fan-out → quarantine → escalation gate → all five commitments closed. Note the case id.
 

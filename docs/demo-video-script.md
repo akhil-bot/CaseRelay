@@ -33,11 +33,11 @@
 > *(If a run does stall mid-take, do not abandon it immediately. See "The feed ends at 'Checkpoint
 > saved'" in "If something goes wrong during recording" — the next sweep may still rescue it.)*
 
-**Budget up to a minute of dead air in the middle of the take.** Between the fan-out run ending and
-the wake starting, the case is genuinely waiting on the once-a-minute sweep. In the reference run
-that gap was 23 s; it can be anything from a second to a full minute. Do not touch the browser
-during it, do not reload, and do not stop recording. That gap is Beat 4's evidence, and you cut it
-down in the edit.
+**Expect roughly ten seconds of dead air in the middle of the take.** Between the fan-out run ending and
+the wake starting, the case is genuinely waiting on the once-a-minute sweep. In the filmed run that
+gap was about ten seconds; on the reference run it was 25 s; it can be anything up to a full minute.
+Do not touch the browser during it, do not reload, and do not stop recording. That gap is Beat 4's
+evidence, and you cut it down in the edit.
 
 Every Console page is slow on first load. Open these **before** pressing record.
 
@@ -172,7 +172,7 @@ Then the feed goes quiet. Do not touch anything.
 
 ### Beat 4 — It comes back on its own · [0:58 → 1:18]
 
-**Screen:** The feed sits still — anywhere from a second to a full minute. Then a separator is drawn across the feed reading **"Checked back _N_s later"**, and a new run begins:
+**Screen:** The feed sits still — roughly ten seconds in the filmed run, up to a full minute if the sweep timing falls differently. Then a separator is drawn across the feed reading **"Checked back _N_s later"**, and a new run begins:
 
 > Reconciled Maya's commitments: 1 overdue, 4 on track.
 > Checking back with Lincoln Unified School District on Maya's school enrollment — they asked for more time.
