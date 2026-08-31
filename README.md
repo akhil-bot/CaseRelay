@@ -15,6 +15,12 @@ escalate missing handoffs to a named human — without making decisions about ch
 
 ![CaseRelay multi-agent mesh — eight ADK agents on Gemini Enterprise Agent Platform, A2A between engines, MCP egress through Agent Gateway, and the GEAP governance layer underneath](docs/diagrams/caserelay-multi-agent-mesh.png)
 
+![CaseRelay portal with case status and copilot](docs/diagrams/platform_image.png)
+
+The portal gives a CASA volunteer one view of assigned cases, live commitment status and the
+CaseRelay copilot. The copilot is not just chat: through CopilotKit browser actions it can list
+cases, open the live view, start outreach and prepare reports from the same screen.
+
 ---
 
 ## Submission at a glance
@@ -23,10 +29,11 @@ escalate missing handoffs to a named human — without making decisions about ch
 |---|---|
 | **Hackathon** | [All Things Agentic](https://allthingsagentichackathon.devpost.com/) (Google) |
 | **Track** | Fortified Enterprise Fleet |
-| **Demo video** | *(URL to be added — video recorded, pending upload)* |
+| **Collaborators** | Bhardwaj Adapala, Rishi Sevakula |
+| **Demo video** | [Watch on YouTube](https://www.youtube.com/watch?v=Bp2PKUXg_PQ) |
 | **Repository** | [github.com/akhil-bot/CaseRelay](https://github.com/akhil-bot/CaseRelay) |
 | **Control plane** | [`caserelay-control-plane-6nwo7o4bbq-uc.a.run.app`](https://caserelay-control-plane-6nwo7o4bbq-uc.a.run.app) — Cloud Run, auth-required (anonymous requests return 403) |
-| **Portal** | [`caserelay-portal-6nwo7o4bbq-uc.a.run.app`](https://caserelay-portal-6nwo7o4bbq-uc.a.run.app) — Cloud Run, behind a session login. Go to `/login`, choose any role, enter email `admin@caserelay.com` and the password supplied in the Devpost submission's testing instructions. |
+| **Portal** | [`caserelay-portal-6nwo7o4bbq-uc.a.run.app`](https://caserelay-portal-6nwo7o4bbq-uc.a.run.app) — Cloud Run, behind HTTP Basic auth. Use the credentials supplied in the Devpost submission's testing instructions. |
 | **Architecture diagram** | The image above, sources in [`docs/diagrams/`](docs/diagrams/) |
 | **Spin-up instructions** | [docs/deploy.md](docs/deploy.md) |
 | **Write-up** | [docs/hackathon-blog.md](docs/hackathon-blog.md) — source of truth for the contest blog. DEV.to: publish from this file (URL TBD). |
@@ -193,8 +200,9 @@ These have been demonstrated on the deployed fleet, not merely asserted.
 - No autonomous emergency response
 
 Persona switching in the portal (advocate vs. platform view) is UI-only and carries no
-authorization implications — role-switching changes the view, not the data access. The portal
-login gate is a single shared credential for judges and testing contacts, not per-user auth.
+authorization implications — role-switching changes the view, not the data access. The portal's
+HTTP Basic auth gate is a single shared credential for judges and testing contacts, not per-user
+auth.
 
 ---
 
