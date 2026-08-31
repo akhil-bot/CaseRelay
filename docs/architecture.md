@@ -121,10 +121,10 @@ Four cases were seeded on 31 August 2026 and approved through the supervisor gat
 
 | Case ID | Scenario | Expected autonomous wake dates |
 |---|---|---|
-| CR-0831120614 | kai (cascade: health timeout + legal malformed) | 31 Aug (edu, health, legal), 14 Sep (shelter), 19 Sep (family) |
-| CR-0831120932 | amara (long horizon, staggered) | 31 Aug (edu, health), 4 Sep (legal), 11 Sep (shelter), 18 Sep (family) |
-| CR-0831121245 | theo (malformed reply from legal) | 31 Aug (edu, legal), 7 Sep (health), 14 Sep (shelter), 19 Sep (family) |
-| CR-0831121606 | ellis (duplicate callback idempotency) | 31 Aug (edu, legal), 7 Sep (health), 14 Sep (shelter), 19 Sep (family) |
+| CR-0831120614 | kai (cascade: health timeout + legal malformed) | 31 Aug (edu, health, legal), 14 Sep (shelter), 19 Sep (family), 22 Sep (health chase), 30 Sep (health final) |
+| CR-0831120932 | amara (long horizon, staggered) | 31 Aug (edu, health), 4 Sep (legal), 11 Sep (shelter), 18 Sep (family), 22 Sep (review), 30 Sep (review), 5 Oct (review) |
+| CR-0831121245 | theo (malformed reply from legal) | 31 Aug (edu, legal), 7 Sep (health), 14 Sep (shelter), 19 Sep (family), 26 Sep (legal revisit), 3 Oct (legal final) |
+| CR-0831121606 | ellis (duplicate callback idempotency) | 31 Aug (edu, legal), 7 Sep (health), 14 Sep (shelter), 19 Sep (family), 26 Sep (review), 3 Oct (review) |
 
 Each wake produces a `run_id` that differs from the checkpoint run's `run_id` for the same case, confirming it is a genuinely new Cloud Run invocation rather than a continuation of an existing one. The sweep picks up nothing when no checkpoint is due, and those sweeps cost nothing.
 
