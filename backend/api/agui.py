@@ -83,13 +83,10 @@ this conversation has already opened. Use it so they do not have to repeat \
 themselves.
 """
 
-# The chat panel is the operator's only way to drive the portal, and it drives it
-# entirely by calling the frontend tools above — a model that will not emit a
-# function call leaves the panel unable to do anything at all. Gemma
-# (gemma-4-26b-a4b-it-maas) has been measured calling all four of them correctly
-# through ADK, so the swap is a one-variable change rather than a code change;
-# Gemini remains the default because it is the configuration the demo was
-# rehearsed against.
+# The chat panel drives the portal entirely through the frontend tools above.
+# Gemma (gemma-4-26b-a4b-it-maas) was tested and cannot call tools through ADK:
+# every request with function declarations attached fails with 400 INVALID_ARGUMENT.
+# The chat agent must run on Gemini.
 CHAT_MODEL = os.environ.get("CASERELAY_CHAT_MODEL", "").strip() or "gemini-3.5-flash"
 
 chat_agent = Agent(
