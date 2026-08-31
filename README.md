@@ -1,5 +1,7 @@
 # CaseRelay
 
+![CaseRelay](docs/diagrams/caserelay-logo.png)
+
 **A governed multi-agent fleet that stops a foster child's next step disappearing between agencies.**
 
 Eight ADK agents on Google's Gemini Enterprise Agent Platform help CASA/GAL programs detect stalled
@@ -178,6 +180,7 @@ These have been demonstrated on the deployed fleet, not merely asserted.
 - **A2A transport auth** — calls with no credentials or an invalid bearer token are refused with HTTP 401; valid token returns 200.
 - **Gateway identity model** — on a deployed engine the caller principal is resolved from `RunContext` and must match that engine's own deployed identity, preventing an engine from claiming to be a different engine. Cross-engine protection comes from A2A bearer-token auth at the transport layer.
 - **Quarantine → escalation** — 5/5 concurrent cloud end-to-end runs had the verifier agent itself call `open_escalation`.
+- **Audit immutability** — audit events are write-once (Firestore document creation with `AlreadyExists` enforcement), but records are not hash-chained between entries.
 
 ---
 
