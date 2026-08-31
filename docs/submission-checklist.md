@@ -31,7 +31,7 @@ Fail any of these and nothing else is scored.
 | # | Field | Status | What is left |
 |---|---|---|---|
 | 1 | **Demo video** | **Outstanding — the critical path** | Not recorded. Max 4 minutes; only the first four are evaluated. Must be public on YouTube or Vimeo. See [what the video must contain](#what-the-video-must-contain) below. |
-| 2 | **Text description** | **Outstanding** | The content exists in [hackathon-blog.md](hackathon-blog.md) and the [README](../README.md); it has not been entered into the Devpost description field. Must cover features and functionality, technologies used, other data sources, and findings/learnings. |
+| 2 | **Text description** | **Outstanding** | Ready in [devpost-description.md](devpost-description.md); paste it into the Devpost description field. |
 | 3 | **Code repository** | **Outstanding** | The repo is private. The rules require sharing a private repo with **`testing@devpost.com`** and **`cloudhackathons@google.com`**. Either do that or make it public before the deadline. |
 | 4 | **Hosted URL** | **Done** | `https://caserelay-portal-6nwo7o4bbq-uc.a.run.app` — verified live, returns 401 on case data without the password. Encouraged, not mandatory. |
 | 5 | **Spin-up instructions** | **Done** | [README](../README.md#quick-start) quick start plus [deploy.md](deploy.md), which states plainly what an outsider cannot reproduce and gives them the local path instead |
@@ -120,9 +120,7 @@ deliberately; do not let a Devpost description walk them back.
   distinguish it from Google's Agent Gateway, which is the egress control point.
 - **Nothing in [post-video-geap-deploy.md](post-video-geap-deploy.md) is done** unless that file
   says so explicitly. It is a queue of work that has not been applied.
-- **Compressed runs do not demonstrate the timer.** Under `due_in=10s` the wake phase runs inside
-  the same run that set the checkpoint. The Cloud Scheduler sweep has been observed separately, with
-  a 23-second gap and nobody at the keyboard; that is the claim to make, and only that one.
+- **Compressed runs use the same machinery.** `due_in` compresses the deadlines, not the execution path. The run that writes checkpoints ends and is recorded `suspended`; Cloud Scheduler sweeps once a minute, finds it, and publishes to Pub/Sub; an authenticated push starts a new run with a new `run_id`. In `CR-0830203440` the checkpoint run was `84bd42c6b0c4` and the wake run was `411d07c94595`. The gap is whatever remains of the minute — about ten seconds in the filmed run, 25 on reference run `CR-0830212122`, never more than 60. Do not cite the old "23-second" figure; it came from a run whose records have been purged.
 
 ---
 
