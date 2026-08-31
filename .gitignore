@@ -75,6 +75,12 @@ infra/deploy_logs/
 .cursor/*
 !.cursor/rules/
 
+# Timestamped Vertex/ADK grade dumps. Pin a named baseline under
+# artifacts/grade_results/ when a run should be kept; leave the rest local.
+artifacts/grade_results/results_*.html
+artifacts/grade_results/results_*.json
+artifacts/recordings/
+
 # ── Agent harness scratch ────────────────────────────────────────────────────
 .omc/
 
