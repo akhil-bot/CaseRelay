@@ -32,21 +32,25 @@ Fail any of these and nothing else is scored.
 | 1 | **Demo video** | **Outstanding — the critical path** | Not recorded. Max 4 minutes; only the first four are evaluated. Must be public on YouTube or Vimeo. See [what the video must contain](#what-the-video-must-contain) below. |
 | 2 | **Text description** | **Outstanding** | Ready in [devpost-description.md](devpost-description.md); paste it into the Devpost description field. |
 | 3 | **Code repository** | **Outstanding** | The repo is private. The rules require sharing a private repo with **`testing@devpost.com`** and **`cloudhackathons@google.com`**. Either do that or make it public before the deadline. |
-| 4 | **Hosted URL** | **Done** | `https://caserelay-portal-6nwo7o4bbq-uc.a.run.app` — verified live, returns 401 on case data without the password. Encouraged, not mandatory. |
+| 4 | **Hosted URL** | **Done** | `https://caserelay-portal-6nwo7o4bbq-uc.a.run.app` — verified live, returns 401 on case data without a session cookie. Auth is a session login page (not HTTP Basic). Encouraged, not mandatory. |
 | 5 | **Spin-up instructions** | **Done** | [README](../README.md#quick-start) quick start plus [deploy.md](deploy.md), which states plainly what an outsider cannot reproduce and gives them the local path instead |
 | 6 | **Architecture diagram** | **Done** | `docs/diagrams/caserelay-multi-agent-mesh.png`, embedded at the top of the README |
 
 ### The one that is easy to miss
 
-The portal is behind a password gate, and the rules require that **testing access is free and
+The portal is behind a session login, and the rules require that **testing access is free and
 unrestricted for the sponsor, administrator and judges until judging ends, including credentials if
-the deployment is private.** Put the username and password in the Devpost submission notes:
+the deployment is private.** Put the login steps in the Devpost submission notes:
 
-```bash
-gcloud secrets versions access latest --secret=caserelay-portal-password --project=caserelay
-```
+1. Go to `https://caserelay-portal-6nwo7o4bbq-uc.a.run.app/login`
+2. Choose any role (e.g. "CASA volunteer advocate")
+3. **Clear the pre-filled email** and enter `admin@caserelay.com`
+4. Enter password `***REDACTED***`
+5. Click "Sign in"
 
-Username is `admin@caserelay.com` unless `CASERELAY_PORTAL_USER` was overridden at deploy time.
+The pre-filled email on each role page is a persona placeholder and will not authenticate. Only
+`admin@caserelay.com` with the password above works.
+
 Judging runs to **Oct 1, 2026**, so the services need to stay up until then, or the video has to
 carry the proof on its own — which the rules explicitly allow.
 

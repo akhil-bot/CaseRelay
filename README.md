@@ -21,10 +21,10 @@ escalate missing handoffs to a named human — without making decisions about ch
 |---|---|
 | **Hackathon** | [All Things Agentic](https://allthingsagentichackathon.devpost.com/) (Google) |
 | **Track** | Fortified Enterprise Fleet |
-| **Demo video** | ⚠️ *Not yet recorded — YouTube/Vimeo URL to be added before submission* |
+| **Demo video** | *(URL to be added — video recorded, pending upload)* |
 | **Repository** | [github.com/akhil-bot/CaseRelay](https://github.com/akhil-bot/CaseRelay) |
 | **Control plane** | [`caserelay-control-plane-6nwo7o4bbq-uc.a.run.app`](https://caserelay-control-plane-6nwo7o4bbq-uc.a.run.app) — Cloud Run, auth-required (anonymous requests return 403) |
-| **Portal** | [`caserelay-portal-6nwo7o4bbq-uc.a.run.app`](https://caserelay-portal-6nwo7o4bbq-uc.a.run.app) — Cloud Run, behind an HTTP Basic gate. Credentials on request; see [submission checklist](docs/submission-checklist.md) |
+| **Portal** | [`caserelay-portal-6nwo7o4bbq-uc.a.run.app`](https://caserelay-portal-6nwo7o4bbq-uc.a.run.app) — Cloud Run, behind a session login. Go to `/login`, choose any role, enter email `admin@caserelay.com` and password `***REDACTED***`. |
 | **Architecture diagram** | The image above, sources in [`docs/diagrams/`](docs/diagrams/) |
 | **Spin-up instructions** | [docs/deploy.md](docs/deploy.md) |
 | **Write-up** | [docs/hackathon-blog.md](docs/hackathon-blog.md) — source of truth for the contest blog. DEV.to: publish from this file (URL TBD). |
@@ -119,7 +119,7 @@ Every row links to the full account, including the limitations, in
 | **Agent Registry** | 24 registered services, auto-registered and updated by `agents-cli deploy`. A live catalogue, not a runtime routing layer — agents find each other through environment variables, not registry lookups. |
 | **Agent Runtime** | Eight reasoning engines in `us-central1` hosting the fleet. The checkpoint / sleep / deadline-triggered resume cycle around them is Firestore plus Pub/Sub push and Cloud Scheduler rather than Agent Runtime itself. |
 | **Memory Bank** | Instance `8631858420611284992` via ADK's `VertexAiMemoryBankService`, scoped per case, with three custom memory topics. The recalled content so far is general process observations rather than operationally specific intelligence. |
-| **Agent Platform Sessions** | Two dedicated Agent Engines — `caserelay-chat-sessions` for the operator chat transcript, `caserelay-run-sessions` for agent turns, one session per phase invocation. A deployed control plane refuses to start without both. |
+| **Agent Platform Sessions** | `caserelay-chat-sessions` for the operator chat transcript; the `caserelay-orchestrator` reasoning engine for agent run sessions, one session per phase invocation. A deployed control plane refuses to start without both engine IDs configured. (`caserelay-run-sessions` was provisioned but is unused; `CASERELAY_RUN_SESSION_ENGINE_ID` points to the orchestrator engine.) |
 | **Agent Identity** | Platform-managed identity per agent (`--agent-identity`); SPIFFE-style principals; caller principal verified at the gateway; cross-scope denial demonstrated. |
 | **Agent Gateway** | All eight engines bound to `caserelay-egress`; outbound traffic TLS-intercepted; MCP method deny policy enforcing; Model Armor extension fail-closed. |
 | **Model Armor** | Template `caserelay-screen` with SDP Advanced Config referencing a Cloud DLP inspect template using custom dictionary detectors and a hotword proximity rule; fails closed. |
@@ -150,7 +150,8 @@ These have been demonstrated on the deployed fleet, not merely asserted.
 - No autonomous emergency response
 
 Persona switching in the portal (advocate vs. platform view) is UI-only and carries no
-authentication or access-control implications. There is no end-user authentication.
+authorization implications — role-switching changes the view, not the data access. The portal
+login gate is a single shared credential for judges and testing contacts, not per-user auth.
 
 ---
 

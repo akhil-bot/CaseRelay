@@ -24,7 +24,7 @@ The flagship case is called Maya. She is not the only scenario. A provider that 
 - **Family Services Agent** — scheduling/status only; no risk scores or findings
 - **Safeguarding Verifier** — policy enforcement; cannot approve its own actions
 
-The control plane is auth-required. The portal is deployed to Cloud Run behind an HTTP Basic gate. Both are production deployments; both stay live through the judging period (Oct 1, 2026).
+The control plane is auth-required. The portal is deployed to Cloud Run behind a session login page. Both are production deployments; both stay live through the judging period (Oct 1, 2026).
 
 ## How It Was Built
 
@@ -40,7 +40,7 @@ The school's reply goes through Model Armor with Advanced Config referencing a C
 
 **State and wake:** The run event log stays on Firestore, not Agent Platform Sessions, because the activity feed and audit trail need an ordered, live, permanent record. Sessions orders events by timestamp alone with no sequence field and no documented tiebreak; offers no streaming API; caps appends at 300 per minute per project; and requires every session to carry an expiry.
 
-Agent Platform Sessions hold the operator chat transcript and every orchestrator agent turn, one session per phase invocation, on two dedicated Agent Engines. A deployed control plane refuses to start without both rather than falling back to in-memory sessions that look identical until the instance recycles.
+Agent Platform Sessions hold the operator chat transcript and every orchestrator agent turn, one session per phase invocation. The chat transcript uses `caserelay-chat-sessions`; the agent run sessions use the `caserelay-orchestrator` engine (the reasoning engine already deployed for agent execution also serves as the session host). A deployed control plane refuses to start without both engine IDs configured rather than falling back to in-memory sessions that look identical until the instance recycles.
 
 **Memory:** Memory Bank is scoped per case, with three custom memory topics. The recalled content so far is general process observations rather than operationally specific intelligence, because a compressed end-to-end demo re-executes orchestrator phases that the specialists already handled. A two-minute case has little worth recalling yet. The write is real.
 
@@ -52,7 +52,7 @@ Agent Platform Sessions hold the operator chat transcript and every orchestrator
 - **Agent Identity** — platform-managed identity per agent; SPIFFE-style principals; caller principal verified at the gateway
 - **Agent Gateway** — all eight engines bound to `caserelay-egress`; outbound traffic TLS-intercepted; MCP method deny policy enforcing
 - **Agent Registry** — 24 registered services, auto-registered and updated by `agents-cli deploy`
-- **Agent Platform Sessions** — two dedicated Agent Engines for chat transcripts and agent run transcripts
+- **Agent Platform Sessions** — `caserelay-chat-sessions` for chat transcripts; `caserelay-orchestrator` engine for agent run transcripts
 - **Memory Bank** — instance `8631858420611284992` via ADK's `VertexAiMemoryBankService`, scoped per case
 - **Model Armor** — template `caserelay-screen` with SDP Advanced Config referencing a Cloud DLP inspect template; fails closed
 - **Agent Observability** — Cloud Trace carries Google-generated spans for every MCP tool call and Model Armor evaluation
@@ -100,7 +100,7 @@ The video runs the flagship case — intake, activation gate, five-way fan-out, 
 
 - **Repository:** [github.com/akhil-bot/CaseRelay](https://github.com/akhil-bot/CaseRelay)
 - **Control plane:** [`caserelay-control-plane-6nwo7o4bbq-uc.a.run.app`](https://caserelay-control-plane-6nwo7o4bbq-uc.a.run.app) — Cloud Run, auth-required
-- **Portal:** [`caserelay-portal-6nwo7o4bbq-uc.a.run.app`](https://caserelay-portal-6nwo7o4bbq-uc.a.run.app) — Cloud Run, behind HTTP Basic auth
+- **Portal:** [`caserelay-portal-6nwo7o4bbq-uc.a.run.app`](https://caserelay-portal-6nwo7o4bbq-uc.a.run.app) — Cloud Run, behind a session login page
 - **Architecture diagram:** `docs/diagrams/caserelay-multi-agent-mesh.png` in the repo
 - **Spin-up instructions:** [docs/deploy.md](https://github.com/akhil-bot/CaseRelay/blob/main/docs/deploy.md)
 - **Full write-up:** [docs/hackathon-blog.md](https://github.com/akhil-bot/CaseRelay/blob/main/docs/hackathon-blog.md)
@@ -111,7 +111,7 @@ The video runs the flagship case — intake, activation gate, five-way fan-out, 
 
 **No endorsement.** This is a hackathon prototype, not endorsed by CASA or any court.
 
-**Portal is deployed, behind a password.** Credentials provided on request to judges and testing contacts.
+**Portal is deployed, behind a session login.** Navigate to `/login`, choose any role, and sign in with email `admin@caserelay.com` and password `***REDACTED***`. The pre-filled email on the role pages is a persona placeholder — use `admin@caserelay.com` regardless of which role you choose.
 
 **Compressed runs use the same machinery.** `due_in` compresses the checkpoint deadlines — not the execution path. The run that writes the checkpoints ends and is recorded `suspended`. Cloud Scheduler sweeps once a minute, finds the due checkpoints, and publishes to Pub/Sub. An authenticated push starts a new run with a new `run_id` and new Firestore records. In the filmed case (`CR-0830203440`) the checkpoint run was `84bd42c6b0c4`; the wake run started by the sweep was `411d07c94595`. The gap is whatever remains of the minute: 25 seconds on the reference run (`CR-0830212122`), about ten in the filmed run, never more than 60.
 
