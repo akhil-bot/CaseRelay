@@ -37,6 +37,7 @@ cases, open the live view, start outreach and prepare reports from the same scre
 | **Architecture diagram** | The image above, sources in [`docs/diagrams/`](docs/diagrams/) |
 | **Spin-up instructions** | [docs/deploy.md](docs/deploy.md) |
 | **Blog post** | [Read on DEV.to](https://dev.to/akill_m_8f67cabd174364802/caserelay-a-governed-agent-fleet-that-follows-up-on-a-childs-court-ordered-services-for-weeks-3hnf) |
+| **LinkedIn post** | [View the launch post](https://lnkd.in/p/dNfhw8qu) |
 
 ---
 
