@@ -113,6 +113,34 @@ Persona switching (advocate vs. platform view) is UI-only and carries no authent
 
 ---
 
+## Continuous autonomous operation record
+
+Four cases were seeded on 31 August 2026 and approved through the supervisor gate. Each case now has per-commitment checkpoints sleeping in Firestore; Cloud Scheduler fires an hourly sweep (`caserelay-sweep`, `0 * * * * Etc/UTC`) that publishes any overdue checkpoint to Pub/Sub, which delivers a push message to the control plane and starts a new orchestrator run with a fresh `run_id`. No human is present for any of these wakes.
+
+**Cases seeded 2026-08-31:**
+
+| Case ID | Scenario | Expected autonomous wake dates |
+|---|---|---|
+| CR-0831120614 | kai (cascade: health timeout + legal malformed) | 31 Aug (edu, health, legal), 14 Sep (shelter), 19 Sep (family) |
+| CR-0831120932 | amara (long horizon, staggered) | 31 Aug (edu, health), 4 Sep (legal), 11 Sep (shelter), 18 Sep (family) |
+| CR-0831121245 | theo (malformed reply from legal) | 31 Aug (edu, legal), 7 Sep (health), 14 Sep (shelter), 19 Sep (family) |
+| CR-0831121606 | ellis (duplicate callback idempotency) | 31 Aug (edu, legal), 7 Sep (health), 14 Sep (shelter), 19 Sep (family) |
+
+Each wake produces a `run_id` that differs from the previous run's `run_id` for the same case, confirming it is a genuinely new Cloud Run invocation rather than a continuation of an existing one. The sweep picks up nothing when no checkpoint is due, and those sweeps cost nothing.
+
+**Cloud Logging query to see the wake history** (project `caserelay`):
+
+```
+resource.type="cloud_run_revision"
+resource.labels.service_name="caserelay-control-plane"
+textPayload=~"starting resumed run"
+timestamp >= "2026-08-31T00:00:00Z"
+```
+
+Each matching line takes the form `starting resumed run {run_id} for case {case_id} (wake wf-{case_id}-{commitment_type})`. The two `run_id`s on adjacent wakes for the same case will always differ, which is the evidence that a fresh invocation fired for each checkpoint.
+
+---
+
 ## Where to go next
 
 - [deploy.md](deploy.md) — running it locally, and the full cloud deploy sequence

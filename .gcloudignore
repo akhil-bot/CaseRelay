@@ -23,3 +23,8 @@ infra/deploy_logs/
 # Test and dev artifacts
 harness/
 .cursor/
+
+# Demo recordings and downloaded tarballs: hundreds of MB of non-source data that
+# the Agent Runtime packager base64-encodes into the deploy request body.
+artifacts/
+*.tgz
