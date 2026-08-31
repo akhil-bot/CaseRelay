@@ -157,8 +157,13 @@ class TestCheckAbsentOrAmbiguous:
         })
         assert check("C1", "education", "deferred") is None
 
-    def test_followup_response_overwrites(self):
-        """Maya's follow-up: the new response has no enrollment_found field, so guard allows."""
+    def test_generic_followup_overwrites_contradicting_response_known_gap(self):
+        """Known gap: a generic follow-up reply (responded/resolved, no enrollment_found field)
+        overwrites the earlier contradicting response in the flat evidence store, leaving
+        the guard with nothing to check and allowing the completed write to proceed.
+        This is a current limitation documented in docs/scenario-showcase.md — not
+        intended behaviour of the guard itself.
+        """
         record_response("C1", "education", {"enrollment_found": False})
         assert check("C1", "education", "completed") is not None
 
@@ -417,10 +422,10 @@ class TestTryClose:
         assert workspace.get_case("CLOSE-11")["status"] == "monitoring"
 
     def test_stale_guard_approval_does_not_block(self):
-        """Maya-like: guard fired during phase 8, nudge resolved education via followup.
-
-        The guard approval is stale because education is now completed through a
-        legitimate channel.  The approval is informational, not blocking.
+        """Maya-like: guard fired during phase 8, nudge's generic followup overwrote the
+        contradicting response (known gap), and education reached completed via that path.
+        The guard approval is now stale — education is completed, so the approval is
+        informational only and must not block closure.
         """
         _make_full_case("CLOSE-12", approvals=[{
             "approval_id": "apr-guard-edu-stale",
@@ -569,7 +574,12 @@ class TestMayaArcWithGuard:
         assert self._nudge_ready(self.CASE) is True
 
     def test_step5_nudge_resolves_education(self):
-        """nudge_overdue calls partners.followup, which overwrites the response."""
+        """nudge_overdue calls partners.followup, which returns a generic positive reply
+        with no enrollment_found field, overwriting the contradicting SIS response in the
+        flat evidence store.  The guard subsequently sees no contradiction and permits
+        the completed write.  This records current behaviour resulting from the known
+        gap documented in docs/scenario-showcase.md.
+        """
         workspace.set_commitment(self.CASE, "education", "completed")
 
         from backend.workflows.escalation import nudge_overdue
@@ -583,7 +593,11 @@ class TestMayaArcWithGuard:
         assert states["education"] == "completed"
 
     def test_step6_full_arc_closes_case(self):
-        """The complete sequence: guard blocks → nudge resolves → case closes."""
+        """Records current end-to-end behaviour: guard blocks → nudge's generic followup
+        overwrites contradicting evidence (known gap) → guard passes → case closes.
+        Closure here depends on the flat-store overwrite described in docs/scenario-showcase.md,
+        not on the guard being satisfied by fresh positive evidence.
+        """
         refusal = workspace.set_commitment(self.CASE, "education", "completed")
         assert refusal is not None
 
