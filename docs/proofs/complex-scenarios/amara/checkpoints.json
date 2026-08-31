@@ -1,0 +1,262 @@
+[
+  {
+    "name": "projects/caserelay/databases/caserelay/documents/workflow_checkpoints/wf-CR-0831212234-education",
+    "fields": {
+      "completed": {
+        "booleanValue": true
+      },
+      "case_id": {
+        "stringValue": "CR-0831212234"
+      },
+      "retry_count": {
+        "integerValue": "0"
+      },
+      "commitment_type": {
+        "stringValue": "education"
+      },
+      "workflow_id": {
+        "stringValue": "wf-CR-0831212234-education"
+      },
+      "commitment_states": {
+        "mapValue": {
+          "fields": {
+            "shelter": {
+              "stringValue": "completed"
+            },
+            "education": {
+              "stringValue": "completed"
+            },
+            "health": {
+              "stringValue": "completed"
+            },
+            "family_services": {
+              "stringValue": "completed"
+            },
+            "legal": {
+              "stringValue": "completed"
+            }
+          }
+        }
+      },
+      "due_at": {
+        "timestampValue": "2026-08-31T21:23:44.002506Z"
+      },
+      "state": {
+        "stringValue": "completed"
+      },
+      "current_step": {
+        "stringValue": "awake"
+      }
+    },
+    "createTime": "2026-08-31T21:23:39.145384Z",
+    "updateTime": "2026-08-31T21:24:08.327344Z"
+  },
+  {
+    "name": "projects/caserelay/databases/caserelay/documents/workflow_checkpoints/wf-CR-0831212234-health",
+    "fields": {
+      "completed": {
+        "booleanValue": true
+      },
+      "case_id": {
+        "stringValue": "CR-0831212234"
+      },
+      "commitment_type": {
+        "stringValue": "health"
+      },
+      "due_at": {
+        "timestampValue": "2026-08-31T21:23:44.002506Z"
+      },
+      "commitment_states": {
+        "mapValue": {
+          "fields": {
+            "shelter": {
+              "stringValue": "completed"
+            },
+            "education": {
+              "stringValue": "completed"
+            },
+            "health": {
+              "stringValue": "completed"
+            },
+            "family_services": {
+              "stringValue": "completed"
+            },
+            "legal": {
+              "stringValue": "completed"
+            }
+          }
+        }
+      },
+      "state": {
+        "stringValue": "completed"
+      },
+      "workflow_id": {
+        "stringValue": "wf-CR-0831212234-health"
+      },
+      "retry_count": {
+        "integerValue": "0"
+      },
+      "current_step": {
+        "stringValue": "awake"
+      }
+    },
+    "createTime": "2026-08-31T21:23:39.233185Z",
+    "updateTime": "2026-08-31T21:24:08.358237Z"
+  },
+  {
+    "name": "projects/caserelay/databases/caserelay/documents/workflow_checkpoints/wf-CR-0831212234-legal",
+    "fields": {
+      "commitment_states": {
+        "mapValue": {
+          "fields": {
+            "shelter": {
+              "stringValue": "completed"
+            },
+            "education": {
+              "stringValue": "completed"
+            },
+            "health": {
+              "stringValue": "completed"
+            },
+            "family_services": {
+              "stringValue": "completed"
+            },
+            "legal": {
+              "stringValue": "completed"
+            }
+          }
+        }
+      },
+      "workflow_id": {
+        "stringValue": "wf-CR-0831212234-legal"
+      },
+      "due_at": {
+        "timestampValue": "2026-09-04T00:00:00Z"
+      },
+      "retry_count": {
+        "integerValue": "0"
+      },
+      "state": {
+        "stringValue": "waiting"
+      },
+      "current_step": {
+        "stringValue": "sleeping"
+      },
+      "commitment_type": {
+        "stringValue": "legal"
+      },
+      "case_id": {
+        "stringValue": "CR-0831212234"
+      },
+      "completed": {
+        "booleanValue": false
+      }
+    },
+    "createTime": "2026-08-31T21:23:39.262062Z",
+    "updateTime": "2026-08-31T21:23:39.262062Z"
+  },
+  {
+    "name": "projects/caserelay/databases/caserelay/documents/workflow_checkpoints/wf-CR-0831212234-shelter",
+    "fields": {
+      "workflow_id": {
+        "stringValue": "wf-CR-0831212234-shelter"
+      },
+      "state": {
+        "stringValue": "waiting"
+      },
+      "completed": {
+        "booleanValue": false
+      },
+      "due_at": {
+        "timestampValue": "2026-09-11T00:00:00Z"
+      },
+      "commitment_type": {
+        "stringValue": "shelter"
+      },
+      "current_step": {
+        "stringValue": "sleeping"
+      },
+      "case_id": {
+        "stringValue": "CR-0831212234"
+      },
+      "retry_count": {
+        "integerValue": "0"
+      },
+      "commitment_states": {
+        "mapValue": {
+          "fields": {
+            "shelter": {
+              "stringValue": "completed"
+            },
+            "education": {
+              "stringValue": "completed"
+            },
+            "health": {
+              "stringValue": "completed"
+            },
+            "family_services": {
+              "stringValue": "completed"
+            },
+            "legal": {
+              "stringValue": "completed"
+            }
+          }
+        }
+      }
+    },
+    "createTime": "2026-08-31T21:23:39.367946Z",
+    "updateTime": "2026-08-31T21:23:39.367946Z"
+  },
+  {
+    "name": "projects/caserelay/databases/caserelay/documents/workflow_checkpoints/wf-CR-0831212234-family_services",
+    "fields": {
+      "due_at": {
+        "timestampValue": "2026-09-18T00:00:00Z"
+      },
+      "workflow_id": {
+        "stringValue": "wf-CR-0831212234-family_services"
+      },
+      "state": {
+        "stringValue": "waiting"
+      },
+      "commitment_states": {
+        "mapValue": {
+          "fields": {
+            "shelter": {
+              "stringValue": "completed"
+            },
+            "education": {
+              "stringValue": "completed"
+            },
+            "health": {
+              "stringValue": "completed"
+            },
+            "family_services": {
+              "stringValue": "completed"
+            },
+            "legal": {
+              "stringValue": "completed"
+            }
+          }
+        }
+      },
+      "completed": {
+        "booleanValue": false
+      },
+      "retry_count": {
+        "integerValue": "0"
+      },
+      "current_step": {
+        "stringValue": "sleeping"
+      },
+      "case_id": {
+        "stringValue": "CR-0831212234"
+      },
+      "commitment_type": {
+        "stringValue": "family_services"
+      }
+    },
+    "createTime": "2026-08-31T21:23:39.184287Z",
+    "updateTime": "2026-08-31T21:23:39.184287Z"
+  }
+]

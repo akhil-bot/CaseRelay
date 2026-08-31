@@ -1,0 +1,464 @@
+{
+  "case": {
+    "status": "closed",
+    "created_at": "2026-08-31T21:22:35.282717+00:00",
+    "test_case": true,
+    "closed_at": "2026-08-31T21:24:08.225651+00:00",
+    "memory_scopes": {
+      "check_referral_status": {
+        "verdict": "allow",
+        "disclosed_fields": [
+          "case_reference",
+          "deadline"
+        ],
+        "status": "context_granted",
+        "legal_basis": "state_juvenile_court_order",
+        "withheld_fields": [
+          "child_name",
+          "dob",
+          "referral_id",
+          "appointment_status",
+          "provider_name",
+          "appointment_date",
+          "scheduling",
+          "assessment_scheduling",
+          "diagnosis",
+          "legal_strategy",
+          "family_notes",
+          "clinical_notes"
+        ]
+      },
+      "check_availability": {
+        "verdict": "allow",
+        "disclosed_fields": [
+          "referral_id",
+          "scheduling"
+        ],
+        "status": "context_granted",
+        "legal_basis": "state_juvenile_court_order",
+        "withheld_fields": [
+          "child_name",
+          "dob",
+          "case_reference",
+          "deadline",
+          "appointment_status",
+          "provider_name",
+          "appointment_date",
+          "assessment_scheduling",
+          "diagnosis",
+          "legal_strategy",
+          "family_notes",
+          "clinical_notes"
+        ]
+      },
+      "checkpoint": {
+        "workflow_id": "wf-CR-0831212234",
+        "current_step": "awake",
+        "workflow_ids": [
+          "wf-CR-0831212234-education",
+          "wf-CR-0831212234-health"
+        ]
+      },
+      "check_appointment_status": {
+        "verdict": "allow",
+        "disclosed_fields": [
+          "appointment_status",
+          "provider_name",
+          "appointment_date"
+        ],
+        "status": "context_granted",
+        "legal_basis": "hipaa_signed_authorization",
+        "withheld_fields": [
+          "child_name",
+          "dob",
+          "referral_id",
+          "case_reference",
+          "deadline",
+          "scheduling",
+          "assessment_scheduling",
+          "diagnosis",
+          "legal_strategy",
+          "family_notes",
+          "clinical_notes"
+        ]
+      },
+      "check_assessment_schedule": {
+        "verdict": "allow",
+        "disclosed_fields": [
+          "assessment_scheduling"
+        ],
+        "status": "context_granted",
+        "legal_basis": "state_juvenile_court_order",
+        "withheld_fields": [
+          "child_name",
+          "dob",
+          "referral_id",
+          "case_reference",
+          "deadline",
+          "appointment_status",
+          "provider_name",
+          "appointment_date",
+          "scheduling",
+          "diagnosis",
+          "legal_strategy",
+          "family_notes",
+          "clinical_notes"
+        ]
+      },
+      "verify_school_enrollment": {
+        "verdict": "allow",
+        "disclosed_fields": [
+          "child_name",
+          "dob",
+          "referral_id"
+        ],
+        "status": "context_granted",
+        "legal_basis": "ferpa_court_order",
+        "withheld_fields": [
+          "case_reference",
+          "deadline",
+          "appointment_status",
+          "provider_name",
+          "appointment_date",
+          "scheduling",
+          "assessment_scheduling",
+          "diagnosis",
+          "legal_strategy",
+          "family_notes",
+          "clinical_notes"
+        ]
+      }
+    },
+    "case_id": "CR-0831212234",
+    "activated_at": "2026-08-31T21:23:14.890830+00:00",
+    "child_name": "Amara",
+    "dob": "2018-09-25",
+    "volunteer_id": "joanne-volunteer-003",
+    "volunteer_name": "Joanne Ferreira",
+    "referral_packet": {
+      "foster_family": {
+        "household_name": "Nguyen",
+        "placement_date": "2026-08-14",
+        "caregiver_name": "Linh Nguyen"
+      },
+      "source_document_ref": "gs://caserelay-fixtures/cr-0831212234/referral-packet.pdf",
+      "retention_policy": "standard_7y",
+      "court": {
+        "judge_name": "Hon. Rivera",
+        "docket_number": "JV-2026-0831212234",
+        "appointment_date": "2026-08-14"
+      },
+      "scenario": "amara",
+      "test_case": true,
+      "case_id": "CR-0831212234",
+      "child": {
+        "child_id": "child-0831212234",
+        "dob": "2018-09-25",
+        "name": "Amara"
+      },
+      "supervisor_id": "supervisor-001",
+      "supervisor_name": "Dana Whitfield",
+      "volunteer_id": "joanne-volunteer-003",
+      "referrals": [
+        {
+          "contact": {
+            "role": "Enrollment Coordinator",
+            "name": "Sarah Miller"
+          },
+          "target_org": "Lincoln Unified School District",
+          "target_org_short": "Lincoln Unified",
+          "due_date": "2026-08-21",
+          "referral_date": "2026-08-14",
+          "status": "sent",
+          "type": "education",
+          "referral_id": "edu-0831212234"
+        },
+        {
+          "contact": {
+            "role": "Records Coordinator",
+            "name": "David Chen"
+          },
+          "target_org": "Riverbend Community Health",
+          "target_org_short": "Riverbend",
+          "due_date": "2026-08-28",
+          "referral_date": "2026-08-14",
+          "status": "sent",
+          "type": "health",
+          "referral_id": "hlth-0831212234"
+        },
+        {
+          "contact": {
+            "role": "Staff Attorney",
+            "name": "Anna Reed"
+          },
+          "target_org": "Statewide Legal Aid Collective",
+          "target_org_short": "Statewide Legal Aid",
+          "due_date": "2026-09-04",
+          "referral_date": "2026-08-14",
+          "status": "sent",
+          "type": "legal",
+          "referral_id": "leg-0831212234"
+        },
+        {
+          "contact": {
+            "role": "Intake Supervisor",
+            "name": "Tom Barnes"
+          },
+          "target_org": "Harborlight Youth Shelter",
+          "target_org_short": "Harborlight",
+          "due_date": "2026-09-11",
+          "referral_date": "2026-08-14",
+          "status": "sent",
+          "type": "shelter",
+          "referral_id": "shl-0831212234"
+        },
+        {
+          "contact": {
+            "role": "Caseworker",
+            "name": "Maria Lopez"
+          },
+          "target_org": "Mesa County Family Services",
+          "target_org_short": "Mesa County",
+          "due_date": "2026-09-18",
+          "referral_date": "2026-08-14",
+          "status": "sent",
+          "type": "family_services",
+          "referral_id": "fam-0831212234"
+        }
+      ],
+      "volunteer_name": "Joanne Ferreira",
+      "synthetic": true
+    },
+    "commitment_count": 5,
+    "supervisor_id": "demo-supervisor"
+  },
+  "commitments": {
+    "education": "completed",
+    "family_services": "completed",
+    "health": "completed",
+    "legal": "completed",
+    "shelter": "completed"
+  },
+  "grants": [
+    {
+      "granted_by": "demo-supervisor",
+      "purpose": "check_appointment_status",
+      "granted_to": "agents.global.org-126484209344.system.id.goog/resources/aiplatform/projects/189353698936/locations/us-central1/reasoningEngines/2657974252392677376",
+      "revoked": false,
+      "status": "granted",
+      "legal_basis": "hipaa_signed_authorization",
+      "grant_id": "grant-check_appointment_status",
+      "allowed_fields": [
+        "appointment_status",
+        "provider_name",
+        "appointment_date"
+      ]
+    },
+    {
+      "granted_by": "demo-supervisor",
+      "purpose": "check_assessment_schedule",
+      "granted_to": "agents.global.org-126484209344.system.id.goog/resources/aiplatform/projects/189353698936/locations/us-central1/reasoningEngines/7993613910919872512",
+      "revoked": false,
+      "status": "granted",
+      "legal_basis": "state_juvenile_court_order",
+      "grant_id": "grant-check_assessment_schedule",
+      "allowed_fields": [
+        "assessment_scheduling"
+      ]
+    },
+    {
+      "granted_by": "demo-supervisor",
+      "purpose": "check_availability",
+      "granted_to": "agents.global.org-126484209344.system.id.goog/resources/aiplatform/projects/189353698936/locations/us-central1/reasoningEngines/8689420053348614144",
+      "revoked": false,
+      "status": "granted",
+      "legal_basis": "state_juvenile_court_order",
+      "grant_id": "grant-check_availability",
+      "allowed_fields": [
+        "referral_id",
+        "scheduling"
+      ]
+    },
+    {
+      "granted_by": "demo-supervisor",
+      "purpose": "check_referral_status",
+      "granted_to": "agents.global.org-126484209344.system.id.goog/resources/aiplatform/projects/189353698936/locations/us-central1/reasoningEngines/3107630527687950336",
+      "revoked": false,
+      "status": "granted",
+      "legal_basis": "state_juvenile_court_order",
+      "grant_id": "grant-check_referral_status",
+      "allowed_fields": [
+        "case_reference",
+        "deadline"
+      ]
+    },
+    {
+      "granted_by": "demo-supervisor",
+      "purpose": "verify_school_enrollment",
+      "granted_to": "agents.global.org-126484209344.system.id.goog/resources/aiplatform/projects/189353698936/locations/us-central1/reasoningEngines/6205121908900364288",
+      "revoked": false,
+      "status": "granted",
+      "legal_basis": "ferpa_court_order",
+      "grant_id": "grant-verify_school_enrollment",
+      "allowed_fields": [
+        "child_name",
+        "dob",
+        "referral_id"
+      ]
+    }
+  ],
+  "timeline": [
+    {
+      "trace_id": "edc0f0d83645a18cf4cc2d0c3f82b8bf",
+      "disclosed_fields": [
+        "child_name",
+        "dob",
+        "referral_id"
+      ],
+      "timestamp": "2026-08-31T21:23:23.792912+00:00",
+      "withheld_fields": [
+        "case_reference",
+        "deadline",
+        "appointment_status",
+        "provider_name",
+        "appointment_date",
+        "scheduling",
+        "assessment_scheduling",
+        "diagnosis",
+        "legal_strategy",
+        "family_notes",
+        "clinical_notes"
+      ],
+      "agent_identity": "agents.global.org-126484209344.system.id.goog/resources/aiplatform/projects/189353698936/locations/us-central1/reasoningEngines/6205121908900364288",
+      "verdict": "allow",
+      "event_type": "disclosure",
+      "legal_basis": "ferpa_court_order",
+      "event_id": "evt-3ae322d0",
+      "purpose": "verify_school_enrollment"
+    },
+    {
+      "disclosed_fields": [
+        "referral_id",
+        "scheduling"
+      ],
+      "trace_id": "c94d28983486a45749e2ae0b155984a6",
+      "timestamp": "2026-08-31T21:23:24.054219+00:00",
+      "withheld_fields": [
+        "child_name",
+        "dob",
+        "case_reference",
+        "deadline",
+        "appointment_status",
+        "provider_name",
+        "appointment_date",
+        "assessment_scheduling",
+        "diagnosis",
+        "legal_strategy",
+        "family_notes",
+        "clinical_notes"
+      ],
+      "agent_identity": "agents.global.org-126484209344.system.id.goog/resources/aiplatform/projects/189353698936/locations/us-central1/reasoningEngines/8689420053348614144",
+      "verdict": "allow",
+      "event_type": "disclosure",
+      "legal_basis": "state_juvenile_court_order",
+      "event_id": "evt-4260dd8d",
+      "purpose": "check_availability"
+    },
+    {
+      "disclosed_fields": [
+        "assessment_scheduling"
+      ],
+      "trace_id": "402572ebdfd431cb557c0ae2ba937631",
+      "timestamp": "2026-08-31T21:23:23.853918+00:00",
+      "agent_identity": "agents.global.org-126484209344.system.id.goog/resources/aiplatform/projects/189353698936/locations/us-central1/reasoningEngines/7993613910919872512",
+      "withheld_fields": [
+        "child_name",
+        "dob",
+        "referral_id",
+        "case_reference",
+        "deadline",
+        "appointment_status",
+        "provider_name",
+        "appointment_date",
+        "scheduling",
+        "diagnosis",
+        "legal_strategy",
+        "family_notes",
+        "clinical_notes"
+      ],
+      "verdict": "allow",
+      "event_type": "disclosure",
+      "legal_basis": "state_juvenile_court_order",
+      "event_id": "evt-5c116148",
+      "purpose": "check_assessment_schedule"
+    },
+    {
+      "disclosed_fields": [
+        "case_reference",
+        "deadline"
+      ],
+      "trace_id": "31826c12fa0e4ed8b3a74555d22ea38c",
+      "timestamp": "2026-08-31T21:23:24.007134+00:00",
+      "agent_identity": "agents.global.org-126484209344.system.id.goog/resources/aiplatform/projects/189353698936/locations/us-central1/reasoningEngines/3107630527687950336",
+      "withheld_fields": [
+        "child_name",
+        "dob",
+        "referral_id",
+        "appointment_status",
+        "provider_name",
+        "appointment_date",
+        "scheduling",
+        "assessment_scheduling",
+        "diagnosis",
+        "legal_strategy",
+        "family_notes",
+        "clinical_notes"
+      ],
+      "verdict": "allow",
+      "event_type": "disclosure",
+      "legal_basis": "state_juvenile_court_order",
+      "event_id": "evt-e181e68a",
+      "purpose": "check_referral_status"
+    },
+    {
+      "disclosed_fields": [
+        "appointment_status",
+        "provider_name",
+        "appointment_date"
+      ],
+      "trace_id": "024c6cba63f7e247c715581d895d34e1",
+      "timestamp": "2026-08-31T21:23:23.883853+00:00",
+      "agent_identity": "agents.global.org-126484209344.system.id.goog/resources/aiplatform/projects/189353698936/locations/us-central1/reasoningEngines/2657974252392677376",
+      "withheld_fields": [
+        "child_name",
+        "dob",
+        "referral_id",
+        "case_reference",
+        "deadline",
+        "scheduling",
+        "assessment_scheduling",
+        "diagnosis",
+        "legal_strategy",
+        "family_notes",
+        "clinical_notes"
+      ],
+      "verdict": "allow",
+      "event_type": "disclosure",
+      "legal_basis": "hipaa_signed_authorization",
+      "event_id": "evt-e1c92632",
+      "purpose": "check_appointment_status"
+    },
+    {
+      "workflow_ids": [
+        "wf-CR-0831212234-education",
+        "wf-CR-0831212234-health"
+      ],
+      "trace_id": "21e53372155e43cc834f077c5363d22a",
+      "event_type": "workflow_wake",
+      "triggered_by": "scheduler",
+      "timestamp": "2026-08-31T21:24:04.904440+00:00",
+      "event_id": "evt-wake-25d2d8af",
+      "agent_identity": "caserelay-scheduler"
+    }
+  ]
+}

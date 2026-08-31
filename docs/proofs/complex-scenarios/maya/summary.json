@@ -1,0 +1,53 @@
+{
+  "scenario": "maya",
+  "case_id": "CR-0831211122",
+  "due_in": "45s",
+  "captured_at": "2026-08-31T21:16:20.025060+00:00",
+  "control_plane": "https://caserelay-control-plane-6nwo7o4bbq-uc.a.run.app",
+  "case_status": "closed",
+  "commitments": {
+    "education": "completed",
+    "family_services": "completed",
+    "health": "completed",
+    "legal": "completed",
+    "shelter": "completed"
+  },
+  "escalation_gate_seen": true,
+  "escalation_decided": true,
+  "run_ids": [
+    {
+      "run_id": "a4ba8e4909b2",
+      "state": "completed",
+      "current_phase": "done",
+      "started_at": null,
+      "resume_trigger": null
+    },
+    {
+      "run_id": "47a84239bcf7",
+      "state": "completed",
+      "current_phase": "approved",
+      "started_at": null,
+      "resume_trigger": null
+    },
+    {
+      "run_id": "b4eebbb3a1c4",
+      "state": "suspended",
+      "current_phase": "checkpoint",
+      "started_at": null,
+      "resume_trigger": null
+    },
+    {
+      "run_id": "d05011d536e7",
+      "state": "completed",
+      "current_phase": "approved",
+      "started_at": null,
+      "resume_trigger": null
+    }
+  ],
+  "audit_event_types": [
+    "disclosure",
+    "followup",
+    "quarantine",
+    "workflow_wake"
+  ]
+}

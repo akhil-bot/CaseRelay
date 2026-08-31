@@ -1,0 +1,25 @@
+{
+  "retrievedMemories": [
+    {
+      "memory": {
+        "name": "projects/189353698936/locations/us-central1/reasoningEngines/8631858420611284992/memories/3007014562227552256",
+        "createTime": "2026-08-31T21:19:05.263587Z",
+        "updateTime": "2026-08-31T21:19:05.263587Z",
+        "fact": "For the stalled legal aid commitment on case CR-0831211641, sending a direct follow-up call to the provider successfully unblocked the process because Officer Reed at Legal Services answered, took ownership, and completed the commitment.",
+        "scope": {
+          "app_name": "caserelay",
+          "user_id": "CR-0831211641"
+        },
+        "topics": [
+          {
+            "customMemoryTopicLabel": "partner_contacts"
+          },
+          {
+            "customMemoryTopicLabel": "unblocking_strategies"
+          }
+        ],
+        "memoryType": "NATURAL_LANGUAGE_COLLECTION"
+      }
+    }
+  ]
+}

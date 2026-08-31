@@ -1,0 +1,205 @@
+[
+  {
+    "trace_id": "c9da265306e64cfc9c1a56e1722602bb",
+    "explanation": "Follow-up answered; a named officer has taken the referral on and closed it.",
+    "disclosed_fields": [
+      "case_reference",
+      "deadline"
+    ],
+    "timestamp": "2026-08-31T21:18:16.260947+00:00",
+    "agent_identity": "agents.global.org-126484209344.system.id.goog/resources/aiplatform/projects/189353698936/locations/us-central1/reasoningEngines/3107630527687950336",
+    "verdict": "answered",
+    "event_type": "followup",
+    "commitment_type": "legal",
+    "event_id": "evt-25d2a7c0",
+    "purpose": "check_referral_status"
+  },
+  {
+    "disclosed_fields": [
+      "referral_id",
+      "scheduling"
+    ],
+    "trace_id": "354a587a9fa1cb831ddccbbb09950699",
+    "timestamp": "2026-08-31T21:17:23.997371+00:00",
+    "withheld_fields": [
+      "child_name",
+      "dob",
+      "case_reference",
+      "deadline",
+      "appointment_status",
+      "provider_name",
+      "appointment_date",
+      "assessment_scheduling",
+      "diagnosis",
+      "legal_strategy",
+      "family_notes",
+      "clinical_notes"
+    ],
+    "agent_identity": "agents.global.org-126484209344.system.id.goog/resources/aiplatform/projects/189353698936/locations/us-central1/reasoningEngines/8689420053348614144",
+    "verdict": "allow",
+    "event_type": "disclosure",
+    "legal_basis": "state_juvenile_court_order",
+    "event_id": "evt-2aed2165",
+    "purpose": "check_availability"
+  },
+  {
+    "disclosed_fields": [
+      "appointment_status",
+      "provider_name",
+      "appointment_date"
+    ],
+    "trace_id": "16e552d12dee2f25a11434e29e0d3c48",
+    "timestamp": "2026-08-31T21:17:23.329507+00:00",
+    "agent_identity": "agents.global.org-126484209344.system.id.goog/resources/aiplatform/projects/189353698936/locations/us-central1/reasoningEngines/2657974252392677376",
+    "withheld_fields": [
+      "child_name",
+      "dob",
+      "referral_id",
+      "case_reference",
+      "deadline",
+      "scheduling",
+      "assessment_scheduling",
+      "diagnosis",
+      "legal_strategy",
+      "family_notes",
+      "clinical_notes"
+    ],
+    "verdict": "allow",
+    "event_type": "disclosure",
+    "legal_basis": "hipaa_signed_authorization",
+    "event_id": "evt-55c66726",
+    "purpose": "check_appointment_status"
+  },
+  {
+    "trace_id": "c9da265306e64cfc9c1a56e1722602bb",
+    "explanation": "No answer to the follow-up.",
+    "disclosed_fields": [
+      "appointment_status",
+      "provider_name",
+      "appointment_date"
+    ],
+    "timestamp": "2026-08-31T21:18:15.889871+00:00",
+    "agent_identity": "agents.global.org-126484209344.system.id.goog/resources/aiplatform/projects/189353698936/locations/us-central1/reasoningEngines/2657974252392677376",
+    "verdict": "no_response",
+    "event_type": "followup",
+    "commitment_type": "health",
+    "event_id": "evt-76d8f241",
+    "purpose": "check_appointment_status"
+  },
+  {
+    "disclosed_fields": [
+      "case_reference",
+      "deadline"
+    ],
+    "trace_id": "6923bee1871ab1c292c3ab7fc270696c",
+    "timestamp": "2026-08-31T21:17:25.969657+00:00",
+    "agent_identity": "agents.global.org-126484209344.system.id.goog/resources/aiplatform/projects/189353698936/locations/us-central1/reasoningEngines/3107630527687950336",
+    "withheld_fields": [
+      "child_name",
+      "dob",
+      "referral_id",
+      "appointment_status",
+      "provider_name",
+      "appointment_date",
+      "scheduling",
+      "assessment_scheduling",
+      "diagnosis",
+      "legal_strategy",
+      "family_notes",
+      "clinical_notes"
+    ],
+    "verdict": "allow",
+    "event_type": "disclosure",
+    "legal_basis": "state_juvenile_court_order",
+    "event_id": "evt-95a2a59f",
+    "purpose": "check_referral_status"
+  },
+  {
+    "trace_id": "af4244adecf39b2abed527c185e91910",
+    "explanation": "Riverbend Community Health has not responded to the follow-up on the health commitment. Its deadline has passed and nothing has come back.",
+    "timestamp": "2026-08-31T21:18:30.459383+00:00",
+    "agent_identity": "agents.global.org-126484209344.system.id.goog/resources/aiplatform/projects/189353698936/locations/us-central1/reasoningEngines/2657974252392677376",
+    "verdict": "supervisor_notified",
+    "event_type": "unresponsive_partner",
+    "commitment_type": "health",
+    "event_id": "evt-b1044d35"
+  },
+  {
+    "trace_id": "c35f8729edcd7e347f41e2ca76d7b3b9",
+    "disclosed_fields": [
+      "child_name",
+      "dob",
+      "referral_id"
+    ],
+    "timestamp": "2026-08-31T21:17:24.608635+00:00",
+    "withheld_fields": [
+      "case_reference",
+      "deadline",
+      "appointment_status",
+      "provider_name",
+      "appointment_date",
+      "scheduling",
+      "assessment_scheduling",
+      "diagnosis",
+      "legal_strategy",
+      "family_notes",
+      "clinical_notes"
+    ],
+    "agent_identity": "agents.global.org-126484209344.system.id.goog/resources/aiplatform/projects/189353698936/locations/us-central1/reasoningEngines/6205121908900364288",
+    "verdict": "allow",
+    "event_type": "disclosure",
+    "legal_basis": "ferpa_court_order",
+    "event_id": "evt-ccc2d234",
+    "purpose": "verify_school_enrollment"
+  },
+  {
+    "disclosed_fields": [
+      "assessment_scheduling"
+    ],
+    "trace_id": "e7b1484060015b2e07ae6f8f64cabc47",
+    "timestamp": "2026-08-31T21:17:23.828197+00:00",
+    "agent_identity": "agents.global.org-126484209344.system.id.goog/resources/aiplatform/projects/189353698936/locations/us-central1/reasoningEngines/7993613910919872512",
+    "withheld_fields": [
+      "child_name",
+      "dob",
+      "referral_id",
+      "case_reference",
+      "deadline",
+      "appointment_status",
+      "provider_name",
+      "appointment_date",
+      "scheduling",
+      "diagnosis",
+      "legal_strategy",
+      "family_notes",
+      "clinical_notes"
+    ],
+    "verdict": "allow",
+    "event_type": "disclosure",
+    "legal_basis": "state_juvenile_court_order",
+    "event_id": "evt-eb50807f",
+    "purpose": "check_assessment_schedule"
+  },
+  {
+    "workflow_ids": [],
+    "trace_id": "213f130c48ef490d89bdbd47ceae4176",
+    "event_type": "workflow_wake",
+    "triggered_by": "scheduler",
+    "timestamp": "2026-08-31T21:18:51.088446+00:00",
+    "event_id": "evt-wake-c242457d",
+    "agent_identity": "caserelay-scheduler"
+  },
+  {
+    "workflow_ids": [
+      "wf-CR-0831211641-education",
+      "wf-CR-0831211641-health",
+      "wf-CR-0831211641-legal"
+    ],
+    "trace_id": "0e5029d732d09ee8c56ff1479d7fe93e",
+    "event_type": "workflow_wake",
+    "triggered_by": "scheduler",
+    "timestamp": "2026-08-31T21:18:07.169390+00:00",
+    "event_id": "evt-wake-f0b5a86b",
+    "agent_identity": "caserelay-scheduler"
+  }
+]

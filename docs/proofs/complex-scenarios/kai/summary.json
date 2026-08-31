@@ -1,0 +1,46 @@
+{
+  "scenario": "kai",
+  "case_id": "CR-0831211641",
+  "due_in": null,
+  "captured_at": "2026-08-31T21:21:59.546683+00:00",
+  "control_plane": "https://caserelay-control-plane-6nwo7o4bbq-uc.a.run.app",
+  "case_status": "monitoring",
+  "commitments": {
+    "education": "completed",
+    "family_services": "completed",
+    "health": "unresolved",
+    "legal": "completed",
+    "shelter": "completed"
+  },
+  "escalation_gate_seen": false,
+  "escalation_decided": false,
+  "run_ids": [
+    {
+      "run_id": "6451653f0e04",
+      "state": "completed",
+      "current_phase": "done",
+      "started_at": null,
+      "resume_trigger": null
+    },
+    {
+      "run_id": "2b9d172be5bb",
+      "state": "suspended",
+      "current_phase": "checkpoint",
+      "started_at": null,
+      "resume_trigger": null
+    },
+    {
+      "run_id": "e3b83cb30c87",
+      "state": "completed",
+      "current_phase": "approved",
+      "started_at": null,
+      "resume_trigger": null
+    }
+  ],
+  "audit_event_types": [
+    "disclosure",
+    "followup",
+    "unresponsive_partner",
+    "workflow_wake"
+  ]
+}

@@ -1,0 +1,12 @@
+{
+  "recipient": "Lincoln Unified School District",
+  "policy_basis": [
+    "block_cross_scope_request",
+    "CR-POLICY-003"
+  ],
+  "approval_id": "apr-4899c87a",
+  "decision": "approved",
+  "action_type": "escalation",
+  "reason": "The callback attempted to access data outside its permitted scope.",
+  "decided_by": "demo-supervisor"
+}

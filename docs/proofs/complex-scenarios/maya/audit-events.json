@@ -1,0 +1,229 @@
+[
+  {
+    "disclosed_fields": [
+      "referral_id",
+      "scheduling"
+    ],
+    "trace_id": "2f31e7df40fa8acaa8adc5ccd3ec4aab",
+    "timestamp": "2026-08-31T21:12:41.984134+00:00",
+    "withheld_fields": [
+      "child_name",
+      "dob",
+      "case_reference",
+      "deadline",
+      "appointment_status",
+      "provider_name",
+      "appointment_date",
+      "assessment_scheduling",
+      "diagnosis",
+      "legal_strategy",
+      "family_notes",
+      "clinical_notes"
+    ],
+    "agent_identity": "agents.global.org-126484209344.system.id.goog/resources/aiplatform/projects/189353698936/locations/us-central1/reasoningEngines/8689420053348614144",
+    "verdict": "allow",
+    "event_type": "disclosure",
+    "legal_basis": "state_juvenile_court_order",
+    "event_id": "evt-07148f70",
+    "purpose": "check_availability"
+  },
+  {
+    "trace_id": "2b6cab0643adfa1fb1e841d7a2f4bcc8",
+    "explanation": "Follow-up answered; a named officer has taken the referral on and closed it.",
+    "disclosed_fields": [
+      "child_name",
+      "dob",
+      "referral_id"
+    ],
+    "timestamp": "2026-08-31T21:15:34.025881+00:00",
+    "agent_identity": "agents.global.org-126484209344.system.id.goog/resources/aiplatform/projects/189353698936/locations/us-central1/reasoningEngines/6205121908900364288",
+    "verdict": "answered",
+    "event_type": "followup",
+    "commitment_type": "education",
+    "event_id": "evt-2c9f0c59",
+    "purpose": "verify_school_enrollment"
+  },
+  {
+    "trace_id": "f2dc4815d739075b88691c69ea8cefec",
+    "disclosed_fields": [
+      "child_name",
+      "dob",
+      "referral_id"
+    ],
+    "timestamp": "2026-08-31T21:15:15.372522+00:00",
+    "withheld_fields": [
+      "case_reference",
+      "deadline",
+      "appointment_status",
+      "provider_name",
+      "appointment_date",
+      "scheduling",
+      "assessment_scheduling",
+      "diagnosis",
+      "legal_strategy",
+      "family_notes",
+      "clinical_notes"
+    ],
+    "agent_identity": "agents.global.org-126484209344.system.id.goog/resources/aiplatform/projects/189353698936/locations/us-central1/reasoningEngines/6205121908900364288",
+    "verdict": "allow",
+    "event_type": "disclosure",
+    "legal_basis": "ferpa_court_order",
+    "event_id": "evt-65e38338",
+    "purpose": "verify_school_enrollment"
+  },
+  {
+    "disclosed_fields": [
+      "assessment_scheduling"
+    ],
+    "trace_id": "b756864b4e34a84400db44b5764fc985",
+    "timestamp": "2026-08-31T21:12:33.325560+00:00",
+    "agent_identity": "agents.global.org-126484209344.system.id.goog/resources/aiplatform/projects/189353698936/locations/us-central1/reasoningEngines/7993613910919872512",
+    "withheld_fields": [
+      "child_name",
+      "dob",
+      "referral_id",
+      "case_reference",
+      "deadline",
+      "appointment_status",
+      "provider_name",
+      "appointment_date",
+      "scheduling",
+      "diagnosis",
+      "legal_strategy",
+      "family_notes",
+      "clinical_notes"
+    ],
+    "verdict": "allow",
+    "event_type": "disclosure",
+    "legal_basis": "state_juvenile_court_order",
+    "event_id": "evt-6cd40439",
+    "purpose": "check_assessment_schedule"
+  },
+  {
+    "trace_id": "21422410946fad4f23852dc54b51e095",
+    "disclosed_fields": [
+      "child_name",
+      "dob",
+      "referral_id"
+    ],
+    "timestamp": "2026-08-31T21:12:54.951435+00:00",
+    "withheld_fields": [
+      "case_reference",
+      "deadline",
+      "appointment_status",
+      "provider_name",
+      "appointment_date",
+      "scheduling",
+      "assessment_scheduling",
+      "diagnosis",
+      "legal_strategy",
+      "family_notes",
+      "clinical_notes"
+    ],
+    "agent_identity": "agents.global.org-126484209344.system.id.goog/resources/aiplatform/projects/189353698936/locations/us-central1/reasoningEngines/6205121908900364288",
+    "verdict": "allow",
+    "event_type": "disclosure",
+    "legal_basis": "ferpa_court_order",
+    "event_id": "evt-88817fab",
+    "purpose": "verify_school_enrollment"
+  },
+  {
+    "disclosed_fields": [
+      "appointment_status",
+      "provider_name",
+      "appointment_date"
+    ],
+    "trace_id": "5854d09eff862ab37b1e079018495b93",
+    "timestamp": "2026-08-31T21:12:38.855241+00:00",
+    "agent_identity": "agents.global.org-126484209344.system.id.goog/resources/aiplatform/projects/189353698936/locations/us-central1/reasoningEngines/2657974252392677376",
+    "withheld_fields": [
+      "child_name",
+      "dob",
+      "referral_id",
+      "case_reference",
+      "deadline",
+      "scheduling",
+      "assessment_scheduling",
+      "diagnosis",
+      "legal_strategy",
+      "family_notes",
+      "clinical_notes"
+    ],
+    "verdict": "allow",
+    "event_type": "disclosure",
+    "legal_basis": "hipaa_signed_authorization",
+    "event_id": "evt-b5c92852",
+    "purpose": "check_appointment_status"
+  },
+  {
+    "disclosed_fields": [
+      "case_reference",
+      "deadline"
+    ],
+    "trace_id": "7a964cba109175bef73c61231705130c",
+    "timestamp": "2026-08-31T21:12:34.734428+00:00",
+    "agent_identity": "agents.global.org-126484209344.system.id.goog/resources/aiplatform/projects/189353698936/locations/us-central1/reasoningEngines/3107630527687950336",
+    "withheld_fields": [
+      "child_name",
+      "dob",
+      "referral_id",
+      "appointment_status",
+      "provider_name",
+      "appointment_date",
+      "scheduling",
+      "assessment_scheduling",
+      "diagnosis",
+      "legal_strategy",
+      "family_notes",
+      "clinical_notes"
+    ],
+    "verdict": "allow",
+    "event_type": "disclosure",
+    "legal_basis": "state_juvenile_court_order",
+    "event_id": "evt-f8e8d817",
+    "purpose": "check_referral_status"
+  },
+  {
+    "verdict": "quarantine",
+    "trace_id": "26ca8c6a6ca28dea08415d199d2e8ca9",
+    "explanation": "The callback attempted to access data outside its permitted scope.",
+    "event_type": "quarantine",
+    "timestamp": "2026-08-31T21:14:33.862773+00:00",
+    "agent_identity": "agents.global.org-126484209344.system.id.goog/resources/aiplatform/projects/189353698936/locations/us-central1/reasoningEngines/3044580132904763392",
+    "event_id": "evt-q-4899c87a"
+  },
+  {
+    "workflow_ids": [
+      "wf-CR-0831211122-legal",
+      "wf-CR-0831211122-education",
+      "wf-CR-0831211122-health"
+    ],
+    "trace_id": "912064dd42a1da8f37aafba72b793294",
+    "event_type": "workflow_wake",
+    "triggered_by": "scheduler",
+    "timestamp": "2026-08-31T21:13:43.478931+00:00",
+    "event_id": "evt-wake-6be60aa8",
+    "agent_identity": "caserelay-scheduler"
+  },
+  {
+    "workflow_ids": [
+      "wf-CR-0831211122-shelter",
+      "wf-CR-0831211122-family_services"
+    ],
+    "trace_id": "5527aad88f4186b031022a6d18e31611",
+    "event_type": "workflow_wake",
+    "triggered_by": "scheduler",
+    "timestamp": "2026-08-31T21:15:00.014441+00:00",
+    "event_id": "evt-wake-ee2e33bc",
+    "agent_identity": "caserelay-scheduler"
+  },
+  {
+    "workflow_ids": [],
+    "trace_id": "4284796cfa634a53a815155d0469b932",
+    "event_type": "workflow_wake",
+    "triggered_by": "scheduler",
+    "timestamp": "2026-08-31T21:15:56.807735+00:00",
+    "event_id": "evt-wake-fc25d3b6",
+    "agent_identity": "caserelay-scheduler"
+  }
+]

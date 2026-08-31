@@ -1,0 +1,40 @@
+{
+  "retrievedMemories": [
+    {
+      "memory": {
+        "name": "projects/189353698936/locations/us-central1/reasoningEngines/8631858420611284992/memories/2304453020357754880",
+        "createTime": "2026-08-31T21:16:07.727626Z",
+        "updateTime": "2026-08-31T21:16:07.727626Z",
+        "fact": "When an education commitment is stalled past its deadline, obtaining supervisor approval to escalate the case allows a scoped follow-up to be sent, which successfully unblocks and resolves the commitment.",
+        "scope": {
+          "app_name": "caserelay",
+          "user_id": "CR-0831211122"
+        },
+        "topics": [
+          {
+            "customMemoryTopicLabel": "unblocking_strategies"
+          }
+        ],
+        "memoryType": "NATURAL_LANGUAGE_COLLECTION"
+      }
+    },
+    {
+      "memory": {
+        "name": "projects/189353698936/locations/us-central1/reasoningEngines/8631858420611284992/memories/8069060543391989760",
+        "createTime": "2026-08-31T21:16:07.726664Z",
+        "updateTime": "2026-08-31T21:16:07.726664Z",
+        "fact": "The contact for the education provider is Sarah M., who successfully resolved an outstanding commitment upon receiving a follow-up.",
+        "scope": {
+          "app_name": "caserelay",
+          "user_id": "CR-0831211122"
+        },
+        "topics": [
+          {
+            "customMemoryTopicLabel": "partner_contacts"
+          }
+        ],
+        "memoryType": "NATURAL_LANGUAGE_COLLECTION"
+      }
+    }
+  ]
+}

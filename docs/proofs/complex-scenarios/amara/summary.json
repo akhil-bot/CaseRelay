@@ -1,0 +1,44 @@
+{
+  "scenario": "amara",
+  "case_id": "CR-0831212234",
+  "due_in": null,
+  "captured_at": "2026-08-31T21:24:16.064855+00:00",
+  "control_plane": "https://caserelay-control-plane-6nwo7o4bbq-uc.a.run.app",
+  "case_status": "closed",
+  "commitments": {
+    "education": "completed",
+    "family_services": "completed",
+    "health": "completed",
+    "legal": "completed",
+    "shelter": "completed"
+  },
+  "escalation_gate_seen": false,
+  "escalation_decided": false,
+  "run_ids": [
+    {
+      "run_id": "3b2628e2b313",
+      "state": "completed",
+      "current_phase": "done",
+      "started_at": null,
+      "resume_trigger": null
+    },
+    {
+      "run_id": "bddba9377ce1",
+      "state": "suspended",
+      "current_phase": "checkpoint",
+      "started_at": null,
+      "resume_trigger": null
+    },
+    {
+      "run_id": "5fd3da37a9e8",
+      "state": "suspended",
+      "current_phase": "checkpoint",
+      "started_at": null,
+      "resume_trigger": null
+    }
+  ],
+  "audit_event_types": [
+    "disclosure",
+    "workflow_wake"
+  ]
+}

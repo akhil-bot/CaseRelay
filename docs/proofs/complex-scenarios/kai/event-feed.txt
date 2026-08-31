@@ -1,0 +1,41 @@
+[21:16:42] RUN_STARTED                                           Opening Kai's case and reviewing every open commitment.
+[21:16:42] STEP_STARTED                                          Reading the Nguyen family's referral for Kai.
+[21:17:13] STEP_FINISHED                                         Found 5 commitments — waiting for supervisor approval to proceed.
+[21:17:13] CUSTOM                                                Waiting for supervisor approval (activation) before continuing with Kai's case.
+[21:17:14] RUN_FINISHED                                          Run paused — supervisor must activate Kai's case before services are contacted.
+[21:17:15] RUN_STARTED                                           Approved — contacting every service on Kai's case.
+[21:17:16] STEP_STARTED                                          Contacting Riverbend Community Health about Kai's clinic visit.
+[21:17:16] STEP_STARTED                                          Contacting Mesa County Family Services about Kai's family services assessment.
+[21:17:16] STEP_STARTED                                          Contacting Harborlight Youth Shelter about Kai's shelter placement.
+[21:17:16] STEP_STARTED                                          Contacting Statewide Legal Aid Collective about Kai's legal aid referral.
+[21:17:16] STEP_STARTED                                          Contacting Lincoln Unified School District about Kai's school enrollment.
+[21:17:33] STEP_FINISHED                                         David Chen could not resolve Kai's clinic visit.
+[21:17:34] STEP_FINISHED                                         Maria Lopez has confirmed Kai's family services assessment.
+[21:17:35] STEP_FINISHED                                         Tom Barnes has confirmed Kai's shelter placement.
+[21:17:36] STEP_FINISHED                                         Sarah Miller has confirmed Kai's school enrollment.
+[21:17:37] STEP_FINISHED                                         Anna Reed could not resolve Kai's legal aid referral.
+[21:17:38] STEP_STARTED                                          Setting a reminder to follow up on anything still open.
+[21:17:46] STEP_FINISHED                                         Reminder set — Kai's open commitments will be chased automatically.
+[21:17:46] CUSTOM                                                Checkpoint saved — this run is ending. 5 scheduled pushes will resume Kai's case as each commitment comes due.
+[21:17:52] CUSTOM                                                Saved notes from this session to Kai's file — partner contacts, shortcuts, and strategies will be available next time.
+[21:17:52] RUN_FINISHED                                          Reminder set — Kai's open commitments will be chased automatically.
+[21:18:02] RUN_STARTED                                           Reminder fired — checking back on Kai's open commitments.
+[21:18:04] CUSTOM                                                Reconciled Kai's commitments: 2 overdue, 3 on track.
+[21:18:04] CUSTOM                                                David Chen is overdue on Kai's clinic visit.
+[21:18:04] CUSTOM                                                Anna Reed is overdue on Kai's legal aid referral.
+[21:18:04] STEP_STARTED                                          Reminder fired — checking back on Kai's open commitments.
+[21:18:11] STEP_FINISHED                                         Checked back on Kai's open commitments.
+[21:18:13] STEP_STARTED                                          Following up on Kai's missed deadlines.
+[21:18:13] CUSTOM                                                Chasing Riverbend Community Health on Kai's clinic visit.
+[21:18:13] CUSTOM                                                Chasing Statewide Legal Aid Collective on Kai's legal aid referral.
+[21:18:24] CUSTOM                                                Riverbend still has not answered on Kai's clinic visit.
+[21:18:24] CUSTOM                                                Anna Reed has taken on Kai's legal aid referral.
+[21:18:24] STEP_FINISHED                                         Follow-ups are out; 1 of 5 still open on Kai's case.
+[21:18:25] STEP_STARTED                                          Nobody replied — escalating to a supervisor.
+[21:18:35] CUSTOM                                                A supervisor has been told Kai's clinic visit is unanswered.
+[21:18:35] STEP_FINISHED                                         The unanswered commitments have been escalated to a supervisor.
+[21:18:36] STEP_STARTED                                          Recording everything that happened for Kai's file.
+[21:18:49] STEP_FINISHED                                         Case notes updated — every status on Kai's file is recorded.
+[21:19:05] CUSTOM                                                Saved notes from this session to Kai's file — partner contacts, shortcuts, and strategies will be available next time.
+[21:19:05] CUSTOM                                                4 of 5 commitments fulfilled for Kai.
+[21:19:05] RUN_FINISHED                                          4 of 5 commitments fulfilled for Kai.

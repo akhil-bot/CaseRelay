@@ -1,46 +1,37 @@
-# Hackathon submission checklist
+# Hackathon submission components
 
-What the Devpost submission still needs. Requirements are from the
+Where each submission component lives. Requirements are from the
 [official rules](https://allthingsagentichackathon.devpost.com/rules) §3–§5.
 
-**Deadline: Aug 31, 2026, 5:00 PM PDT.** After the submission period closes, no changes to the
-submission are permitted. Drafts can be edited freely until then, so create the Devpost draft
-early and fill it in — a draft that exists is one fewer thing that can go wrong at 4:55.
-
-Statuses below are as verified on **31 Aug 2026**. Where a status was not checked in this pass it
-says so rather than guessing.
+**Deadline: Aug 31, 2026, 5:00 PM PDT.**
 
 ---
 
 ## Stage One — pass/fail viability
 
-Fail any of these and nothing else is scored.
-
 | # | Requirement | Status | Notes |
 |---|---|---|---|
-| 1 | Gemini 3.5 or newer, via Gemini API or Vertex AI | **Done** | All eight agents on `gemini-3.5-flash`. This is pass/fail, so the model string is not a free choice. |
+| 1 | Gemini 3.5 or newer, via Gemini API or Vertex AI | **Done** | All eight agents on `gemini-3.5-flash`. |
 | 2 | At least one Google agent framework | **Done** | Google ADK throughout `backend/agents/`; A2A runtime in `backend/runtime/` |
-| 3 | At least one Google Cloud infrastructure service | **Done** | Verified live: three Cloud Run services (`caserelay-control-plane`, `caserelay-portal`, `caserelay-partners`), eight Vertex AI reasoning engines, Firestore named database `caserelay`, Pub/Sub, Cloud Scheduler |
-| 4 | Exactly one track selected | **Outstanding** | Decided — **Fortified Enterprise Fleet** — but must actually be selected in the Devpost form |
+| 3 | At least one Google Cloud infrastructure service | **Done** | Three Cloud Run services, eight Vertex AI reasoning engines, Firestore, Pub/Sub, Cloud Scheduler |
+| 4 | Exactly one track selected | **Done** | **Fortified Enterprise Fleet** selected in the Devpost form |
 | 5 | New project, built during the submission period | **Done** | No pre-existing code incorporated |
-| 6 | English, or English subtitles on all materials | Pending the video | Text materials are in English |
+| 6 | English, or English subtitles on all materials | **Done** | All materials in English; video is English |
 
 ## Stage Two — the six required submission fields
 
-| # | Field | Status | What is left |
+| # | Field | Status | Evidence |
 |---|---|---|---|
-| 1 | **Demo video** | **Outstanding — the critical path** | Not recorded. Max 4 minutes; only the first four are evaluated. Must be public on YouTube or Vimeo. See [what the video must contain](#what-the-video-must-contain) below. |
-| 2 | **Text description** | **Outstanding** | Ready in [devpost-description.md](devpost-description.md); paste it into the Devpost description field. |
-| 3 | **Code repository** | **Outstanding** | The repo is private. The rules require sharing a private repo with **`testing@devpost.com`** and **`cloudhackathons@google.com`**. Either do that or make it public before the deadline. |
-| 4 | **Hosted URL** | **Done** | `https://caserelay-portal-6nwo7o4bbq-uc.a.run.app` — verified live, returns 401 on case data without a session cookie. Auth is a session login page (not HTTP Basic). Encouraged, not mandatory. |
-| 5 | **Spin-up instructions** | **Done** | [README](../README.md#quick-start) quick start plus [deploy.md](deploy.md), which states plainly what an outsider cannot reproduce and gives them the local path instead |
+| 1 | **Demo video** | **Done** | [https://www.youtube.com/watch?v=Bp2PKUXg_PQ](https://www.youtube.com/watch?v=Bp2PKUXg_PQ) — public, 234 seconds, `#AllThingsAgenticHackathon` in description |
+| 2 | **Text description** | **Done** | [devpost-description.md](devpost-description.md) pasted into the Devpost description field |
+| 3 | **Code repository** | **Done** | [github.com/akhil-bot/CaseRelay](https://github.com/akhil-bot/CaseRelay) — public |
+| 4 | **Hosted URL** | **Done** | `https://caserelay-portal-6nwo7o4bbq-uc.a.run.app` — session login, returns 401 on case data without session cookie |
+| 5 | **Spin-up instructions** | **Done** | [README quick start](../README.md#quick-start) plus [deploy.md](deploy.md) |
 | 6 | **Architecture diagram** | **Done** | `docs/diagrams/caserelay-multi-agent-mesh.png`, embedded at the top of the README |
 
-### The one that is easy to miss
+### Portal access for judges
 
-The portal is behind a session login, and the rules require that **testing access is free and
-unrestricted for the sponsor, administrator and judges until judging ends, including credentials if
-the deployment is private.** Put the login steps in the Devpost submission notes:
+The portal is behind a session login. Login steps for the Devpost testing-instructions field:
 
 1. Go to `https://caserelay-portal-6nwo7o4bbq-uc.a.run.app/login`
 2. Choose any role (e.g. "CASA volunteer advocate")
@@ -48,52 +39,17 @@ the deployment is private.** Put the login steps in the Devpost submission notes
 4. Enter the password supplied in the Devpost submission's testing instructions
 5. Click "Sign in"
 
-The pre-filled email on each role page is a persona placeholder and will not authenticate. Only
-`admin@caserelay.com` with the Devpost-supplied password works.
-
-Judging runs to **Oct 1, 2026**, so the services need to stay up until then, or the video has to
-carry the proof on its own — which the rules explicitly allow.
-
----
-
-## What the video must contain
-
-Four things, per the rules. All four are scored under Demo & Production Readiness (30%).
-
-| Must show | Where it comes from |
-|---|---|
-| The problem being solved | The inherited-case framing — a volunteer opens a file that is already seventeen days old |
-| The value proposition | Five commitments, two human gates, one autonomous wake |
-| A demo of the app in action | The Maya arc in the portal. **Unedited, live execution** is what "proof of action" means — terminal logs, database updates or UI changes visible on screen |
-| Proof the backend runs on Google Cloud | Cloud Console: Agent Engines list, Cloud Run dashboard, Firestore documents, Cloud Trace waterfall, Agent Registry. A `.run.app` URL on screen also counts. |
-
-The runtime budget, beat list and console paths are in
-[demo-test-script.md](demo-test-script.md).
-
-**Video blockers that are now resolved** — verified by
-reading the tree on 31 Aug 2026:
-
-- The `case_report` frontend tool exists in `portal/src/components/copilot/CopilotProvider.tsx` with
-  a `render` declared, and `case_report` is in `WIDGET_TOOLS`.
-- `ReportStoreProvider` and `ReportPrintRoot` are both mounted — inside `CopilotProvider` rather
-  than `layout.tsx`, which is why a grep of `layout.tsx` still looks like they are missing.
-- `portal/Dockerfile` exists and the portal is deployed to Cloud Run, so the "host the frontend"
-  item is done and the recording no longer has to fall back to `localhost:3000`.
-
-Items 2, 3 and 6 of that checklist — chat formatting, the `10s` dry run, and the script rewrite —
-were **not** verified in this pass. Treat them as open.
+The pre-filled email on each role page is a persona placeholder and will not authenticate.
 
 ---
 
 ## Stage Three — bonus points (max 1.0 on a 6.0 scale)
 
-| Bonus | Max | Status |
-|---|---|---|
-| Public build write-up stating it was created for this hackathon | 0.2 | **Outstanding.** [hackathon-blog.md](hackathon-blog.md) is written and carries the `#AllThingsAgenticHackathon` statement, but its front matter is `published: false` and there is no DEV.to URL. Publishing it is a few minutes for a fifth of a point. |
-| Public social post with `#AllThingsAgenticHackathon` on X or LinkedIn | 0.2 | **Outstanding.** Not written. |
-| Each additional Google AI model integrated (Gemma, Veo, Lyria) | 0.6 | **0.2 of 0.6 claimable.** Gemma 4 (`gemma-4-26b-a4b-it-maas`) writes the end-of-run session narrative and has been observed on the serving revision. Veo and Lyria are not integrated and there is no reason to add them now. |
-
-Both 0.2 items are cheap and independent of the video. Do them while a render is running.
+| Bonus | Max | Status | Evidence |
+|---|---|---|---|
+| Public build write-up stating it was created for this hackathon | 0.2 | **Done** | [DEV.to post](https://dev.to/akill_m_8f67cabd174364802/caserelay-a-governed-agent-fleet-that-follows-up-on-a-childs-court-ordered-services-for-weeks-3hnf) — published, carries `#AllThingsAgenticHackathon` |
+| Public social post with `#AllThingsAgenticHackathon` on X or LinkedIn | 0.2 | **Done** | [LinkedIn post](https://lnkd.in/p/dNfhw8qu) — published with hashtag |
+| Each additional Google AI model integrated (Gemma, Veo, Lyria) | 0.6 | **0.2 of 0.6** | Gemma 4 (`gemma-4-26b-a4b-it-maas`) writes the end-of-run session narrative: `backend/narration/gemma.py`, called from `backend/runtime/invoke.py:224`. Observed on serving revision. Veo and Lyria are not integrated. |
 
 ---
 
@@ -124,17 +80,3 @@ deliberately; do not let a Devpost description walk them back.
 - **Nothing in [post-video-geap-deploy.md](post-video-geap-deploy.md) is done** unless that file
   says so explicitly. It is a queue of work that has not been applied.
 - **Compressed runs use the same machinery.** `due_in` compresses the deadlines, not the execution path. The run that writes checkpoints ends and is recorded `suspended`; Cloud Scheduler sweeps once an hour, finds it, and publishes to Pub/Sub; an authenticated push starts a new run with a new `run_id`. In `CR-0830203440` the checkpoint run was `84bd42c6b0c4` and the wake run was `411d07c94595`. The gap is whatever remains of the hour. Do not cite the old "23-second" figure; it came from a run whose records have been purged.
-
----
-
-## Order of work, given the clock
-
-1. **Record and publish the video.** It is the only item that cannot be done in minutes, it is 30%
-   of the score, and Stage One fails without it.
-2. **Create the Devpost draft** and select the Fortified Enterprise Fleet track. Drafts are editable
-   until the deadline; the submission is not.
-3. **Share the repo** with `testing@devpost.com` and `cloudhackathons@google.com`, or make it public.
-4. **Paste the description** from the blog and README, and add the portal credentials to the notes.
-5. **Publish the blog** and post to LinkedIn or X with `#AllThingsAgenticHackathon` (+0.4 for maybe
-   twenty minutes of work).
-6. **Confirm** the Google Cloud product list in the submission matches what the video actually shows.

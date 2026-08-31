@@ -70,7 +70,7 @@ Agent Platform Sessions hold the operator chat transcript and every orchestrator
 
 ## Challenges
 
-**Silence is the failure mode.** Nothing in a run looks it up — the catalogue is for discovery only, not routing. A missing reply looks exactly like a reply that has not come yet, and it keeps looking like that until a court date arrives. Any system that only reacts to inbound events will never notice. CaseRelay uses Cloud Scheduler to sweep on its own schedule, fired by Pub/Sub, with nobody staring at a screen.
+**Silence is the failure mode.** A missing reply looks exactly like a reply that has not come yet, and it keeps looking like that until a court date arrives. Any system that only reacts to inbound events will never notice. CaseRelay uses Cloud Scheduler to sweep on its own schedule, fired by Pub/Sub, with nobody staring at a screen.
 
 **Wake is architecture, not duration.** A long-running agent is not a long-running call. It is Firestore checkpoints, Cloud Scheduler sweeps, and Pub/Sub messages resuming parked work. If the process dies, the call ends; the case does not.
 
@@ -88,7 +88,7 @@ Wake is architecture, not duration. Governance lives in the tool surface. Guardr
 
 ## Demo Video
 
-**[INSERT YOUTUBE/VIMEO URL HERE]**
+https://www.youtube.com/watch?v=Bp2PKUXg_PQ
 
 The video runs the flagship case — intake, activation gate, five-way fan-out, checkpoint, autonomous wake, Model Armor quarantine, escalation gate, supervisor approval, follow-up, and name retrieval. It covers:
 - The problem being solved: a volunteer inheriting an already-late case

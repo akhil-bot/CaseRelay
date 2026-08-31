@@ -11,7 +11,7 @@ Run any of them:
 bash examples/cloud-scenario-run.sh priya     # against the deployed control plane
 ```
 
-Read this page before drawing a conclusion from a run. Four of the nine do not demonstrate what
+Read this page before drawing a conclusion from a run. Three of the nine do not demonstrate what
 their own definition claims, and that is documented rather than hidden.
 
 ---
@@ -25,6 +25,7 @@ their own definition claims, and that is documented rather than hidden.
 | **rosa** | Works | ~2 min | A partner asking for data outside the referral's scope, refused at fan-out, then recovered |
 | **theo** | Works | 2–3 min | A partner reply that cannot be parsed at all, recovered by the same follow-up ladder |
 | **maya** | The flagship | ~3 min | Deferral → check-back → Model Armor quarantine → supervisor escalation → scoped follow-up → all five close |
+| **kai** | Works as specified | ~2.5 min | Two partner failures caught on one reconciliation pass, then diverging: one recovers on the nudge, the other reaches a named human |
 
 **priya** is the strongest single piece of evidence on this page, and it is not the flagship. It is
 the only scenario that reaches `10-unanswered`, the last rung of the ladder. Maya's district
@@ -46,14 +47,15 @@ runs it should find this section first.
 
 | Scenario | Why it does not demonstrate its claim |
 |---|---|
-| **kai** | Both failures do occur (legal returns garbage, health times out) and the health escalation now fires. But legal did not recover through the nudge on the verified run, so it ends with two open commitments rather than the single health escalation its spec claims. |
 | **diego** | The SIS returns `enrollment_found: false` and the education specialist may still close the commitment. That is the hallucination the scenario surfaces — but nothing in the activity feed identifies the false basis, and **neither Model Armor nor the gateway caught it.** It is evaluation fodder for GEAP Agent Evaluation HALLUCINATION scoring, not a visible guardrail. |
 | **ellis** | Claims a duplicate callback is discarded by idempotency logic. The `duplicate` branch in the partner simulator is a no-op that falls through to the normal reply, so the callback only ever arrives once and the idempotency path is never reached. The claimed behaviour was not observed. |
-| **amara** | Claims three staggered deadlines across several weeks with memory carried across sessions. Under a compressed deadline all five partners answer during fan-out, nothing is left open, and no wake fires. Run uncompressed it would take five weeks. A limitation of the demonstration, not a defect in the code. |
+| **amara** | Claims three staggered deadlines across several weeks with memory carried across sessions. The stagger itself is real and persisted — three checkpoints were verified asleep with due dates four, eleven and eighteen days out — but all five partners answer at fan-out, so there is no ladder to watch and nothing to show without waiting five weeks. A limitation of the demonstration, not a defect in the code. |
 
 Full captured evidence for every row above — Firestore documents, Cloud Logging output, Agent
 Gateway request logs, Cloud Trace waterfalls, Memory Bank contents, and the console path for each —
-is in [../docs/scenario-showcase.md](../docs/scenario-showcase.md).
+is in [../docs/scenario-showcase.md](../docs/scenario-showcase.md). The three complex scenarios
+(**maya**, **kai**, **amara**) get their own walk-through with the raw captures attached in
+[../docs/complex-scenarios.md](../docs/complex-scenarios.md).
 
 ---
 

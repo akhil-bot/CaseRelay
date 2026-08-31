@@ -1,0 +1,22 @@
+{
+  "name": "projects/caserelay/databases/caserelay/documents/cases/CR-0831211122/screening_verdicts/latest",
+  "fields": {
+    "rules": {
+      "arrayValue": {
+        "values": [
+          {
+            "stringValue": "sdp"
+          }
+        ]
+      }
+    },
+    "screened_at": {
+      "doubleValue": 1788210870.9017982
+    },
+    "verdict": {
+      "stringValue": "quarantine"
+    }
+  },
+  "createTime": "2026-08-31T21:14:31.054563Z",
+  "updateTime": "2026-08-31T21:14:31.054563Z"
+}

@@ -32,8 +32,8 @@ cases, open the live view, start outreach and prepare reports from the same scre
 | **Collaborators** | Bhardwaj Adapala, Rishi Sevakula |
 | **Demo video** | [Watch on YouTube](https://www.youtube.com/watch?v=Bp2PKUXg_PQ) |
 | **Repository** | [github.com/akhil-bot/CaseRelay](https://github.com/akhil-bot/CaseRelay) |
-| **Control plane** | [`caserelay-control-plane-6nwo7o4bbq-uc.a.run.app`](https://caserelay-control-plane-6nwo7o4bbq-uc.a.run.app) — Cloud Run, auth-required (anonymous requests return 403) |
-| **Portal** | [`caserelay-portal-6nwo7o4bbq-uc.a.run.app`](https://caserelay-portal-6nwo7o4bbq-uc.a.run.app) — Cloud Run, behind HTTP Basic auth. Use the credentials supplied in the Devpost submission's testing instructions. |
+| **Control plane** | [`caserelay-control-plane-6nwo7o4bbq-uc.a.run.app`](https://caserelay-control-plane-6nwo7o4bbq-uc.a.run.app) — Cloud Run, auth-required: `curl -s -o /dev/null -w '%{http_code}' https://caserelay-control-plane-6nwo7o4bbq-uc.a.run.app/v1/cases` → `403`. (There is no `/healthz`; a path that does not exist returns 404.) |
+| **Portal** | [`caserelay-portal-6nwo7o4bbq-uc.a.run.app`](https://caserelay-portal-6nwo7o4bbq-uc.a.run.app) — Cloud Run, behind a session login page. Navigate to `/login`, choose any role, and sign in with `admin@caserelay.com` and the password supplied in the Devpost testing instructions. (`portal/src/middleware.ts` implements HTTP Basic for restricted deployments; not enabled on the judging revision.) |
 | **Architecture diagram** | The image above, sources in [`docs/diagrams/`](docs/diagrams/) |
 | **Spin-up instructions** | [docs/deploy.md](docs/deploy.md) |
 | **Blog post** | [Read on DEV.to](https://dev.to/akill_m_8f67cabd174364802/caserelay-a-governed-agent-fleet-that-follows-up-on-a-childs-court-ordered-services-for-weeks-3hnf) |
@@ -52,21 +52,24 @@ cd portal && npm install && cd ..   # needed for t2.3 (TypeScript typecheck)
 python harness/gate.py --all
 ```
 
-Expected output: **34 passed, 0 failed, 3 skipped**. The 3 skips are marked `slow=True` in the
+Expected output: **35 passed, 0 failed, 3 skipped**. The 3 skips are marked `slow=True` in the
 source and name themselves; they talk to Vertex, Cloud Run and Cloud Scheduler and are excluded
 unless you pass `--slow`. A skip is never counted as a pass.
 
 **Without `npm install`** (skip the `cd portal` step): t2.3 announces itself as a skip and the
-result is **33 passed, 0 failed, 4 skipped**. **Without a Docker daemon** running: t12.1
-announces itself as a skip; without both it is **32 passed, 0 failed, 5 skipped**. No gate
+result is **34 passed, 0 failed, 4 skipped**. **Without a Docker daemon** running: t12.1
+announces itself as a skip; without both it is **33 passed, 0 failed, 5 skipped**. No gate
 silently fails because a prerequisite is absent.
+
+**38 executable gates** (35 offline, 3 requiring cloud access) plus **64 unit tests with 83
+assertions** in `tests/`. A skip is never counted as a pass.
 
 What the 34 offline gates verify:
 
 | Gates | What they prove |
 |---|---|
 | t2.1 – t2.3 | No false model-version claims; no leaked answer key; TypeScript compiles |
-| t3.1 – t3.2 | Store selects Firestore by default; `CASERELAY_STATE=memory` overrides it; 14 state-machine unit tests pass |
+| t3.1 – t3.3 | Store selects Firestore by default; `CASERELAY_STATE=memory` overrides it; 14 state-machine unit tests pass; 50 commitment-guard unit tests pass — the write path refuses an unevidenced `completed` claim (`tests/test_commitment_guard.py`, 83 assertions) |
 | t4.1 – t4.4 | `RunContext` carries all four IDs; context isolates between concurrent tasks; trace ids are real OTel hex strings; gateway disclosures emit the three `caserelay.*` span attributes |
 | t5.1 – t5.3 | Two cases get distinct checkpoints; checkpoints carry a tz-aware `due_at`; Firestore index covers `state + due_at` |
 | t6.1 | Audit log rejects duplicate `event_id` (immutability enforced in code, not policy) |
@@ -139,11 +142,29 @@ Eight agents deployed as Vertex AI reasoning engines (`gemini-3.5-flash`), each 
 Component wiring, the technology stack and the engineering decisions behind them are in
 **[docs/architecture.md](docs/architecture.md)**.
 
+### What each agent structurally cannot do
+
+Governance lives in the tool surface, not the prompt. The following are structural impossibilities
+enforced by the tool list each agent is given — not policy, not instructions:
+
+| Agent | Cannot | Enforced by |
+|---|---|---|
+| Safeguarding Verifier | approve its own escalation — it has no approval tool | `backend/agents/verifier/agent.py:204` — `tools=[inspect_partner_callback, open_escalation]` |
+| Continuity Orchestrator | activate a case — the tool is absent from its surface, not merely discouraged | orchestrator tool list; the lesson is in `docs/devpost-description.md` ("Governance lives in the tool surface, not the prompt") |
+| Education Liaison | see health, legal or family fields — it receives a three-key dict | `backend/policy/projection.py` |
+| every specialist | claim `completed` against a contradicting partner response | `backend/guards/commitment_guard.py`, 50 tests in `tests/test_commitment_guard.py` |
+| every engine | call an MCP method outside policy | `infra/policies/authzpolicy-mcp-deny-prompts-resources.yaml` |
+| every engine | impersonate another engine | `backend/runtime/a2a_auth.py` bearer auth + pinned identities in `infra/pinned_identities.env` |
+
+Pub/Sub push carries a five-attempt dead-letter policy with 10s–300s exponential retry
+(`infra/bootstrap.sh:53-64`), verified on the deployed subscription (`caserelay-events-push`,
+`maxDeliveryAttempts: 5`).
+
 ---
 
 ## The flagship case
 
-**Case CR-1042 — Maya's stalled school enrollment**
+**Case CR-1042 — Maya's stalled school enrollment** *(scripted walkthrough; the same arc ran live as `CR-0831120614`)*
 
 1. Supervisor activates monitoring after verifying court authority.
 2. Orchestrator delegates scoped tasks to five partner agents, reaching each over authenticated A2A.
@@ -155,7 +176,32 @@ Component wiring, the technology stack and the engineering decisions behind them
 8. Only then may the scoped follow-up go out. The district is chased once within the same authority grant that covered the original request.
 9. The district answers, naming the enrollment coordinator who has taken the referral on. That name is written back onto the referral, the commitment closes, and Maya's timeline updates. Had nobody answered, the supervisor would have been told instead.
 
+**The whole arc above, captured.** [docs/complex-scenarios.md](docs/complex-scenarios.md) walks Maya
+and the other two complex scenarios link by link and attaches the raw evidence for each claim — the
+narrated feed, the four run records, the Model Armor verdict document, the escalation as raised and
+as decided, five reasoning engines answering one fan-out, the intercepted gateway egress, the Cloud
+Trace guardrail spans, and what the session left in Memory Bank.
+
 **Maya is not the only scenario.** [docs/scenario-showcase.md](docs/scenario-showcase.md) covers the rest — a provider that goes silent and ends up in front of a named supervisor, a school that asks for medical records while answering a question about enrollment, a partner reply that cannot be parsed — each verified end to end against the deployed control plane, with the captured Firestore, Cloud Logging, Agent Gateway and Cloud Trace evidence, and with the scenarios that do *not* hold up listed alongside the ones that do.
+
+### What is scripted and what is live
+
+The portal serves two kinds of case. Six case IDs (`CR-1042`, `CR-1038`, `CR-1047`, `CR-1051`,
+`CR-1029`, `CR-1055` — all defined in `portal/src/lib/mock/cases.ts`) render a **scripted product
+walkthrough** — a fixed narrative used to explain the workflow without waiting on real deadlines.
+Every other case ID is fetched from the deployed control plane and rendered live.
+
+The routing is one branch with no fallback in either direction
+(`portal/src/app/(app)/cases/[caseId]/page.tsx:51-64`): a broken live fetch shows an error; it
+never swaps in scripted data.
+
+Maya's arc as described above is scripted **in the portal** and live **in the fleet**. The same arc
+executed end to end against the deployed control plane on 31 Aug 2026 as `CR-0831120614` (and in
+the video as `CR-0830203440`). To watch it run rather than read it, create a fresh case with the
+four commands in [docs/scenario-showcase.md](docs/scenario-showcase.md) and open the case ID it
+returns — that path renders live. Partner behaviour is injected per-service and the agents are
+never told a scenario is running (`docs/scenario-showcase.md:19-22`), so the simulator is a test
+double, not a script the agents read from.
 
 ---
 
@@ -205,9 +251,9 @@ These have been demonstrated on the deployed fleet, not merely asserted.
 - No autonomous emergency response
 
 Persona switching in the portal (advocate vs. platform view) is UI-only and carries no
-authorization implications — role-switching changes the view, not the data access. The portal's
-HTTP Basic auth gate is a single shared credential for judges and testing contacts, not per-user
-auth.
+authorization implications — role-switching changes the view, not the data access. The session
+login accepts any password on the persona select and writes down which role you chose;
+`admin@caserelay.com` with the Devpost-supplied password works on the deployed revision.
 
 ---
 
@@ -218,6 +264,7 @@ auth.
 | [docs/deploy.md](docs/deploy.md) | Running it locally, the full cloud deploy sequence, and what is not reproducible from outside |
 | [examples/](examples/) | Runnable invocations and a one-page guide to the nine scenarios |
 | [docs/architecture.md](docs/architecture.md) | Component wiring, technology stack, GEAP capability detail, engineering decisions |
+| [docs/complex-scenarios.md](docs/complex-scenarios.md) | How the three complex scenarios compose, with the captured logs and cloud proofs attached |
 | [docs/scenario-showcase.md](docs/scenario-showcase.md) | The non-Maya scenarios with captured cloud evidence — and the ones that do not hold up |
 | [docs/gcp-proofs/](docs/gcp-proofs/) | Google Cloud console stills behind the GEAP capability claims, captioned with their limits |
 | [docs/caserelay-walkthrough.md](docs/caserelay-walkthrough.md) | Per-phase detail, expected outputs, the control-plane API surface |

@@ -1,0 +1,173 @@
+{
+  "traces": [
+    {
+      "projectId": "caserelay",
+      "traceId": "5360d68028ee185b02c04815e2fea19f",
+      "spans": [
+        {
+          "spanId": "323038897662095078",
+          "kind": "RPC_SERVER",
+          "name": "apply_guardrail \"Google Cloud Model Armor\"",
+          "startTime": "2026-08-31T21:12:35.334211276Z",
+          "endTime": "2026-08-31T21:12:37.021486843Z",
+          "labels": {
+            "service.name": "modelarmor",
+            "cloud.region": "us-central1",
+            "cloud.provider": "gcp",
+            "gcp.project_id": "caserelay",
+            "rpc.system": "grpc"
+          }
+        },
+        {
+          "spanId": "10471471280788256662",
+          "name": "Request Path",
+          "startTime": "2026-08-31T21:12:35.334418456Z",
+          "endTime": "2026-08-31T21:12:35.583242219Z",
+          "parentSpanId": "323038897662095078",
+          "labels": {
+            "cloud.region": "us-central1",
+            "gen_ai.security.decision.reason": "The prompt did not violate any safety settings.",
+            "gcp.modelarmor.filter.match.state": "NO_MATCH_FOUND",
+            "cloud.provider": "gcp",
+            "gcp.project_id": "caserelay",
+            "gen_ai.security.decision.type": "allow",
+            "gen_ai.security.decision.code": "200",
+            "service.name": "modelarmor",
+            "gen_ai.security.target.type": "input",
+            "gen_ai.security.policy.name": "caserelay-screen",
+            "gen_ai.security.policy.id": "projects/caserelay/locations/us-central1/templates/caserelay-screen"
+          }
+        },
+        {
+          "spanId": "16057418430960118926",
+          "name": "Response Path",
+          "startTime": "2026-08-31T21:12:37.020513374Z",
+          "endTime": "2026-08-31T21:12:37.020780354Z",
+          "parentSpanId": "323038897662095078",
+          "labels": {
+            "service.name": "modelarmor",
+            "cloud.region": "us-central1",
+            "gen_ai.security.policy.id": "projects/caserelay/locations/us-central1/templates/caserelay-screen",
+            "gen_ai.security.policy.name": "caserelay-screen",
+            "cloud.provider": "gcp",
+            "gen_ai.security.target.type": "output",
+            "gcp.project_id": "caserelay"
+          }
+        }
+      ]
+    },
+    {
+      "projectId": "caserelay",
+      "traceId": "97fa50f05bfb80aa14f039fab451d365",
+      "spans": [
+        {
+          "spanId": "3506664129123084358",
+          "kind": "RPC_SERVER",
+          "name": "apply_guardrail \"Google Cloud Model Armor\"",
+          "startTime": "2026-08-31T21:14:34.262912579Z",
+          "endTime": "2026-08-31T21:14:35.771862384Z",
+          "labels": {
+            "rpc.system": "grpc",
+            "gcp.project_id": "caserelay",
+            "cloud.provider": "gcp",
+            "service.name": "modelarmor",
+            "cloud.region": "us-central1"
+          }
+        },
+        {
+          "spanId": "6107329482893851439",
+          "name": "Request Path",
+          "startTime": "2026-08-31T21:14:34.263044339Z",
+          "endTime": "2026-08-31T21:14:34.416432473Z",
+          "parentSpanId": "3506664129123084358",
+          "labels": {
+            "gcp.project_id": "caserelay",
+            "cloud.provider": "gcp",
+            "cloud.region": "us-central1",
+            "gcp.modelarmor.filter.match.state": "NO_MATCH_FOUND",
+            "gen_ai.security.target.type": "input",
+            "gen_ai.security.policy.name": "caserelay-screen",
+            "gen_ai.security.policy.id": "projects/caserelay/locations/us-central1/templates/caserelay-screen",
+            "service.name": "modelarmor",
+            "gen_ai.security.decision.type": "allow",
+            "gen_ai.security.decision.code": "200",
+            "gen_ai.security.decision.reason": "The prompt did not violate any safety settings."
+          }
+        },
+        {
+          "spanId": "15249499131081624325",
+          "name": "Response Path",
+          "startTime": "2026-08-31T21:14:35.770480203Z",
+          "endTime": "2026-08-31T21:14:35.770769903Z",
+          "parentSpanId": "3506664129123084358",
+          "labels": {
+            "gen_ai.security.policy.name": "caserelay-screen",
+            "gen_ai.security.target.type": "output",
+            "cloud.region": "us-central1",
+            "service.name": "modelarmor",
+            "gcp.project_id": "caserelay",
+            "cloud.provider": "gcp",
+            "gen_ai.security.policy.id": "projects/caserelay/locations/us-central1/templates/caserelay-screen"
+          }
+        }
+      ]
+    },
+    {
+      "projectId": "caserelay",
+      "traceId": "b7e860e51ff090b5047f8ac8e8d015d3",
+      "spans": [
+        {
+          "spanId": "7279254900617983858",
+          "kind": "RPC_SERVER",
+          "name": "apply_guardrail \"Google Cloud Model Armor\"",
+          "startTime": "2026-08-31T21:15:16.181412426Z",
+          "endTime": "2026-08-31T21:15:18.058107336Z",
+          "labels": {
+            "cloud.provider": "gcp",
+            "rpc.system": "grpc",
+            "gcp.project_id": "caserelay",
+            "cloud.region": "us-central1",
+            "service.name": "modelarmor"
+          }
+        },
+        {
+          "spanId": "16913382917347481556",
+          "name": "Request Path",
+          "startTime": "2026-08-31T21:15:16.181608056Z",
+          "endTime": "2026-08-31T21:15:16.494584140Z",
+          "parentSpanId": "7279254900617983858",
+          "labels": {
+            "service.name": "modelarmor",
+            "gen_ai.security.decision.type": "allow",
+            "gen_ai.security.decision.code": "200",
+            "gen_ai.security.target.type": "input",
+            "gen_ai.security.policy.name": "caserelay-screen",
+            "cloud.provider": "gcp",
+            "gen_ai.security.decision.reason": "The prompt did not violate any safety settings.",
+            "cloud.region": "us-central1",
+            "gcp.project_id": "caserelay",
+            "gen_ai.security.policy.id": "projects/caserelay/locations/us-central1/templates/caserelay-screen",
+            "gcp.modelarmor.filter.match.state": "NO_MATCH_FOUND"
+          }
+        },
+        {
+          "spanId": "3602152551276897772",
+          "name": "Response Path",
+          "startTime": "2026-08-31T21:15:18.057249486Z",
+          "endTime": "2026-08-31T21:15:18.057526926Z",
+          "parentSpanId": "7279254900617983858",
+          "labels": {
+            "cloud.region": "us-central1",
+            "service.name": "modelarmor",
+            "gen_ai.security.policy.id": "projects/caserelay/locations/us-central1/templates/caserelay-screen",
+            "gen_ai.security.target.type": "output",
+            "cloud.provider": "gcp",
+            "gen_ai.security.policy.name": "caserelay-screen",
+            "gcp.project_id": "caserelay"
+          }
+        }
+      ]
+    }
+  ],
+  "nextPageToken": "IAMpj3h2M7FDF6MyJggDGiIKIGI3ZTg2MGU1MWZmMDkwYjUwNDdmOGFjOGU4ZDAxNWQz"
+}

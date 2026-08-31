@@ -4,7 +4,9 @@ Maya is CaseRelay's flagship case and gets all the attention. She is not the onl
 can do, and she is not the best evidence that it works — a scenario that is exercised every day
 tells you less than one that has been left alone.
 
-This page covers the **non-Maya** scenarios. Every scenario below was run end to end against the
+This page covers the **non-Maya** scenarios. Maya and the other two complex scenarios — Kai and
+Amara — are walked through link by link, with their raw captures attached, in
+[complex-scenarios.md](complex-scenarios.md). Every scenario below was run end to end against the
 deployed control plane on **31 August 2026** (revision `caserelay-control-plane-00105-yom`),
 and the evidence is captured output rather than description. Where a scenario does not do what its
 definition claims, that is stated rather than omitted — the list of what does not hold is at the
@@ -70,10 +72,10 @@ All runs below were served by Cloud Run revision `caserelay-control-plane-00105-
 | **Rosa** | Works | ~2 min | A partner asking for data outside the referral's scope, refused at fan-out, then recovered |
 | **Theo** | Works | 2–3 min | A partner reply that cannot be parsed at all, recovered by the same follow-up ladder |
 | **Noah** | Works as specified | ~1.5 min | The clean path — the control that shows the ladder only fires when something is wrong |
-| Kai | Partly — see below | ~2.5 min | Two simultaneous failures; health escalates to supervisor; see below |
+| **Kai** | Works as specified — see [complex-scenarios.md](complex-scenarios.md) | ~2.5 min | Two simultaneous failures on one reconciliation pass, diverging into one recovery and one human escalation |
 | **Diego** | Works | 1.5–3 min | Education sets `unresolved` on missing enrollment; nudge resolves it; case auto-closes; commitment guard is an untriggered backstop |
 | Ellis | Does not demonstrate its claim | ~2 min | — |
-| Amara | Not demonstrable under compression | ~2 min | — |
+| Amara | Mechanism verifiable at rest, arc runs to September — see [complex-scenarios.md](complex-scenarios.md) | ~2 min | — |
 
 ---
 
@@ -509,17 +511,11 @@ Console: **Agent Registry** in the Google Cloud console, region `us-central1`.
 
 ## Not featured, and why
 
-These four are defined in `backend/state/scenarios.py` and run without crashing, but none of them
-demonstrates what its definition claims. They are listed here rather than quietly dropped, because
-a judge who finds one of them in the source and runs it should find this section first.
-
-**Kai — cascade.** Claims two simultaneous partner failures with one human escalation. Two failures
-do occur: legal returns garbage and health times out. The `due_offsets={"health": 10}` override was
-added to `scenarios.py` so Kai's health referral is treated as overdue on the same pass that Priya's
-is, and the health escalation now fires — approval `apr-8f1a5a53` is the unanswered-follow-up notice
-the original description said never appeared. Legal recovers through the nudge in this run, so the
-scenario ends at 4 of 5 fulfilled with only health still open — not the single clean human escalation
-its spec claims, but closer to it than before.
+These three are defined in `backend/state/scenarios.py` and run without crashing, but each one's
+relationship to its own definition needs stating. They are listed here rather than quietly dropped,
+because a judge who finds one of them in the source and runs it should find this section first.
+Kai is not among them — it does what it claims, and its evidence is in
+[complex-scenarios.md](complex-scenarios.md#kai--two-failures-one-recovery-one-human).
 
 **Diego — missing enrollment, resolved by nudge.** The SIS returns `enrollment_found: false` with no confirmed school. The education agent's instruction handles this explicitly: missing enrollment means `unresolved`, not `completed`. The agent sets the commitment to `unresolved` and reports it honestly. Because the guard only triggers when a specialist *claims* `completed` against a contradicting response, the guard is never invoked — the prompt handles the condition upstream.
 
@@ -548,17 +544,19 @@ with one by this scenario.
 discards the second. The `duplicate` branch in the partner simulator is a no-op (`pass`) that
 falls through to the normal reply path, so the callback only ever arrives once and the idempotency
 path is never reached. The run closes all 5 of 5 commitments and the case auto-closes — which is
-not the same outcome as Noah's clean close, because health was never actually impaired. The
-previously observed 4/5 result was likely a cold-start or rate-limit artefact; the deterministic
-explanation is that `duplicate` is indistinguishable from a normal reply at the partner layer.
-The claimed behaviour — a duplicate arriving and being discarded — was not observed on either run.
+not the same outcome as Noah's clean close, because health was never actually impaired. At the
+partner layer `duplicate` is indistinguishable from a normal reply, so the claimed behaviour — a
+duplicate arriving and being discarded — does not occur.
 
 **Amara — long horizon.** Claims three staggered deadlines across several weeks with the fleet
-sleeping between wakes and carrying memory across sessions. Under the compressed deadline the
-whole point collapses: all five partners answer during fan-out, nothing is left open, no wake is
-needed and none fires. Run uncompressed it would take five weeks, which is not demonstrable inside
-a hackathon submission. This is a limitation of the demonstration rather than a defect in the
-code, but the result is the same — there is nothing to show.
+sleeping between wakes and carrying memory across sessions. All five partners answer during fan-out,
+nothing is left open, and the case closes in under two minutes — so there is no ladder to watch. The
+staggering mechanism itself *is* real, and it is verifiable at rest: on case `CR-0831212234` three
+checkpoint documents sit `waiting` with genuine due dates of 4, 11 and 18 September, while the two
+already-overdue ones fired immediately. See
+[complex-scenarios.md](complex-scenarios.md#amara--the-mechanism-is-real-the-arc-takes-five-weeks).
+Watching the rest happen would take five weeks, which is not demonstrable inside a hackathon
+submission — a limitation of the demonstration rather than a defect in the code.
 
 ---
 

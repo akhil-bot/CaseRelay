@@ -1,0 +1,95 @@
+=== Gateway: Maya window 21:11-21:17, grouped by host ===
+TIMESTAMP                    HOSTNAME                                      REQUEST_WAS_TLS_INTERCEPTED  RESULT   STATUS
+2026-08-31T21:15:11.882225Z  240.0.0.2:443                                                                       200
+2026-08-31T21:14:35.821077Z  telemetry.mtls.googleapis.com                 True                         ALLOWED  200
+2026-08-31T21:14:30.417752Z  240.0.0.2:443                                                                       200
+2026-08-31T21:14:27.844432Z  iamcredentials.mtls.googleapis.com            True                         ALLOWED  404
+2026-08-31T21:14:26.690277Z  telemetry.mtls.googleapis.com                 True                         ALLOWED  200
+2026-08-31T21:14:24.977243Z  240.0.0.2:443                                                                       200
+2026-08-31T21:14:24.188084Z  iamcredentials.mtls.googleapis.com            True                         ALLOWED  404
+2026-08-31T21:14:24.158102Z  cloudresourcemanager.mtls.googleapis.com:443  True                         ALLOWED  200
+2026-08-31T21:14:08.984251Z  240.0.0.2:443                                                                       200
+2026-08-31T21:14:08.932547Z  240.0.0.2:443                                                                       200
+2026-08-31T21:13:03.797817Z  telemetry.mtls.googleapis.com                 True                         ALLOWED  200
+2026-08-31T21:12:54.625218Z  240.0.0.2:443                                                                       200
+2026-08-31T21:12:54.190694Z  iamcredentials.mtls.googleapis.com            True                         ALLOWED  404
+2026-08-31T21:12:54.185388Z  240.0.0.2:443                                                                       200
+2026-08-31T21:12:51.462402Z  cloudtrace.googleapis.com                     True                         ALLOWED  200
+2026-08-31T21:12:51.287390Z  aiplatform.mtls.googleapis.com                True                         ALLOWED  200
+2026-08-31T21:12:50.411091Z  iamcredentials.mtls.googleapis.com            True                         ALLOWED  404
+2026-08-31T21:12:50.380116Z  cloudresourcemanager.mtls.googleapis.com:443  True                         ALLOWED  200
+2026-08-31T21:12:46.996747Z  aiplatform.mtls.googleapis.com                True                         ALLOWED  200
+2026-08-31T21:12:46.810665Z  firestore.googleapis.com                      True                         ALLOWED  200
+2026-08-31T21:12:46.655495Z  firestore.googleapis.com                      True                         ALLOWED  200
+2026-08-31T21:12:46.501638Z  firestore.googleapis.com                      True                         ALLOWED  200
+2026-08-31T21:12:46.485730Z  cloudtrace.googleapis.com                     True                         ALLOWED  200
+2026-08-31T21:12:46.358082Z  firestore.googleapis.com                      True                         ALLOWED  200
+2026-08-31T21:12:46.297253Z  telemetry.mtls.googleapis.com                 True                         ALLOWED  200
+2026-08-31T21:12:46.206931Z  firestore.googleapis.com                      True                         ALLOWED  200
+2026-08-31T21:12:46.199063Z  cloudtrace.googleapis.com                     True                         ALLOWED  200
+2026-08-31T21:12:46.038430Z  firestore.googleapis.com                      True                         ALLOWED  200
+2026-08-31T21:12:44.872771Z  cloudtrace.googleapis.com                     True                         ALLOWED  200
+2026-08-31T21:12:43.920506Z  aiplatform.mtls.googleapis.com                True                         ALLOWED  200
+2026-08-31T21:12:42.923612Z  telemetry.mtls.googleapis.com                 True                         ALLOWED  200
+2026-08-31T21:12:42.341357Z  aiplatform.mtls.googleapis.com                True                         ALLOWED  200
+2026-08-31T21:12:42.167730Z  firestore.googleapis.com                      True                         ALLOWED  200
+2026-08-31T21:12:41.986253Z  firestore.googleapis.com                      True                         ALLOWED  200
+2026-08-31T21:12:41.836566Z  firestore.googleapis.com                      True                         ALLOWED  200
+2026-08-31T21:12:41.666255Z  firestore.googleapis.com                      True                         ALLOWED  200
+2026-08-31T21:12:41.516664Z  firestore.googleapis.com                      True                         ALLOWED  200
+2026-08-31T21:12:41.369513Z  firestore.googleapis.com                      True                         ALLOWED  200
+2026-08-31T21:12:41.307414Z  iamcredentials.mtls.googleapis.com            True                         ALLOWED  404
+2026-08-31T21:12:41.302591Z  240.0.0.2:443                                                                       200
+2026-08-31T21:12:41.286634Z  cloudtrace.googleapis.com                     True                         ALLOWED  200
+2026-08-31T21:12:41.241621Z  iamcredentials.mtls.googleapis.com            True                         ALLOWED  404
+2026-08-31T21:12:41.220310Z  firestore.googleapis.com                      True                         ALLOWED  200
+2026-08-31T21:12:40.925498Z  aiplatform.mtls.googleapis.com                True                         ALLOWED  200
+2026-08-31T21:12:39.653393Z  iamcredentials.mtls.googleapis.com            True                         ALLOWED  404
+2026-08-31T21:12:39.627858Z  cloudtrace.googleapis.com                     True                         ALLOWED  200
+2026-08-31T21:12:39.093697Z  aiplatform.mtls.googleapis.com                True                         ALLOWED  200
+2026-08-31T21:12:38.922842Z  firestore.googleapis.com                      True                         ALLOWED  200
+2026-08-31T21:12:38.788938Z  firestore.googleapis.com                      True                         ALLOWED  200
+2026-08-31T21:12:38.657139Z  aiplatform.mtls.googleapis.com                True                         ALLOWED  200
+2026-08-31T21:12:38.651661Z  240.0.0.2:443                                                                       200
+2026-08-31T21:12:38.638160Z  firestore.googleapis.com                      True                         ALLOWED  200
+2026-08-31T21:12:38.489169Z  firestore.googleapis.com                      True                         ALLOWED  200
+2026-08-31T21:12:38.332164Z  firestore.googleapis.com                      True                         ALLOWED  200
+2026-08-31T21:12:38.183972Z  firestore.googleapis.com                      True                         ALLOWED  200
+2026-08-31T21:12:38.157716Z  240.0.0.2:443                                                                       200
+2026-08-31T21:12:37.950282Z  240.0.0.2:443                                                                       200
+2026-08-31T21:12:37.905439Z  240.0.0.2:443                                                                       200
+2026-08-31T21:12:37.048803Z  aiplatform.mtls.googleapis.com                True                         ALLOWED  200
+2026-08-31T21:12:35.384641Z  aiplatform.mtls.googleapis.com                True                         ALLOWED  200
+2026-08-31T21:12:35.380743Z  240.0.0.2:443                                                                       200
+2026-08-31T21:12:35.379039Z  aiplatform.mtls.googleapis.com                True                         ALLOWED  200
+2026-08-31T21:12:35.176919Z  aiplatform.mtls.googleapis.com                True                         ALLOWED  200
+2026-08-31T21:12:34.597405Z  iamcredentials.mtls.googleapis.com            True                         ALLOWED  404
+2026-08-31T21:12:34.591686Z  240.0.0.2:443                                                                       200
+2026-08-31T21:12:34.575509Z  cloudresourcemanager.mtls.googleapis.com:443  True                         ALLOWED  200
+2026-08-31T21:12:33.723514Z  aiplatform.mtls.googleapis.com                True                         ALLOWED  200
+2026-08-31T21:12:33.615969Z  iamcredentials.mtls.googleapis.com            True                         ALLOWED  404
+2026-08-31T21:12:33.547599Z  iamcredentials.mtls.googleapis.com            True                         ALLOWED  404
+2026-08-31T21:12:33.541370Z  240.0.0.2:443                                                                       200
+2026-08-31T21:12:33.518257Z  firestore.googleapis.com                      True                         ALLOWED  200
+2026-08-31T21:12:33.508594Z  iamcredentials.mtls.googleapis.com            True                         ALLOWED  404
+2026-08-31T21:12:33.504650Z  240.0.0.2:443                                                                       200
+2026-08-31T21:12:33.327272Z  firestore.googleapis.com                      True                         ALLOWED  200
+2026-08-31T21:12:32.211798Z  iamcredentials.mtls.googleapis.com            True                         ALLOWED  404
+2026-08-31T21:12:32.205485Z  240.0.0.2:443                                                                       200
+2026-08-31T21:12:30.739875Z  iamcredentials.mtls.googleapis.com            True                         ALLOWED  404
+2026-08-31T21:12:30.674840Z  240.0.0.2:443                                                                       200
+2026-08-31T21:12:30.671795Z  cloudresourcemanager.mtls.googleapis.com:443  True                         ALLOWED  200
+2026-08-31T21:12:29.851908Z  iamcredentials.mtls.googleapis.com            True                         ALLOWED  404
+2026-08-31T21:12:29.827311Z  cloudresourcemanager.mtls.googleapis.com:443  True                         ALLOWED  200
+2026-08-31T21:12:29.166905Z  aiplatform.mtls.googleapis.com                True                         ALLOWED  200
+2026-08-31T21:12:28.413616Z  iamcredentials.mtls.googleapis.com            True                         ALLOWED  404
+2026-08-31T21:12:28.403449Z  iamcredentials.mtls.googleapis.com            True                         ALLOWED  404
+2026-08-31T21:12:28.397700Z  240.0.0.2:443                                                                       200
+2026-08-31T21:12:28.379644Z  cloudresourcemanager.mtls.googleapis.com:443  True                         ALLOWED  200
+2026-08-31T21:12:27.515383Z  iamcredentials.mtls.googleapis.com            True                         ALLOWED  404
+2026-08-31T21:12:24.403930Z  cloudresourcemanager.mtls.googleapis.com:443  True                         ALLOWED  200
+2026-08-31T21:12:20.593783Z  240.0.0.2:443                                                                       200
+2026-08-31T21:12:20.543474Z  240.0.0.2:443                                                                       200
+2026-08-31T21:12:14.342004Z  cloudresourcemanager.mtls.googleapis.com:443  True                         ALLOWED  200
+2026-08-31T21:12:14.297118Z  240.0.0.2:443                                                                       200
+2026-08-31T21:12:14.242685Z  240.0.0.2:443                                                                       200
