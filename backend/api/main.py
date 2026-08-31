@@ -1286,26 +1286,6 @@ def _run_background(
                 })
                 return (label, err_msg, "")
             states = workspace.commitment_states(case_id)
-            # Control-plane deferral override: the deployed specialist engine may predate
-            # the `deferred` status and report a defer response as pending or completed.
-            # Detect this from partner_behaviour on the referral and correct the commitment
-            # state before narrating phase_complete so the feed tells one consistent story
-            # (never a superseded "confirmed" line followed by a correction).
-            if label.startswith("3-fanout-"):
-                _cp_svc = _SPECIALIST_TO_SERVICE.get(label.removeprefix("3-fanout-"), "")
-                if _cp_svc and states.get(_cp_svc) in ("pending", "completed", "unresolved", "blocked"):
-                    _cp_ref = next(
-                        (r for r in workspace.packet(case_id).get("referrals", [])
-                         if r.get("type") == _cp_svc),
-                        None,
-                    )
-                    if _cp_ref and (
-                        _cp_ref.get("partner_behaviour", "").startswith("defer")
-                        or _cp_ref.get("first_contact_defer")
-                    ):
-                        workspace.set_commitment(case_id, _cp_svc, "deferred")
-                        states = dict(states)
-                        states[_cp_svc] = "deferred"
             _complete: dict[str, Any] = {
                 "event": "phase_complete", "run_id": run_id,
                 "phase": label, "summary": (text or "")[:300],
@@ -1472,52 +1452,6 @@ def _run_background(
                                 failed_phases.append(label_result)
                     for spec in group_phases:
                         completed_phases.add(spec.label)
-
-                    for _svc, _st in workspace.commitment_states(case_id).items():
-                        if _st == "deferred":
-                            _defer_detected = True
-                        else:
-                            _ref = next(
-                                (r for r in workspace.packet(case_id).get("referrals", [])
-                                 if r.get("type") == _svc),
-                                None,
-                            )
-                            _defer_detected = bool(
-                                _ref and (
-                                    _ref.get("partner_behaviour", "").startswith("defer")
-                                    or _ref.get("first_contact_defer")
-                                )
-                                and _st in ("pending", "completed", "unresolved", "blocked")
-                            )
-                        if _defer_detected:
-                            if _st != "deferred":
-                                workspace.set_commitment(case_id, _svc, "deferred")
-                                # Only emit the feed event when phase_complete didn't
-                                # already narrate the deferral (i.e., when the override
-                                # in _run_single_phase left _st as pending/completed
-                                # because the engine itself reported deferred natively).
-                                _push_event({
-                                    "event": "commitment_deferred", "run_id": run_id,
-                                    "case_id": case_id, "commitment_type": _svc,
-                                    "scheduled_at": narrator.check_back_at(_svc),
-                                    "message": narrator.deferred(_svc),
-                                })
-                            # Always write the audit so the record is complete and honest,
-                            # regardless of whether a feed event was emitted.
-                            workspace.append_audit(case_id, {
-                                "event_id": f"evt-defer-{uuid4().hex[:8]}",
-                                "event_type": "commitment_deferred",
-                                "commitment_type": _svc,
-                                "verdict": "deferred",
-                                # Quoted verbatim into the court report's findings,
-                                # so it names the child and the service the way the
-                                # filing does rather than the way the runtime does.
-                                "explanation": (
-                                    f"{narrator._org(_svc)} asked for more time on "
-                                    f"{narrator.child}'s {narrator._subject(_svc)}; "
-                                    f"CaseRelay will check back when the reminder falls due."
-                                ),
-                            })
 
                 else:
                     label = first.label

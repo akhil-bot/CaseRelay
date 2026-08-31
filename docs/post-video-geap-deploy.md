@@ -88,19 +88,23 @@ Today the feed says "Lincoln Unified asked for more time" at fan-out, but the sc
 
 It is a compensator, not a design. The `defer_then_inject` simulator branch already produces a genuine two-stage partner — it defers while education is `pending` and returns the poisoned payload once education is `deferred` — but the deployed education agent has no instruction for reading `deferred: True`, so it would report `unresolved` and the arc would break. Rather than redeploy the fleet, the status was overridden in the control plane.
 
-Two changes still outstanding, plus a redeploy:
+All three code changes are now applied in the working tree. Only deploys remain.
 
 | File | Change | Status |
 |---|---|---|
-| `backend/state/scenarios.py` | maya: `partner_behaviours={"education": "defer_then_inject"}`; drop `defer_first=["education"]` | **outstanding** |
-| `backend/agents/education/agent.py` (and shelter, health, legal, family) | `INSTRUCTION` maps `deferred: True` → status `deferred` | **already applied in tree** — pending fleet redeploy only |
-| `backend/api/main.py` | delete the `first_contact_defer` override block | **outstanding** |
+| `backend/state/scenarios.py` | maya: `partner_behaviours={"education": "defer_then_inject"}`; `defer_first` field and `ScenarioSpec.defer_first` removed entirely | **applied** |
+| `backend/agents/education/agent.py` (and shelter, health, legal, family) | `INSTRUCTION` maps `deferred: True` → status `deferred` | **applied** — pending fleet redeploy only |
+| `backend/api/main.py` | both `first_contact_defer` override blocks deleted | **applied** |
 
-The agent instruction change has been made to all five specialist agents (`education`, `shelter`, `health`, `legal`, `family`) in the current working tree. It does not take effect in the cloud until the fleet is redeployed. The two outstanding changes (`scenarios.py` and the `main.py` override block) must still be written and deployed — without them, the control-plane override is still active and the new agent instruction is never exercised.
+The `defer_first` mechanism has been fully removed: the field is gone from `ScenarioSpec`, the `defer_first_set` wiring is gone from `synthetic.py`, and neither `first_contact_defer` nor the `defer*` partner-behaviour checks appear anywhere in the control plane. Maya was the only consumer.
 
-Requires a **fleet redeploy first** (education engine minimum), then a **control-plane redeploy** to remove the override. The fleet must go first — removing the `first_contact_defer` override before the specialist can report `deferred` leaves nothing producing a deferral and breaks the Maya arc. Do not shift control-plane traffic until the education engine's A2A card confirms the new code is serving.
+Local simulator verification (in-process, no cloud calls): with `partner_behaviour=defer_then_inject`, first contact returns `{"deferred": True}` and check-back returns the poisoned payload — exactly what the specialist instruction and the quarantine arc expect.
 
-**Verify after:** run a fresh maya case and confirm the fan-out row still reads as a deferral, that it now originates from the specialist rather than the override, and that the check-back still produces the quarantine. If education comes back `unresolved` at fan-out, the instruction change did not land on the engine.
+**DEPLOY ORDER IS CRITICAL.** The fleet must deploy before the control plane.
+
+Requires a **fleet redeploy first** (education engine minimum), then a **control-plane redeploy**. The fleet must go first — the control plane no longer has the override, so until the education engine carries the new instruction that reads `deferred: True`, a fan-out will produce `unresolved` instead of `deferred` and the Maya arc breaks. Do not shift control-plane traffic until the education engine's A2A card confirms the new code is serving.
+
+**Verify after:** run a fresh maya case and confirm the fan-out row reads as a deferral originating from the specialist (not the override), and that the check-back still produces the quarantine. If education comes back `unresolved` at fan-out, the instruction change did not land on the engine.
 
 ### 7. Clear `CASERELAY_STATE=memory` off the verifier engine
 

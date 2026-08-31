@@ -32,11 +32,6 @@ class ScenarioSpec:
     default_due_days: int = 17
     # Short-form due_in override (e.g. "60s") for demo runs with visible wait gaps.
     default_due_in: str | None = None
-    # Service types whose FIRST fan-out reply should be narrated as a deferral by the
-    # control plane, regardless of what the deployed specialist reports.  The deployed
-    # engine may predate the `deferred` status; this flag lets the control plane
-    # override the narration without a fleet redeploy.
-    defer_first: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -140,8 +135,7 @@ SCENARIOS: dict[str, ScenarioSpec] = {
             "with a named contact; all five commitments fulfilled."
         ),
         inject_callback={"education": True},
-        partner_behaviours={"education": "inject"},
-        defer_first=["education"],
+        partner_behaviours={"education": "defer_then_inject"},
         unnamed_contacts=["education"],
         default_due_days=17,
         default_due_in="10s",
