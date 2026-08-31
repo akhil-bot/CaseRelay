@@ -1,13 +1,14 @@
-"""Simulated partner systems — not agents. Agents must interpret these replies.
+"""Simulated partner responses — there are no real school district, clinic, shelter, court or
+family-services APIs behind CaseRelay. Both routing paths call these same functions: in-process
+when CASERELAY_PARTNER_MCP=0, and via mcp_server.py on Cloud Run when set to 1. The MCP path
+changes the transport and produces Agent Gateway and Cloud Trace evidence; the answers come from
+this module either way. There is no fallback between paths — a failed MCP call retries once
+then raises.
 
-Behaviour is determined by reading the `partner_behaviour` field on the referral row in the
-case packet, set at case-creation time by the scenario factory. This means the simulator
-produces the correct reply for any case without the calling agent needing to know what scenario
-is running — the same mechanism that makes scenario cases indistinguishable from real ones.
-
-The default ("normal") behaviour for every service is a positive, successful reply — the clean
-path where a partner confirms the action completed. Negative/stalled replies are an explicit
-behaviour ("stalled", "timeout", "malformed", etc.) that scenarios opt into.
+Behaviour is driven by the `partner_behaviour` field on the referral row, set at case-creation
+time by the scenario factory. The default ("normal") is a positive reply — a partner confirms
+the action completed. Negative variants ("stalled", "timeout", "malformed", etc.) are explicit
+scenario opt-ins.
 """
 
 import logging
