@@ -521,7 +521,7 @@ the original description said never appeared. Legal recovers through the nudge i
 scenario ends at 4 of 5 fulfilled with only health still open — not the single clean human escalation
 its spec claims, but closer to it than before.
 
-**Diego — missing enrollment, resolved by nudge.** *(Case CR-0831145502, status `closed`, 5/5 commitments completed.)* The SIS returns `enrollment_found: false` with no confirmed school. The education agent's instruction handles this explicitly: missing enrollment means `unresolved`, not `completed`. The agent sets the commitment to `unresolved` and reports it honestly. Because the guard only triggers when a specialist *claims* `completed` against a contradicting response, the guard is never invoked — the prompt handles the condition upstream.
+**Diego — missing enrollment, resolved by nudge.** The SIS returns `enrollment_found: false` with no confirmed school. The education agent's instruction handles this explicitly: missing enrollment means `unresolved`, not `completed`. The agent sets the commitment to `unresolved` and reports it honestly. Because the guard only triggers when a specialist *claims* `completed` against a contradicting response, the guard is never invoked — the prompt handles the condition upstream.
 
 The case then follows the same path as every other unresolved overdue commitment: the nudge fires, Lincoln Unified is chased, and the follow-up response resolves the enrollment. All five commitments reach `completed`, and auto-close transitions the case to `closed`.
 
