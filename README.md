@@ -36,7 +36,7 @@ cases, open the live view, start outreach and prepare reports from the same scre
 | **Portal** | [`caserelay-portal-6nwo7o4bbq-uc.a.run.app`](https://caserelay-portal-6nwo7o4bbq-uc.a.run.app) — Cloud Run, behind HTTP Basic auth. Use the credentials supplied in the Devpost submission's testing instructions. |
 | **Architecture diagram** | The image above, sources in [`docs/diagrams/`](docs/diagrams/) |
 | **Spin-up instructions** | [docs/deploy.md](docs/deploy.md) |
-| **Write-up** | [docs/hackathon-blog.md](docs/hackathon-blog.md) — source of truth for the contest blog. DEV.to: publish from this file (URL TBD). |
+| **Blog post** | [Read on DEV.to](https://dev.to/akill_m_8f67cabd174364802/caserelay-a-governed-agent-fleet-that-follows-up-on-a-childs-court-ordered-services-for-weeks-3hnf) |
 
 ---
 
