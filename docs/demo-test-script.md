@@ -10,7 +10,7 @@ Underneath all of that, every one of the eight engines now runs its outbound tra
 
 **And the injection is refused twice, not once.** `sim.school_callback` returns the poisoned payload to whoever asks while the escalation is undecided — so the education liaison receives it during fan-out (`3-fanout-education_liaison`), refuses it under its own instruction, and reports its commitment `blocked`. The safeguarding verifier then fetches the *same* payload in `6-quarantine` and puts it through Model Armor. Model Armor is the enforcement decision that produces the audit event and the escalation; the liaison's refusal is a model-level refusal with no policy artefact behind it. Worth narrating as defence in depth — but do not present the fan-out refusal as the guardrail.
 
-Phases are not a fixed sequence. `PHASE_REGISTRY` in `backend/runtime/fleet.py` holds twelve phase specs, each with a precondition and a priority; the engine re-evaluates every precondition after each completed phase and dispatches whichever are now ready. Which phases a run visits therefore depends on what the case actually looks like — which is why maya's safeguarding phases never fire on a scenario that has nothing to quarantine, and why maya reaches `9-nudge` but not `10-unanswered`.
+Phases are not a fixed sequence. `PHASE_REGISTRY` in `backend/runtime/fleet.py` holds twelve phase specs, each with a precondition and a priority; the engine re-evaluates every precondition after each completed phase and dispatches whichever are now ready. Which phases a run visits therefore depends on what the case actually looks like — which is why maya's safeguarding phases never fire on a scenario that has nothing to quarantine, and why maya reaches `8-followup` but not `9-nudge` or `10-unanswered`.
 
 **Read this before you record.** There is no phase that approves anything. A run reaches a point where no precondition is satisfiable, asks `awaiting_supervisor()` why, and if the answer is "a human has to decide" it **stops** — emitting an `awaiting_supervisor` event, parking with `state="awaiting_supervisor"` and `current_phase="gate:activation"` or `gate:escalation`, and closing the SSE stream with `stream_end`. It resumes only when a real `POST /v1/cases/{id}/activate` or `POST /v1/approvals/{id}/decide` arrives carrying the identity of whoever decided. That resume is a **new run with a new run id**, not a continuation.
 
@@ -39,17 +39,19 @@ The portal's BFF proxy (`/api/control-plane/[...path]`) forwards all traffic ser
 ## Click path
 
 1. Navigate to **http://localhost:3000/admin** (the "Synthetic Data Lab" card loads).
-2. Set the **Deadline** field to `10s` (compresses the checkpoint deadlines so the scheduler sweep fires within seconds rather than after 17 real days).
+2. Set the **Deadline** field to `10s`.
 
-> **Use `10s`, and do not raise it.** `schedule_commitment_checkpoints` spaces the five per-commitment wakes proportionally across the window it is given, at `now + due_in × (i+1)/5`, and it computes them during `4-checkpoint`. `5-wake` asks for due checkpoints a few seconds later. At `10s` the earliest checkpoint is due at +2s, so the sweep fires it within the first sweep cycle and the resumed run continues through `6-quarantine` and `9-nudge`. At `45s` the checkpoints are not due until 45 seconds after creation — the run that wrote them ends `suspended`, and the sweep fires them ~45s later, starting a new run. That new run reaches quarantine and follow-up, but you will wait the full sweep interval on camera. A longer deadline reliably stretches the demo gap, often past what a take can hold.
+> **The autonomous wake takes up to 60 minutes — plan around it.** Cloud Scheduler fires the sweep at `0 * * * *` (once per hour, at the top of the hour). A case created at 11:01 waits until 12:00; a case created at 11:59 waits only one minute. Time the recording to start just after the top of an hour, or use `POST /v1/workflows/sweep` for a manual trigger on a local run. On the deployed fleet, the observed wake for `CR-0831110100` took about 59 minutes.
+>
+> **Use `10s`, and do not raise it.** `schedule_commitment_checkpoints` spaces the five per-commitment wakes at `now + due_in × (i+1)/5`, computed during `4-checkpoint`. At `10s` the earliest checkpoint is due at +2s — far past due by the time the sweep fires ~59 minutes later. At much longer deadlines (e.g. `17d`) the checkpoints have not come due yet when the sweep runs and the run does not resume. The `10s` value ensures the checkpoints are stale and ready the moment the hourly sweep fires; raising it serves no purpose and risks the checkpoints not being due yet.
 3. Under **Complex**, click the **Maya** card ("Flagship — stalled enrollment, cross-scope callback, quarantine, approval, close").
 4. The "Case CR-XXXX" card appears with scenario details and a due timestamp. **Write the case id down** — you will need it in the address bar twice.
 5. Click **"Run the fleet"**.
 6. The event stream opens. Watch the event log scroll. Each row is an icon, the backend's own plain-language `message`, and a timestamp — there is no event-type badge and no phase badge on screen (`EventRow` in `portal/src/components/live/LiveActivityFeed.tsx`). Commitment status badges appear only on the rows the feed grades as needing attention. **Nothing in the feed names an agent**, so the multi-agent structure is not visible from this page alone; if you want a judge to see it, you have to say it or show the engine logs.
 7. Intake completes, then the stream ends after about a minute with only intake run. **This is the activation gate, not a failure.** The admin page has no approval control and no link to the case, so open **http://localhost:3000/cases/CR-XXXX** in the address bar yourself. (Starting the run from the chat panel instead skips this hop — see the chatbot script below.)
 8. Within ~8 seconds a yellow-bordered card appears: **"Approve activation for Maya"** — "CaseRelay has extracted commitments and proposed grants. It will not contact any service until you approve.", with **"Acting as advocate"** underneath — that string is the viewer persona's `id` (`portal/src/design/personas.ts`), and it is what gets written to Firestore. Click **"Approve & activate"**.
-9. A second run starts on its own. The case page picks it up and the activity feed continues in place — fan-out, checkpoint, wake, quarantine, nudge. Stay on this page; everything from here happens here.
-10. The feed stops again after `9-nudge`. **This is the escalation gate.** A second yellow card appears — **"Approve escalation for Maya"**, its body the verifier's own reason text — with **"Reject"** and **"Approve escalation"**. Click **"Approve escalation"**.
+9. A second run starts on its own. The case page picks it up and the activity feed continues in place — fan-out, checkpoint, wake, quarantine — then parks at the escalation gate. Stay on this page; everything from here happens here.
+10. The feed stops after `6-quarantine`. **This is the escalation gate.** A second yellow card appears — **"Approve escalation for Maya"**, its body the verifier's own reason text — with **"Reject"** and **"Approve escalation"**. Click **"Approve escalation"**.
 11. A third run starts, writes memory, and reports the final tally.
 
 The gate cards live on the **case detail page only** (`portal/src/app/(app)/cases/[caseId]/page.tsx`). Do not go looking for them anywhere else — see the warning below about `/approvals`.
@@ -123,10 +125,6 @@ Run 1 is fast — under a minute. If you are waiting three minutes for fan-out, 
 | 5-wake | `phase_complete` | "Followed up on Maya's open commitments." | 10–30s | Durable wake resumes with no user session |
 | 6-quarantine | `phase_started` | "A reply came back from the school — the safeguarding verifier is screening it before anyone acts." | — | Model Armor trigger point, and the one feed line that names the agent doing the work |
 | 6-quarantine | `phase_complete` | "The safeguarding verifier stopped that reply — it reached outside its scope. Held for Dana Whitfield." | 10–30s | **Cross-scope callback quarantined** |
-| 9-nudge | `followup_sent` | One per chased service, e.g. "Chasing Lincoln Unified School District on Maya's school enrollment." | — | Escalation ladder |
-| 9-nudge | `phase_started` | "Following up on Maya's missed deadlines." | — | — |
-| 9-nudge | `followup_answered` | "Sarah Miller has taken on Maya's school enrollment." | — | The reply names the coordinator, and that name is written back onto the referral |
-| 9-nudge | `phase_complete` | "The follow-ups landed — every commitment on Maya's case is fulfilled." (or "Follow-ups are out; N of 5 still open on Maya's case." if something did not close) | 10–30s | **Education finally closes** |
 | gate:escalation | `awaiting_supervisor` | "Waiting for supervisor approval (escalation) before continuing with Maya's case." | immediate | **The pending quarantine blocks `11-memory` and nothing else can run. The run parks a second time.** |
 | — | `run_completed` | "Run paused — a quarantined reply needs a supervisor decision before Maya's case can proceed." | — | Stream closes with `stream_end` |
 
@@ -138,13 +136,17 @@ Run 1 is fast — under a minute. If you are waiting three minutes for fan-out, 
 |---|---|---|---|---|
 | — | `run_started` | "Escalation decided — picking Maya's case back up." | 0s | Third run id |
 | — | `memory_recall` | "Recalled N notes from earlier work on Maya's case.", with up to three quoted previews under it | — | **Run 2** wrote memory (run 1 wrote none). This is the one run in the walkthrough where recall can fire, and it is not guaranteed — extraction has to have produced at least one fact. The injection of recalled memories into the orchestrator prompt for the wake, nudge and follow-up phases is deployed and live (`_MEMORY_DECISION_PHASES` in `backend/api/main.py`), with a `memory_injected` audit event when it fires; observed end-to-end on run `de73dabce1d4`, where one recalled memory was injected into `5-wake` and `8-followup`. The recalled content so far is general process observations rather than operationally specific intelligence, because the compressed end-to-end script re-executes orchestrator phases that the specialists already handled. The other path where a recalled memory reaches a model is `preload_memory` inside `11-memory` |
+| 8-followup | `phase_started` | "Contacting Lincoln Unified about Maya's school enrollment." | — | Scoped re-request under the same authority grant that covered the original outreach |
+| 8-followup | `phase_complete` | "Lincoln Unified has confirmed Maya's school enrollment." | 10–30s | **Education closes** — the district answers the scoped re-request and the commitment resolves |
 | 11-memory | `phase_started` | "Recording everything that happened for Maya's file." | — | Memory persistence |
 | 11-memory | `phase_complete` | "Case notes updated — every status on Maya's file is recorded." | 5–15s | All scopes written |
 | — | `run_completed` | "All 5 commitments for Maya are fulfilled." (or "4 of 5 commitments fulfilled for Maya." if the follow-up did not land) | — | Terminal state |
 
-**Expect `8-followup` not to fire.** Its precondition is "the escalation is decided *and* the commitment it concerns is still open", and `9-nudge` now runs before the escalation gate rather than after it, closing education on the way past. So by the time you approve, there is nothing left for the scoped re-request to ask about. If you do see `8-followup` — "Contacting Lincoln Unified about Maya's school enrollment." then "Lincoln Unified could not resolve Maya's school enrollment." — it means the nudge did not close education, which is also a valid outcome; it just means run 3 has one more phase in it.
+**Expect `9-nudge` not to fire.** Its precondition is a missed deadline with a commitment still open and no pending escalation — but education is still open when the escalation gate parks run 2, so there is no past deadline without a pending escalation to go with it. Once you approve the escalation, `8-followup` runs first: it makes another scoped request to the district, and if the district answers, education closes without the run ever reaching the nudge. That is what happened on case `CR-0831110100`.
 
-Both orderings tell the same story: the district gets one attempt at an out-of-scope request, that attempt is quarantined, and what actually closes education is `9-nudge`, whose follow-up names the officer who took the referral on. That name is written back onto the referral, so every later line says "Sarah Miller" rather than "Lincoln Unified".
+What closes education is `8-followup`, narrated "Lincoln Unified has confirmed Maya's school enrollment." There is no `followup_answered` event naming a coordinator in the observed arc — the district answers the scoped re-request directly and the commitment resolves.
+
+If you do see `9-nudge` fire — "Chasing Lincoln Unified School District on Maya's school enrollment" followed by a `followup_answered` event — it means `8-followup` ran but the district did not answer, so the nudge ladder picked it up. That is a valid alternate path; run 3 just has one more phase in it.
 
 One more phase in the registry stays silent on maya:
 
@@ -156,7 +158,7 @@ On maya the district answers its follow-up, so nothing is left unanswered and th
 
 Fan-out events (phases 3-fanout-*) arrive in **arbitrary order** — they run concurrently via a ThreadPoolExecutor. This is expected, not a bug.
 
-Each organisation is named in full the first time the run mentions it and by its short name after that, per service — which is why `3-fanout-education_liaison` says "Lincoln Unified School District" on the way out and `9-nudge`'s chasing line says "Lincoln Unified". That counter belongs to the run's narrator, so it resets at each gate: the first mention in run 3 is a full name again.
+Each organisation is named in full the first time the run mentions it and by its short name after that, per service — which is why `3-fanout-education_liaison` says "Lincoln Unified School District" on the way out and `8-followup`'s completion line says "Lincoln Unified". That counter belongs to the run's narrator, so it resets at each gate: the first mention in run 3 is a full name again.
 
 ---
 
@@ -174,7 +176,7 @@ Each organisation is named in full the first time the run mentions it and by its
 
 **What to look for in the UI:**
 - Phase `6-quarantine` completes with "That reply reached outside its scope — held for Dana Whitfield."
-- `9-nudge` runs, and then the feed **stops** at the escalation gate. Nothing further happens until you decide. That is the point: an undecided safeguarding escalation is the only thing standing between the fleet and `11-memory`, and the engine has no way to clear it itself.
+- `6-quarantine` completes, and then the feed **stops** at the escalation gate. Nothing further happens until you decide. That is the point: an undecided safeguarding escalation is the only thing standing between the fleet and `11-memory`, and the engine has no way to clear it itself.
 - **One click is enough**, and it is worth knowing why before you are live. The verifier can open more than one approval record for the same callback, and it used to take a click per record to get past a single safeguarding decision. Both the gate and the `11-memory` precondition now ask whether an escalation has been *decided* rather than whether one is still pending, so one human ruling settles the case. If you click once and the run resumes while a duplicate still shows `pending`, that is the fix working, not a missed approval.
 - The escalation card's body text is the verifier's own `reason` string, served from `GET /v1/approvals` — not portal copy. Reading it aloud off the screen is worth doing.
 - **Reject** is a real branch and it is wired (`decideApproval(..., "reject", ...)`). It also resumes the run, so do not click it expecting nothing to happen.
@@ -198,8 +200,8 @@ Navigate to: **Console → Firestore → Select database "caserelay"**
 
 | Collection path | What to check |
 |---|---|
-| `cases/{case_id}` | Top-level doc: `status` should be `"closed"` or `"monitoring"`, `child_name` is "Maya" |
-| `cases/{case_id}/commitments` | 5 docs keyed by type. Education should show `status: "completed"` after a full run — closed by the follow-up in `9-nudge`, not by `8-followup` |
+| `cases/{case_id}` | Top-level doc: `status` is `"monitoring"` after a completed run — the `monitoring → closed` transition is defined in the state machine but is not triggered by any code path; monitoring is the terminal state. `child_name` is "Maya" |
+| `cases/{case_id}/commitments` | 5 docs keyed by type. Education should show `status: "completed"` after a full run — closed by `8-followup` in run 3 |
 | `cases/{case_id}` referral packet | The education referral's `contact` starts null and ends as Sarah Miller, Enrollment Coordinator. That write is the escalation ladder's visible result |
 | `cases/{case_id}/authority_grants` | 5 docs. Each has `granted_to` matching an agent identity, `status: "granted"`, and **`granted_by: "advocate"`** — see below |
 | `cases/{case_id}/human_approvals` | At least one doc with `action_type: "escalation"` — the one you ruled on reads `decision: "approve"`, `recipient: "Lincoln Unified School District"` and **`decided_by: "advocate"`**. **Do not promise exactly one on camera.** The verifier mints a fresh `apr-{uuid4}` on every `open_escalation` call, so a single quarantined callback often leaves duplicate records behind, and the extras stay `pending` forever. That is cosmetic, not a stuck gate: the run asks whether an escalation has been *decided*, not whether one is still pending, so your one click clears it. A `supervisor_notice` doc appears only on scenarios where a chased provider stayed silent |
@@ -427,7 +429,7 @@ curl -s -G -H "Authorization: Bearer $(gcloud auth print-access-token)" \
 |---|---|
 | Run sits on "Waiting for events…" for 30–60s | **Normal.** Cold-started engines take 30–60s to respond. Wait. |
 | The stream ends with only intake run | **Normal — this is the activation gate.** Go to `/cases/CR-XXXX` and approve. Nothing will happen until you do. |
-| The feed stops after `9-nudge` | **Normal — this is the escalation gate.** Approve the escalation card on the same page. |
+| The feed stops after `6-quarantine` | **Normal — this is the escalation gate.** Approve the escalation card on the same page. |
 | Waiting at a gate and no card appears | Give it ~8 seconds for the next poll. If it still does not, reload the page: the case page **stops polling** once the newest run is `awaiting_supervisor` (`pollDelay` returns `null` for it), so a card missed on that last poll will not turn up on its own. |
 | First BFF request after a dev-server restart takes ~12s | **Normal.** Next.js is compiling the route on first hit. |
 | A full maya walkthrough takes 8–12 minutes across its three runs | **Normal.** A dozen or so orchestrator turns, each invoking an LLM + partner sim, plus however long you spend narrating the two gates. |
@@ -436,7 +438,7 @@ curl -s -G -H "Authorization: Bearer $(gcloud auth print-access-token)" \
 | `phase_error` on a single specialist | **May be transient.** The run continues with partial_failure. Re-run if only one failed. |
 | SSE stream disconnects mid-run | **Likely a proxy timeout.** The run is still going in the background — poll `GET /v1/runs/{run_id}` manually, or reopen the case and read the recorded history from `GET /v1/cases/{case_id}/events`. |
 | `6-quarantine` never fires | **Broken.** The `inject_callback` flag is probably not set on the case. Verify the scenario was "maya" not a generic create. |
-| `8-followup` never fires | **Normal.** `9-nudge` closed education before the escalation gate, so the scoped re-request has nothing left to ask. |
+| `9-nudge` never fires | **Normal.** Education is still open when the escalation gate parks run 2. `8-followup` runs first in run 3 and closes it; `9-nudge` only fires if `8-followup` did not close the commitment. |
 | `10-unanswered` never fires on maya | **Normal.** Its precondition needs a chased provider that stayed silent, and the district answers its follow-up. Run `priya` to see it. |
 | Run 2 ends `suspended` and a later run still never reaches `6-quarantine` | **Almost always the deadline.** Check `due_in` on the case: at anything above ~`10s` the earliest checkpoint is not due when `5-wake` asks. The run that wrote them ends `suspended`; the sweep fires them when they come due and starts a new run. But if the deadline is long (e.g. `45s`), the arc completes eventually — just not within the demo window. Re-run at `10s` and do not raise the deadline to "look realistic". |
 | Approving returns `400 supervisor_id is required` | **Broken.** The portal always sends one; a 400 means the request did not come from the gate card. |

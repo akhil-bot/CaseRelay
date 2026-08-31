@@ -51,11 +51,12 @@ never one run.
 
 **On `due_in="10s"`.** This is not a commitment deadline. It is the window across which the five
 per-commitment checkpoints are spread, at `now + due_in × (i+1)/5`, computed during the checkpoint
-phase. The wake phase asks for already-due checkpoints seven to twelve seconds later, so at `10s`
-the earliest checkpoint has fired and the run continues; at `60s` it has not and the run ends
-early. Ten seconds is what makes a seventeen-day story fit in two minutes.
+phase. At `10s` the earliest checkpoint is due at +2s — far past due by the time the sweep fires.
+At much longer values (e.g. `17d`) the checkpoints have not come due yet and the sweep skips them.
+Ten seconds is the conventional compressed value; the checkpoints are stale within moments of
+being written and will be fired on the next sweep, whenever that arrives.
 
-**What is compressed, and what that means.** `due_in` compresses the checkpoint deadlines, not the execution path. Even at `10s`, the run that writes the checkpoints ends and is recorded `suspended`; Cloud Scheduler sweeps, finds the due checkpoints, publishes to Pub/Sub, and an authenticated push starts a new run. Read these as proof that the ladder works at compressed scale — the same Cloud Scheduler and Pub/Sub path as a seventeen-day case, just a shorter wait.
+**What is compressed, and what that means.** `due_in` compresses the checkpoint deadlines, not the execution path. Even at `10s`, the run that writes the checkpoints ends and is recorded `suspended`; Cloud Scheduler sweeps, finds the due checkpoints, publishes to Pub/Sub, and an authenticated push starts a new run. **The deployed sweep runs at `0 * * * *` — once per hour at the top of the hour — so a case created at 11:01 waits until 12:00 for its wake.** Read these as proof that the ladder works at compressed scale — the same Cloud Scheduler and Pub/Sub path as a seventeen-day case, just a much shorter deadline window to make the checkpoints stale.
 
 ---
 
