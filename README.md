@@ -166,7 +166,7 @@ Every row links to the full account, including the limitations, in
 
 | Component | In CaseRelay |
 |---|---|
-| **Agent Registry** | 24 registered services, auto-registered and updated by `agents-cli deploy`. A live catalogue, not a runtime routing layer — agents find each other through environment variables, not registry lookups. |
+| **Agent Registry** | 24 services registered by `agents-cli deploy` — eight A2A agent cards, two MCP partner entries, fourteen infrastructure endpoints — alongside eleven rows the platform registers itself, so the Agents tab reads 19. A live catalogue, not a runtime routing layer — agents find each other through environment variables, not registry lookups. |
 | **Agent Runtime** | Eight reasoning engines in `us-central1` hosting the fleet. The checkpoint / sleep / deadline-triggered resume cycle around them is Firestore plus Pub/Sub push and Cloud Scheduler rather than Agent Runtime itself. |
 | **Memory Bank** | Instance `8631858420611284992` via ADK's `VertexAiMemoryBankService`, scoped per case, with three custom memory topics. The recalled content so far is general process observations rather than operationally specific intelligence. |
 | **Agent Platform Sessions** | `caserelay-chat-sessions` for the operator chat transcript; the `caserelay-orchestrator` reasoning engine for agent run sessions, one session per phase invocation. A deployed control plane refuses to start without both engine IDs configured. (`caserelay-run-sessions` was provisioned but is unused; `CASERELAY_RUN_SESSION_ENGINE_ID` points to the orchestrator engine.) |
@@ -177,6 +177,10 @@ Every row links to the full account, including the limitations, in
 
 Two things beyond the seven components: **AG-UI** carries both event surfaces (the operator chat
 endpoint and the run event stream), and **Gemma 4** writes the end-of-run session narrative.
+
+Console captures for the rows above are indexed in **[docs/gcp-proofs/](docs/gcp-proofs/)** — 13
+stills from the live `caserelay` project, each captioned with what it does and does not prove,
+including where a panel is audited rather than enforced.
 
 ---
 
@@ -215,6 +219,7 @@ auth.
 | [examples/](examples/) | Runnable invocations and a one-page guide to the nine scenarios |
 | [docs/architecture.md](docs/architecture.md) | Component wiring, technology stack, GEAP capability detail, engineering decisions |
 | [docs/scenario-showcase.md](docs/scenario-showcase.md) | The non-Maya scenarios with captured cloud evidence — and the ones that do not hold up |
+| [docs/gcp-proofs/](docs/gcp-proofs/) | Google Cloud console stills behind the GEAP capability claims, captioned with their limits |
 | [docs/caserelay-walkthrough.md](docs/caserelay-walkthrough.md) | Per-phase detail, expected outputs, the control-plane API surface |
 | [docs/hackathon-blog.md](docs/hackathon-blog.md) | The contest write-up |
 | [docs/submission-checklist.md](docs/submission-checklist.md) | What the Devpost submission still needs |

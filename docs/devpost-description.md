@@ -51,7 +51,7 @@ Agent Platform Sessions hold the operator chat transcript and every orchestrator
 - **Agent Runtime** — eight reasoning engines in `us-central1` hosting the fleet
 - **Agent Identity** — platform-managed identity per agent; SPIFFE-style principals; caller principal verified at the gateway
 - **Agent Gateway** — all eight engines bound to `caserelay-egress`; outbound traffic TLS-intercepted; MCP method deny policy enforcing
-- **Agent Registry** — 24 registered services, auto-registered and updated by `agents-cli deploy`
+- **Agent Registry** — 24 services registered by `agents-cli deploy` (eight A2A agent cards, two MCP partner entries, fourteen infrastructure endpoints), plus eleven rows the platform registers itself
 - **Agent Platform Sessions** — `caserelay-chat-sessions` for chat transcripts; `caserelay-orchestrator` engine for agent run transcripts
 - **Memory Bank** — instance `8631858420611284992` via ADK's `VertexAiMemoryBankService`, scoped per case
 - **Model Armor** — template `caserelay-screen` with SDP Advanced Config referencing a Cloud DLP inspect template; fails closed
