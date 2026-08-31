@@ -74,7 +74,7 @@ SCENARIOS: dict[str, ScenarioSpec] = {
                          "unanswered follow-up; the other four close normally.",
         partner_behaviours={"health": "timeout"},
         due_offsets={"health": 10},
-        default_due_in="60s",
+        default_due_in="10s",
     ),
     "diego": ScenarioSpec(
         id="diego",
@@ -144,7 +144,7 @@ SCENARIOS: dict[str, ScenarioSpec] = {
         defer_first=["education"],
         unnamed_contacts=["education"],
         default_due_days=17,
-        default_due_in="60s",
+        default_due_in="10s",
     ),
     "kai": ScenarioSpec(
         id="kai",
