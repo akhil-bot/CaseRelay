@@ -445,3 +445,154 @@ class TestTryClose:
         _make_full_case("CLOSE-14")
         assert workspace.try_close("CLOSE-14") is True
         assert workspace.try_close("CLOSE-14") is False
+
+
+# ---------------------------------------------------------------------------
+# Maya arc integration: guard + phase preconditions + nudge + auto-close
+# ---------------------------------------------------------------------------
+
+
+class TestMayaArcWithGuard:
+    """Trace Maya's post-guard arc phase by phase.
+
+    Without the guard, phase 8-followup resolves education and 9-nudge never
+    fires (observed on CR-0831110100).  With the guard, the SIS still returns
+    enrollment_found: false, so any ``completed`` claim in phase 8 is blocked.
+    This leaves education unresolved, which satisfies 9-nudge's precondition
+    ``_overdue_and_unchased``.  The nudge calls ``partners.followup`` — a
+    different API from ``school_callback`` — which returns a positive response
+    with no ``enrollment_found`` field, overwriting the stale response and
+    letting education reach ``completed``.
+
+    Each step exercises the real code path (preconditions, guard, workspace,
+    escalation module) against workspace state set up to match the point in
+    Maya's run where that step fires.
+    """
+
+    CASE = "MAYA-GUARD-ARC"
+
+    @pytest.fixture(autouse=True)
+    def _setup_maya_case(self):
+        """Build the case state Maya is in at the START of run 3.
+
+        State at this point:
+        - Case is ``monitoring``, activated by a supervisor
+        - 4 of 5 commitments ``completed``; education is ``deferred``
+        - A quarantine escalation has been raised AND decided (approved)
+        - Per-commitment checkpoints exist and are woken
+        - The education referral has ``inject_callback: true``
+        """
+        from backend.runtime.fleet import (
+            _escalation_decided_and_still_open,
+            _overdue_and_unchased,
+        )
+        self._esc_open = _escalation_decided_and_still_open
+        self._nudge_ready = _overdue_and_unchased
+
+        workspace.create_case(self.CASE, {
+            "case_id": self.CASE,
+            "child": {"name": "Maya", "dob": "2014-03-15"},
+            "test_case": True,
+            "referrals": [
+                {"type": "education", "referral_id": "ref-edu",
+                 "target_org": "Lincoln Unified School District",
+                 "inject_callback": True},
+                {"type": "health", "referral_id": "ref-hlth",
+                 "target_org": "Riverbend Community Health"},
+                {"type": "legal", "referral_id": "ref-leg",
+                 "target_org": "Statewide Legal Aid Collective"},
+                {"type": "shelter", "referral_id": "ref-shl",
+                 "target_org": "Harborlight Youth Shelter"},
+                {"type": "family_services", "referral_id": "ref-fam",
+                 "target_org": "Mesa County Family Services"},
+            ],
+        })
+        workspace.commitments[self.CASE] = [
+            {"commitment_id": "cmt-edu", "type": "education",
+             "status": "deferred", "deadline": "2026-08-01T00:00:00+00:00"},
+            {"commitment_id": "cmt-hlth", "type": "health", "status": "completed"},
+            {"commitment_id": "cmt-leg", "type": "legal", "status": "completed"},
+            {"commitment_id": "cmt-shl", "type": "shelter", "status": "completed"},
+            {"commitment_id": "cmt-fam", "type": "family_services", "status": "completed"},
+        ]
+        workspace.activate(self.CASE, "advocate")
+
+        workspace.add_approval(self.CASE, {
+            "approval_id": "apr-esc-maya",
+            "action_type": "escalation",
+            "decision": "approve",
+            "decided_by": "advocate",
+        })
+
+        workspace.put_checkpoint(f"wf-{self.CASE}-edu", {
+            "workflow_id": f"wf-{self.CASE}-edu",
+            "case_id": self.CASE,
+            "commitment_type": "education",
+            "current_step": "awake",
+            "state": "running",
+        })
+
+        record_response(self.CASE, "education", {
+            "system": "lincoln_unified_sis",
+            "enrollment_found": False,
+            "deferred": True,
+            "note": "Counselor not yet available to confirm enrollment.",
+        })
+
+        yield
+
+    def test_step1_phase8_precondition_met(self):
+        """Escalation decided + education not completed → phase 8 fires."""
+        assert self._esc_open(self.CASE) is True
+
+    def test_step2_guard_blocks_completed_claim(self):
+        """Guard sees enrollment_found: false and blocks the completed claim."""
+        refusal = check(self.CASE, "education", "completed")
+        assert refusal is not None
+        assert refusal["reason_code"] == "TOOL_RESPONSE_CONTRADICTION"
+
+    def test_step3_phase8_blocks_education(self):
+        """set_commitment returns a refusal and education stays blocked."""
+        refusal = workspace.set_commitment(self.CASE, "education", "completed")
+        assert refusal is not None
+        states = workspace.commitment_states(self.CASE)
+        assert states["education"] == "blocked"
+
+    def test_step4_phase9_precondition_met_after_block(self):
+        """After guard blocks education, 9-nudge's precondition is satisfied.
+
+        This is the crux: _overdue_and_unchased returns True because education
+        is blocked (not completed), its checkpoint is woken, it has no followup
+        record, and the escalation is decided (not blocking).
+        """
+        workspace.set_commitment(self.CASE, "education", "completed")
+        assert self._nudge_ready(self.CASE) is True
+
+    def test_step5_nudge_resolves_education(self):
+        """nudge_overdue calls partners.followup, which overwrites the response."""
+        workspace.set_commitment(self.CASE, "education", "completed")
+
+        from backend.workflows.escalation import nudge_overdue
+        results = nudge_overdue(self.CASE)
+
+        edu_results = [r for r in results if r["service"] == "education"]
+        assert len(edu_results) == 1
+        assert edu_results[0]["answered"] is True
+
+        states = workspace.commitment_states(self.CASE)
+        assert states["education"] == "completed"
+
+    def test_step6_full_arc_closes_case(self):
+        """The complete sequence: guard blocks → nudge resolves → case closes."""
+        refusal = workspace.set_commitment(self.CASE, "education", "completed")
+        assert refusal is not None
+
+        from backend.workflows.escalation import nudge_overdue
+        nudge_overdue(self.CASE)
+
+        states = workspace.commitment_states(self.CASE)
+        assert states["education"] == "completed"
+
+        closed = workspace.try_close(self.CASE)
+        assert closed is True
+        assert workspace.get_case(self.CASE)["status"] == "closed"
