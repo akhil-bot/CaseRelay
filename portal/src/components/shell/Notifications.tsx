@@ -7,6 +7,7 @@ import { Badge } from "@/components/ui/primitives";
 import { cx, surface, type as type_, type Tone } from "@/design/tokens";
 import { useDemo } from "@/lib/demo-store";
 import { useLiveApprovals } from "@/lib/live-approvals";
+import { PRIMARY_CASE_ID } from "@/lib/mock/cases";
 import { useViewer } from "@/lib/viewer";
 
 export function Notifications() {
@@ -60,7 +61,7 @@ export function Notifications() {
       variant: "danger" as Tone,
       title: `Waiting ${commitment.daysOverdue} days with nobody responsible`,
       body: commitment.title,
-      href: "/cases/CR-1042",
+      href: `/cases/${PRIMARY_CASE_ID}`,
     })),
     ...(latest && step > 0
       ? [
@@ -70,7 +71,7 @@ export function Notifications() {
             variant: "brand" as Tone,
             title: latest.summary,
             body: latest.at,
-            href: "/cases/CR-1042",
+            href: `/cases/${PRIMARY_CASE_ID}`,
           },
         ]
       : []),

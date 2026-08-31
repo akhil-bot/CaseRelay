@@ -41,10 +41,8 @@ import type { Commitment, Domain } from "@/lib/types";
 // ---------------------------------------------------------------------------
 // Route decision: mock walkthrough vs live control-plane data
 //
-// The CASES array contains the hardcoded demo-store IDs (CR-1042, CR-1038,
-// etc.). If the URL's caseId is one of those, render the scripted walkthrough.
-// If it is NOT in that list, it is a real case created via /admin or the API —
-// fetch it from the control plane and render live data.
+// If the URL's caseId matches a mock CASES entry, render the scripted walkthrough.
+// Otherwise fetch from the control plane and render live data.
 //
 // There is NO silent fallback from one to the other. A broken live fetch
 // shows an error; it does not quietly swap in mock data.

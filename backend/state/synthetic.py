@@ -1,6 +1,6 @@
 """Synthetic case generation.
 
-CR-1042 is the scripted demo case and its facts live in fixtures/. For repeatable testing we
+The scripted demo case and its facts live in fixtures/. For repeatable testing we
 need many cases that do not collide, so this module derives a complete, self-consistent case
 from any case id: the referral packet, the commitments, and the authority grants a supervisor
 would be asked to approve. Referral ids are derived from the case suffix, which keeps a case's

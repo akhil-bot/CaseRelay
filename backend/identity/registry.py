@@ -117,8 +117,3 @@ def assert_scope(identity: str, field: str) -> None:
     card = verify(identity)
     if field in card["denied_data_scopes"]:
         raise IdentityDenied(f"{identity} denied field {field}")
-
-
-def is_dev_default(identity: str) -> bool:
-    """True if the identity is a local placeholder, not a real platform principal."""
-    return identity.endswith(_LOCAL_PLACEHOLDER_DOMAIN)

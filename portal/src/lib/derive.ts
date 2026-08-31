@@ -191,8 +191,9 @@ export function deriveActivity(step: number): ActivityEvent[] {
 }
 
 /**
- * The scenario clock only drives CR-1042. Every other case is a static synthetic
- * record, so the list is rebuilt with the live case folded back into it.
+ * The scenario clock only drives the primary demo case. Every other case is a
+ * static synthetic record, so the list is rebuilt with the live case folded back
+ * into it.
  *
  * Nothing here flags a case as awaiting approval. What is held for a person is
  * read from the control plane rather than from the walkthrough — see
@@ -236,7 +237,7 @@ export function stepMeta(step: number) {
   return DEMO_STEPS[Math.min(Math.max(step, 0), DEMO_STEPS.length - 1)];
 }
 
-export const OPEN_STATUSES: CommitmentStatus[] = [
+const OPEN_STATUSES: CommitmentStatus[] = [
   "proposed",
   "pending",
   "in_progress",

@@ -1,7 +1,6 @@
 import type { CaseSummary, Commitment } from "@/lib/types";
 
 export const PRIMARY_CASE_ID = "CR-1042";
-export const WORKFLOW_ID = "wf-school-enrollment";
 
 export const CASES: CaseSummary[] = [
   {

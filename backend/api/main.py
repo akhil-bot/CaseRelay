@@ -6,6 +6,7 @@ All routes are under /v1. Legacy routes from earlier prototypes have been remove
 from __future__ import annotations
 
 import asyncio
+import base64
 import contextvars
 import json
 import logging
@@ -38,6 +39,7 @@ from backend.runtime import event_log
 from backend.runtime.workspace import CaseNotFound, workspace
 from backend.state import dataset, scenarios as _scenarios_mod
 from backend.workflows import durable
+from backend.workflows.durable import _parse_duration
 from backend.workflows.escalation import SUPERVISOR_NOTICE
 
 if os.environ.get("CASERELAY_CONTROL_PLANE", "").strip() == "1":
@@ -136,8 +138,6 @@ async def probe_a2a() -> dict:
     when a sync event hook was registered — every health check stayed green while
     every A2A call failed. This probe fails in the same conditions that break production.
     """
-    import os
-
     from backend.runtime.a2a_auth import authenticated_client
 
     _PROBE_CANDIDATES = [
@@ -178,20 +178,6 @@ async def probe_a2a() -> dict:
 # ---------------------------------------------------------------------------
 # helpers
 # ---------------------------------------------------------------------------
-
-
-def _parse_duration(s: str) -> timedelta:
-    """Parse a duration string like '45s', '5m', '2h', '17d' into a timedelta."""
-    s = s.strip()
-    if s.endswith("s"):
-        return timedelta(seconds=int(s[:-1]))
-    if s.endswith("m"):
-        return timedelta(minutes=int(s[:-1]))
-    if s.endswith("h"):
-        return timedelta(hours=int(s[:-1]))
-    if s.endswith("d"):
-        return timedelta(days=int(s[:-1]))
-    raise ValueError(f"cannot parse duration {s!r}; expected e.g. '45s', '17d'")
 
 
 def _resolve_due_in(due_in: str | None, scenario_name: str | None) -> str | None:
@@ -680,8 +666,6 @@ def wake_workflow(workflow_id: str) -> dict:
     case_id = cp.get("case_id", "")
     return durable.resume_wake(case_id, workflow_id)
 
-
-import base64
 
 _push_logger = logging.getLogger("caserelay.pubsub_push")
 

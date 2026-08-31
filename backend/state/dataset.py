@@ -6,7 +6,7 @@ create a throwaway case, exercise the fleet against it, and delete it afterwards
 that leaking into agent code or prompts.
 
 Three sources:
-  fixture   — the scripted CR-1042 referral packet under fixtures/, for the demo walkthrough
+  fixture   — the scripted demo referral packet under fixtures/, for the demo walkthrough
   synthetic — a generated packet under a fresh case id, for repeatable runs
   clone     — a copy of a case already in the store, seated on a fresh case id
 
