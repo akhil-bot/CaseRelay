@@ -126,7 +126,9 @@ Four cases were seeded on 31 August 2026 and approved through the supervisor gat
 | CR-0831121245 | theo (malformed reply from legal) | 31 Aug (edu, legal), 7 Sep (health), 14 Sep (shelter), 19 Sep (family) |
 | CR-0831121606 | ellis (duplicate callback idempotency) | 31 Aug (edu, legal), 7 Sep (health), 14 Sep (shelter), 19 Sep (family) |
 
-Each wake produces a `run_id` that differs from the previous run's `run_id` for the same case, confirming it is a genuinely new Cloud Run invocation rather than a continuation of an existing one. The sweep picks up nothing when no checkpoint is due, and those sweeps cost nothing.
+Each wake produces a `run_id` that differs from the checkpoint run's `run_id` for the same case, confirming it is a genuinely new Cloud Run invocation rather than a continuation of an existing one. The sweep picks up nothing when no checkpoint is due, and those sweeps cost nothing.
+
+**Verified wake on 2026-08-31:** the 13:00 UTC sweep (delivered at 13:03 UTC via Pub/Sub) fired four wakes. For case CR-0831120614 (kai), the checkpoint run that wrote the sleep record was `7702b90ee88d` (state: suspended, phase: checkpoint). The sweep-triggered wake run was `5f2738588aaf` (state: completed, phase: done, started 13:03:09 UTC) — a fresh invocation with a distinct `run_id` and nobody at the keyboard.
 
 **Cloud Logging query to see the wake history** (project `caserelay`):
 
