@@ -10,7 +10,11 @@ path where a partner confirms the action completed. Negative/stalled replies are
 behaviour ("stalled", "timeout", "malformed", etc.) that scenarios opt into.
 """
 
+import logging
+
 from backend.runtime.workspace import workspace
+
+_log = logging.getLogger(__name__)
 
 PARTNER_SYSTEMS: dict[str, str] = {
     "education": "lincoln_unified_sis",
@@ -28,8 +32,8 @@ def _behaviour(case_id: str, service: str) -> str:
         for ref in packet.get("referrals", []):
             if ref.get("type") == service:
                 return ref.get("partner_behaviour", "normal") or "normal"
-    except Exception:  # noqa: BLE001
-        pass
+    except Exception as exc:  # noqa: BLE001
+        _log.warning("could not read partner_behaviour for case %s service %s, defaulting to normal: %s", case_id, service, exc)
     return "normal"
 
 

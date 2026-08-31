@@ -149,6 +149,16 @@ CASERELAY_PARTNER_MCP=1 CASERELAY_PARTNER_MCP_URL=https://... bash infra/deploy_
 Note the ordering dependency: `deploy_fleet.sh` exits immediately if `CASERELAY_PARTNER_MCP=1` is
 set without a URL.
 
+**Why MCP is currently off (`CASERELAY_PARTNER_MCP=0`).** The MCP path was demonstrated
+end-to-end on 2026-08-31 (Agent Gateway log at `12:11:47Z`, Cloud Trace
+`442a845a56a86c50ee5d35be1891cdd7`). It was then reverted because the partner Cloud Run
+service loses access to the case packet: `sim._behaviour()` reads `partner_behaviour` from the
+referral row, but on the MCP path that lookup runs inside the partners service, which has no
+workspace access and silently swallows the exception, defaulting every partner to `"normal"`.
+The result is that Lincoln Unified confirms enrollment immediately instead of deferring, and the
+quarantine, escalation, and case-close arc never happens. Re-enabling MCP without fixing
+`sim._behaviour()`'s access to the case packet will reproduce this failure identically.
+
 **Agent Gateway binding.** Binding is explicit opt-in, and the flag is omitted entirely rather
 than passed empty when it is off — `--agent-gateway-egress=""` silently *unbinds* an engine.
 

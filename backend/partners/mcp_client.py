@@ -1,10 +1,12 @@
-"""MCP client for partner calls with automatic fallback to in-process sim.py.
+"""MCP client for partner calls.
 
-Routing is controlled by the CASERELAY_PARTNER_MCP env var:
-  - Unset or empty or "0" → in-process calls via sim.py (default, proven path)
+Routing is controlled by the CASERELAY_PARTNER_MCP env var, checked per call:
+  - Unset or empty or "0" → in-process calls via sim.py (current default)
   - "1" or a URL → MCP path (URL auto-detected from CASERELAY_PARTNER_MCP_URL)
 
-The fallback ensures the demo can always run even if MCP deployment isn't ready.
+On the MCP path, a failed call discards the cached ID token and retries exactly once,
+then raises. There is no fallback to sim.py on error — set CASERELAY_PARTNER_MCP=0
+before deploying if you want the in-process path.
 
 The deployed MCP server is a private Cloud Run service, so every call on the MCP path
 carries a Google-signed ID token minted for the configured server URL.

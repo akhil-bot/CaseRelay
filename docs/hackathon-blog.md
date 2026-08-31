@@ -70,7 +70,7 @@ The school's reply goes through [Model Armor](https://docs.cloud.google.com/mode
 
 ### Observability
 
-[Cloud Trace](https://docs.cloud.google.com/trace) shows the calls leaving the engines and Model Armor ruling on them. [Agent Observability](https://docs.cloud.google.com/gemini-enterprise-agent-platform/optimize/observability/overview) collects the spans. [Cloud Logging](https://docs.cloud.google.com/logging) holds the gateway request log. This is not a picture of the agents thinking—ADK does not export execution traces. It is a picture of the perimeter.
+[Cloud Trace](https://docs.cloud.google.com/trace) shows the calls leaving the engines and Model Armor ruling on them — when partner calls route through the MCP server. The MCP path was demonstrated end-to-end on 2026-08-31: trace `442a845a56a86c50ee5d35be1891cdd7` shows `MCP send tools/call family_status` as the root span with nested `apply_guardrail "Google Cloud Model Armor"` and `/mcp`. The demo video runs the in-process simulator (`CASERELAY_PARTNER_MCP=0`), which does not produce gateway spans. [Agent Observability](https://docs.cloud.google.com/gemini-enterprise-agent-platform/optimize/observability/overview) collects the spans. [Cloud Logging](https://docs.cloud.google.com/logging) holds the gateway request log. This is not a picture of the agents thinking—ADK does not export execution traces. It is a picture of the perimeter.
 
 ## Maya's scenario step by step
 

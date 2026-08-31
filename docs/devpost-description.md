@@ -55,7 +55,7 @@ Agent Platform Sessions hold the operator chat transcript and every orchestrator
 - **Agent Platform Sessions** — `caserelay-chat-sessions` for chat transcripts; `caserelay-orchestrator` engine for agent run transcripts
 - **Memory Bank** — instance `8631858420611284992` via ADK's `VertexAiMemoryBankService`, scoped per case
 - **Model Armor** — template `caserelay-screen` with SDP Advanced Config referencing a Cloud DLP inspect template; fails closed
-- **Agent Observability** — Cloud Trace carries Google-generated spans for every MCP tool call and Model Armor evaluation
+- **Agent Observability** — Cloud Trace carries Google-generated spans for MCP tool calls and Model Armor evaluations traversing Agent Gateway; demonstrated end-to-end on 2026-08-31 (trace `442a845a56a86c50ee5d35be1891cdd7`); the current serving configuration routes partner calls through the in-process simulator (`CASERELAY_PARTNER_MCP=0`)
 - **ADK** — Agent Development Kit; reasoning engines, A2A, MCP integration
 - **A2A** — Agent-to-Agent communication; authenticated cross-engine routing
 - **Gemini 3.5 Flash** — all eight agents; model string `gemini-3.5-flash`
@@ -64,7 +64,7 @@ Agent Platform Sessions hold the operator chat transcript and every orchestrator
 - **Firestore** — named database `caserelay`; checkpoint storage, event log, audit trail
 - **Cloud Scheduler** — one-minute sweep for checkpoint due dates
 - **Pub/Sub** — authenticated push delivery to resume parked cases
-- **Cloud Trace** — MCP tool call spans, Model Armor guardrail evaluation spans
+- **Cloud Trace** — MCP tool call spans and Model Armor guardrail evaluation spans (demonstrated end-to-end; see trace `442a845a56a86c50ee5d35be1891cdd7`)
 - **Cloud Logging** — gateway request log
 - **Sensitive Data Protection** — Cloud DLP integration with Model Armor template
 
