@@ -416,8 +416,32 @@ class TestTryClose:
         assert workspace.try_close("CLOSE-11") is False
         assert workspace.get_case("CLOSE-11")["status"] == "monitoring"
 
+    def test_stale_guard_approval_does_not_block(self):
+        """Maya-like: guard fired during phase 8, nudge resolved education via followup.
+
+        The guard approval is stale because education is now completed through a
+        legitimate channel.  The approval is informational, not blocking.
+        """
+        _make_full_case("CLOSE-12", approvals=[{
+            "approval_id": "apr-guard-edu-stale",
+            "action_type": "commitment_guard",
+            "commitment_type": "education",
+            "decision": "pending",
+        }])
+        assert workspace.try_close("CLOSE-12") is True
+        assert workspace.get_case("CLOSE-12")["status"] == "closed"
+
+    def test_non_guard_pending_approval_still_blocks(self):
+        """A pending escalation blocks closure even if all commitments complete."""
+        _make_full_case("CLOSE-13", approvals=[{
+            "approval_id": "apr-esc-1",
+            "action_type": "escalation",
+            "decision": "pending",
+        }])
+        assert workspace.try_close("CLOSE-13") is False
+
     def test_idempotent_on_already_closed(self):
         """Calling try_close on an already-closed case returns False, doesn't error."""
-        _make_full_case("CLOSE-12")
-        assert workspace.try_close("CLOSE-12") is True
-        assert workspace.try_close("CLOSE-12") is False
+        _make_full_case("CLOSE-14")
+        assert workspace.try_close("CLOSE-14") is True
+        assert workspace.try_close("CLOSE-14") is False

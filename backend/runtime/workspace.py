@@ -367,7 +367,12 @@ class Workspace:
 
         Returns True if the case was closed, False if any condition blocked it:
         case not in ``monitoring``, a commitment not ``completed``, or a pending
-        approval of any kind (guard refusal, quarantine escalation, activation gate).
+        approval that still blocks progress.
+
+        A guard refusal approval for a commitment that has since been resolved
+        through a legitimate channel (e.g. ``nudge_overdue``) is stale — the
+        commitment is completed and the refusal is informational.  Only guard
+        approvals whose commitment is still blocked count as blocking.
         """
         with self._lock_for(case_id):
             self.load(case_id)
@@ -375,11 +380,17 @@ class Workspace:
             if not case or case.get("status") != "monitoring":
                 return False
 
-            states = [row["status"] for row in self.commitments.get(case_id, [])]
-            if not states or not all(s == "completed" for s in states):
+            rows = self.commitments.get(case_id, [])
+            if not rows or not all(r["status"] == "completed" for r in rows):
                 return False
 
-            if any(a.get("decision") == "pending" for a in self.approvals.get(case_id, [])):
+            completed_types = {r["type"] for r in rows}
+            for a in self.approvals.get(case_id, []):
+                if a.get("decision") != "pending":
+                    continue
+                if (a.get("action_type") == "commitment_guard"
+                        and a.get("commitment_type") in completed_types):
+                    continue
                 return False
 
             assert_transition(case["status"], "closed")
