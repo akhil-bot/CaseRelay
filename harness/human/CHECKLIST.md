@@ -1,13 +1,13 @@
 # Things the loop cannot do
 
-Four items. None takes long, two of them are pass/fail for the submission, and the harness will not
-attempt any of them.
+None of these takes long, repository visibility is pass/fail for the submission, and the harness
+will not attempt any of them.
 
 ## Before the loop runs
 
-- [ ] **Make the repository visible.** `github.com/akhil-bot/CaseRelay` currently returns HTTP 404
-      to an unauthenticated visitor, so there is no repo for a judge to open. Either make it public,
-      or share it with **both** `testing@devpost.com` and `cloudhackathons@google.com`.
+- [ ] **Make the repository visible.** Open `github.com/akhil-bot/CaseRelay` signed out; an HTTP 404
+      means there is no repo for a judge to open. Either make it public, or share it with **both**
+      `testing@devpost.com` and `cloudhackathons@google.com`.
       *This is pass/fail, not scoring — nothing else in the plan matters if it stays private.*
 
 - [ ] **Confirm gcloud is authenticated to the right project**, or the cloud tasks (`t11.5`,

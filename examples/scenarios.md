@@ -49,7 +49,7 @@ runs it should find this section first.
 |---|---|
 | **diego** | The SIS returns `enrollment_found: false` and the education specialist may still close the commitment. That is the hallucination the scenario surfaces — but nothing in the activity feed identifies the false basis, and **neither Model Armor nor the gateway caught it.** It is evaluation fodder for GEAP Agent Evaluation HALLUCINATION scoring, not a visible guardrail. |
 | **ellis** | Claims a duplicate callback is discarded by idempotency logic. The `duplicate` branch in the partner simulator is a no-op that falls through to the normal reply, so the callback only ever arrives once and the idempotency path is never reached. The claimed behaviour was not observed. |
-| **amara** | Claims three staggered deadlines across several weeks with memory carried across sessions. The stagger itself is real and persisted — three checkpoints were verified asleep with due dates four, eleven and eighteen days out — but all five partners answer at fan-out, so there is no ladder to watch and nothing to show without waiting five weeks. A limitation of the demonstration, not a defect in the code. |
+| **amara** | Claims three staggered deadlines across several weeks with memory carried across sessions. The stagger itself is real and persisted — three checkpoints were verified asleep with due dates four, eleven and eighteen days out — but all five partners answer at fan-out, so there is no ladder to watch and nothing to show without waiting out the eighteen days to the last checkpoint. A limitation of the demonstration, not a defect in the code. |
 
 Full captured evidence for every row above — Firestore documents, Cloud Logging output, Agent
 Gateway request logs, Cloud Trace waterfalls, Memory Bank contents, and the console path for each —
@@ -64,10 +64,9 @@ is in [../docs/scenario-showcase.md](../docs/scenario-showcase.md). The three co
 ### `due_in` must be short
 
 This is not a commitment deadline. It is the window across which the five per-commitment
-checkpoints are spread, at `now + due_in × (i+1)/5`, computed during the checkpoint phase. The wake
-phase asks for already-due checkpoints seven to twelve seconds later.
+checkpoints are spread, at `now + due_in × (i+1)/5`, computed during the checkpoint phase.
 
-At `10s` the earliest checkpoint is due at +2s; the sweep fires it in the next sweep cycle and the resumed run reaches the wake, quarantine, follow-up and memory phases shortly after. At `60s` the checkpoints come due a minute after creation — the run that wrote them ends `suspended`, and a new run is started by the sweep when they fire. The arc still completes, but on camera you wait the full sweep interval (up to an hour) between run end and wake. Ten seconds is what makes a seventeen-day story fit in two minutes.
+At `10s` the earliest checkpoint is due at +2s; the sweep fires it in the next sweep cycle and the resumed run reaches the wake, quarantine, follow-up and memory phases shortly after. At `60s` the checkpoints come due a minute after creation — the run that wrote them ends `suspended`, and a new run is started by the sweep when they fire. The arc still completes, but on camera you wait the full sweep interval (up to an hour) between run end and wake. Ten seconds is what makes a seventeen-day story fit in a few minutes.
 
 Both example scripts default to `DUE_IN=10s`. Overriding it upward is the most common way to get a
 run that looks broken and is not.
@@ -88,11 +87,18 @@ prompt saying a supervisor signs off, the model approved its own work anyway.
 
 ## What is compressed, and what that costs
 
-Because the deadline window is squeezed into seconds, the wake phase runs inside the same run that
-set the checkpoint. **Nothing in a compressed run is woken autonomously by Cloud Scheduler** — the
-hourly Pub/Sub sweep (`0 * * * *`) is the real mechanism, and it is what runs the uncompressed case, but it
-is not what a two-minute demo shows. Read a compressed run as proof that the *ladder* works, not
-that the *timer* does.
+`due_in` compresses the deadlines, not the execution path. The checkpoint phase always ends its
+run — `backend/api/main.py` breaks out of the phase engine and records the run `suspended` unless
+the run was itself started by a sweep — so the wake is always a **new run with a new run id**,
+whatever `due_in` was set to. What compression changes is only how long the checkpoints sit in the
+future before they are due.
+
+What it costs is the wait, and the wait is where the two paths differ. On the deployed fleet the
+hourly Pub/Sub sweep (`0 * * * *`) is what finds the due checkpoints, so a compressed case still
+waits out whatever remains of the hour before it wakes — which is why a filmed run cannot show the
+sweep and the ladder in the same take. Locally there is no Pub/Sub at all, and
+[`local-maya-run.sh`](local-maya-run.sh) stands in for Scheduler by calling `/v1/workflows/sweep`
+and posting the push envelope itself.
 
 The timer has been observed separately: a Maya run ended on its checkpoints and a sweep restarted
 it with nobody at the keyboard.

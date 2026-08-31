@@ -1,0 +1,801 @@
+{
+  "claim": "Case CR-0831110100 was resumed from its durable checkpoints by the hourly Cloud Scheduler job caserelay-sweep, with no human action. The scheduler-published Pub/Sub message for the 12:00 UTC tick has scheduledTime 2026-08-31T12:00:35.692552Z; the control plane started resumed run 9b4a97203aad for the case at 2026-08-31T12:00:38.760070Z, 3.068s later, through the caserelay.pubsub_push handler on revision caserelay-control-plane-00103-siz.",
+  "interval_from_checkpoint_to_wake": {
+    "value": "roughly 57 minutes",
+    "bounded_range": "57m04s - 57m53s",
+    "why_bounded": "The checkpoint-write timestamp is not itself logged. It is bounded below by the activate call that started the run leg (2026-08-31T11:02:46.536649Z) and above by the end-of-run memory extraction (2026-08-31T11:03:35.303730Z). The wake at 12:00:38.760070Z is therefore between 57m04s and 57m53s after the checkpoint was written. No more precise figure is claimed."
+  },
+  "caveat_scheduler_log_ordering": "The Cloud Scheduler AttemptStarted/AttemptFinished entries for this tick carry log timestamps of 2026-08-31T12:00:42.42Z and 12:00:42.45Z - AFTER the wake at 12:00:38.760070Z. That is expected: those execution records are written once the publish completes, so their log timestamps lag the actual publish. The causal ordering must be read off scheduledTime (12:00:35.692552Z), which is carried inside the AttemptStarted payload and is the time the tick fired. A reader who compares only the log timestamps will wrongly conclude the ordering is impossible.",
+  "notes": [
+    "The case was deleted at 2026-08-31T17:25:29Z (DELETE entry included below), so Cloud Logging is the only remaining record of this wake, and it ages out of log retention. These entries were captured on 2026-09-01 for that reason.",
+    "The previous hourly tick has scheduledTime 2026-08-31T11:00:31.207755Z, which is before the case's run even started (11:01:17Z), so the 12:00 tick is the first sweep that could have resumed it.",
+    "The wake fired workflow wf-CR-0831110100-legal. While run 9b4a97203aad held the case, the four sibling checkpoint wakes were nacked so Pub/Sub would retry them; after the run finished they were acked as 'checkpoint already completed' at 12:02:22-12:02:28Z.",
+    "Redaction: httpRequest.remoteIp on the operator's own API calls has been replaced with '[redacted-operator-ip]' (residential IP of the person driving the demo). Nothing else was removed. No bearer tokens, Authorization headers, OIDC/JWT tokens, signed URLs, API keys or personal email addresses appear in these entries - the Pub/Sub push OIDC token is not written to logs."
+  ],
+  "queries": [
+    "gcloud logging read 'resource.labels.service_name=\"caserelay-control-plane\" AND \"CR-0831110100\"' --project=caserelay --limit=200 --freshness=7d --format=json",
+    "gcloud logging read 'resource.type=\"cloud_scheduler_job\" AND resource.labels.job_id=\"caserelay-sweep\"' --project=caserelay --limit=50 --freshness=7d --format=json",
+    "gcloud scheduler jobs describe caserelay-sweep --location=us-central1 --project=caserelay --format=json"
+  ],
+  "scheduler_job": {
+    "description": "Triggers the CaseRelay workflow sweep hourly",
+    "lastAttemptTime": "2026-08-31T22:00:48.631307Z",
+    "name": "projects/caserelay/locations/us-central1/jobs/caserelay-sweep",
+    "pubsubTarget": {
+      "data": "eyJhY3Rpb24iOiJzd2VlcCJ9",
+      "topicName": "projects/caserelay/topics/caserelay-events"
+    },
+    "retryConfig": {
+      "maxBackoffDuration": "3600s",
+      "maxDoublings": 5,
+      "maxRetryDuration": "0s",
+      "minBackoffDuration": "5s"
+    },
+    "schedule": "0 * * * *",
+    "scheduleTime": "2026-08-31T23:00:02.362595Z",
+    "state": "ENABLED",
+    "status": {},
+    "timeZone": "Etc/UTC",
+    "userUpdateTime": "2026-08-31T08:14:33.983081Z"
+  },
+  "scheduler_log_entries": [
+    {
+      "insertId": "1bhrf6bf41i0w9",
+      "jsonPayload": {
+        "@type": "type.googleapis.com/google.cloud.scheduler.logging.AttemptFinished",
+        "jobName": "projects/caserelay/locations/us-central1/jobs/caserelay-sweep",
+        "pubsubTopic": "projects/caserelay/topics/caserelay-events",
+        "targetType": "PUB_SUB"
+      },
+      "logName": "projects/caserelay/logs/cloudscheduler.googleapis.com%2Fexecutions",
+      "receiveTimestamp": "2026-08-31T11:00:35.034108277Z",
+      "resource": {
+        "labels": {
+          "job_id": "caserelay-sweep",
+          "location": "us-central1",
+          "project_id": "caserelay"
+        },
+        "type": "cloud_scheduler_job"
+      },
+      "severity": "INFO",
+      "timestamp": "2026-08-31T11:00:35.034108277Z"
+    },
+    {
+      "insertId": "lnelecf3hx8hs",
+      "jsonPayload": {
+        "@type": "type.googleapis.com/google.cloud.scheduler.logging.AttemptStarted",
+        "jobName": "projects/caserelay/locations/us-central1/jobs/caserelay-sweep",
+        "pubsubTopic": "projects/caserelay/topics/caserelay-events",
+        "scheduledTime": "2026-08-31T11:00:31.207755Z",
+        "targetType": "PUB_SUB"
+      },
+      "logName": "projects/caserelay/logs/cloudscheduler.googleapis.com%2Fexecutions",
+      "receiveTimestamp": "2026-08-31T11:00:35.249313752Z",
+      "resource": {
+        "labels": {
+          "job_id": "caserelay-sweep",
+          "location": "us-central1",
+          "project_id": "caserelay"
+        },
+        "type": "cloud_scheduler_job"
+      },
+      "severity": "INFO",
+      "timestamp": "2026-08-31T11:00:35.249313752Z"
+    },
+    {
+      "insertId": "ge2jn5f2mfxbb",
+      "jsonPayload": {
+        "@type": "type.googleapis.com/google.cloud.scheduler.logging.AttemptStarted",
+        "jobName": "projects/caserelay/locations/us-central1/jobs/caserelay-sweep",
+        "pubsubTopic": "projects/caserelay/topics/caserelay-events",
+        "scheduledTime": "2026-08-31T12:00:35.692552Z",
+        "targetType": "PUB_SUB"
+      },
+      "logName": "projects/caserelay/logs/cloudscheduler.googleapis.com%2Fexecutions",
+      "receiveTimestamp": "2026-08-31T12:00:42.428324896Z",
+      "resource": {
+        "labels": {
+          "job_id": "caserelay-sweep",
+          "location": "us-central1",
+          "project_id": "caserelay"
+        },
+        "type": "cloud_scheduler_job"
+      },
+      "severity": "INFO",
+      "timestamp": "2026-08-31T12:00:42.428324896Z"
+    },
+    {
+      "insertId": "z9k95jf3ch4z3",
+      "jsonPayload": {
+        "@type": "type.googleapis.com/google.cloud.scheduler.logging.AttemptFinished",
+        "jobName": "projects/caserelay/locations/us-central1/jobs/caserelay-sweep",
+        "pubsubTopic": "projects/caserelay/topics/caserelay-events",
+        "targetType": "PUB_SUB"
+      },
+      "logName": "projects/caserelay/logs/cloudscheduler.googleapis.com%2Fexecutions",
+      "receiveTimestamp": "2026-08-31T12:00:42.456461342Z",
+      "resource": {
+        "labels": {
+          "job_id": "caserelay-sweep",
+          "location": "us-central1",
+          "project_id": "caserelay"
+        },
+        "type": "cloud_scheduler_job"
+      },
+      "severity": "INFO",
+      "timestamp": "2026-08-31T12:00:42.456461342Z"
+    }
+  ],
+  "control_plane_log_entries": [
+    {
+      "httpRequest": {
+        "latency": "0.124258618s",
+        "protocol": "HTTP/1.1",
+        "remoteIp": "[redacted-operator-ip]",
+        "requestMethod": "POST",
+        "requestSize": "900",
+        "requestUrl": "https://caserelay-control-plane-6nwo7o4bbq-uc.a.run.app/v1/cases/CR-0831110100/runs",
+        "responseSize": "168",
+        "serverIp": "34.143.73.2",
+        "status": 202,
+        "userAgent": "curl/8.7.1"
+      },
+      "insertId": "6a955efd000aff2c1c610dd6",
+      "labels": {
+        "instanceId": "00a41e8c1d6c076cea7638751bc04fadc28075cbf72dfa69ee854d035880d0fc9b5497a83255444962955c2fda9e42e3841f0eff6ae1e864f8261511e739d91a80842fa3ea5158c63f7dfcccb06bae8c"
+      },
+      "logName": "projects/caserelay/logs/run.googleapis.com%2Frequests",
+      "receiveTimestamp": "2026-08-31T11:01:17.726667080Z",
+      "resource": {
+        "labels": {
+          "configuration_name": "caserelay-control-plane",
+          "location": "us-central1",
+          "project_id": "caserelay",
+          "revision_name": "caserelay-control-plane-00103-siz",
+          "service_name": "caserelay-control-plane"
+        },
+        "type": "cloud_run_revision"
+      },
+      "severity": "INFO",
+      "spanId": "68540d20701a942f",
+      "timestamp": "2026-08-31T11:01:17.587571Z",
+      "trace": "projects/caserelay/traces/5346b34108eb667cc049fea0ace3f1b6",
+      "traceSampled": true
+    },
+    {
+      "insertId": "6a955efd000af601d467b513",
+      "labels": {
+        "instanceId": "00a41e8c1d6c076cea7638751bc04fadc28075cbf72dfa69ee854d035880d0fc9b5497a83255444962955c2fda9e42e3841f0eff6ae1e864f8261511e739d91a80842fa3ea5158c63f7dfcccb06bae8c"
+      },
+      "logName": "projects/caserelay/logs/run.googleapis.com%2Fstdout",
+      "receiveTimestamp": "2026-08-31T11:01:17.725602637Z",
+      "resource": {
+        "labels": {
+          "configuration_name": "caserelay-control-plane",
+          "location": "us-central1",
+          "project_id": "caserelay",
+          "revision_name": "caserelay-control-plane-00103-siz",
+          "service_name": "caserelay-control-plane"
+        },
+        "type": "cloud_run_revision"
+      },
+      "textPayload": "INFO:     169.254.169.126:43020 - \"POST /v1/cases/CR-0831110100/runs HTTP/1.1\" 202 Accepted",
+      "timestamp": "2026-08-31T11:01:17.718337Z"
+    },
+    {
+      "httpRequest": {
+        "latency": "0.489425611s",
+        "protocol": "HTTP/1.1",
+        "remoteIp": "[redacted-operator-ip]",
+        "requestMethod": "POST",
+        "requestSize": "933",
+        "requestUrl": "https://caserelay-control-plane-6nwo7o4bbq-uc.a.run.app/v1/cases/CR-0831110100/activate",
+        "responseSize": "149",
+        "serverIp": "34.143.72.2",
+        "status": 200,
+        "userAgent": "curl/8.7.1"
+      },
+      "insertId": "6a955f5700008b0201a842ff",
+      "labels": {
+        "instanceId": "00a41e8c1d6c076cea7638751bc04fadc28075cbf72dfa69ee854d035880d0fc9b5497a83255444962955c2fda9e42e3841f0eff6ae1e864f8261511e739d91a80842fa3ea5158c63f7dfcccb06bae8c"
+      },
+      "logName": "projects/caserelay/logs/run.googleapis.com%2Frequests",
+      "receiveTimestamp": "2026-08-31T11:02:47.328771015Z",
+      "resource": {
+        "labels": {
+          "configuration_name": "caserelay-control-plane",
+          "location": "us-central1",
+          "project_id": "caserelay",
+          "revision_name": "caserelay-control-plane-00103-siz",
+          "service_name": "caserelay-control-plane"
+        },
+        "type": "cloud_run_revision"
+      },
+      "severity": "INFO",
+      "spanId": "26e90029c12dd033",
+      "timestamp": "2026-08-31T11:02:46.536649Z",
+      "trace": "projects/caserelay/traces/4afba26541b7571599c3d57b62d622cd",
+      "traceSampled": true
+    },
+    {
+      "insertId": "6a955f57000089b97bacbd8b",
+      "labels": {
+        "instanceId": "00a41e8c1d6c076cea7638751bc04fadc28075cbf72dfa69ee854d035880d0fc9b5497a83255444962955c2fda9e42e3841f0eff6ae1e864f8261511e739d91a80842fa3ea5158c63f7dfcccb06bae8c"
+      },
+      "logName": "projects/caserelay/logs/run.googleapis.com%2Fstdout",
+      "receiveTimestamp": "2026-08-31T11:02:47.331896525Z",
+      "resource": {
+        "labels": {
+          "configuration_name": "caserelay-control-plane",
+          "location": "us-central1",
+          "project_id": "caserelay",
+          "revision_name": "caserelay-control-plane-00103-siz",
+          "service_name": "caserelay-control-plane"
+        },
+        "type": "cloud_run_revision"
+      },
+      "textPayload": "INFO:     169.254.169.126:61712 - \"POST /v1/cases/CR-0831110100/activate HTTP/1.1\" 200 OK",
+      "timestamp": "2026-08-31T11:02:47.035257Z"
+    },
+    {
+      "insertId": "6a955f870004a272e92a0522",
+      "labels": {
+        "instanceId": "00a41e8c1d6c076cea7638751bc04fadc28075cbf72dfa69ee854d035880d0fc9b5497a83255444962955c2fda9e42e3841f0eff6ae1e864f8261511e739d91a80842fa3ea5158c63f7dfcccb06bae8c"
+      },
+      "logName": "projects/caserelay/logs/run.googleapis.com%2Fstderr",
+      "receiveTimestamp": "2026-08-31T11:03:35.556238343Z",
+      "resource": {
+        "labels": {
+          "configuration_name": "caserelay-control-plane",
+          "location": "us-central1",
+          "project_id": "caserelay",
+          "revision_name": "caserelay-control-plane-00103-siz",
+          "service_name": "caserelay-control-plane"
+        },
+        "type": "cloud_run_revision"
+      },
+      "textPayload": "INFO backend.memory.platform: Extracted memories from session (case scope: CR-0831110100)",
+      "timestamp": "2026-08-31T11:03:35.303730Z"
+    },
+    {
+      "insertId": "6a956ce6000b99065ca49d2f",
+      "labels": {
+        "instanceId": "00a41e8c1d6c076cea7638751bc04fadc28075cbf72dfa69ee854d035880d0fc9b5497a83255444962955c2fda9e42e3841f0eff6ae1e864f8261511e739d91a80842fa3ea5158c63f7dfcccb06bae8c"
+      },
+      "logName": "projects/caserelay/logs/run.googleapis.com%2Fstderr",
+      "receiveTimestamp": "2026-08-31T12:00:38.826672091Z",
+      "resource": {
+        "labels": {
+          "configuration_name": "caserelay-control-plane",
+          "location": "us-central1",
+          "project_id": "caserelay",
+          "revision_name": "caserelay-control-plane-00103-siz",
+          "service_name": "caserelay-control-plane"
+        },
+        "type": "cloud_run_revision"
+      },
+      "textPayload": "INFO caserelay.pubsub_push: starting resumed run 9b4a97203aad for case CR-0831110100 (wake wf-CR-0831110100-legal)",
+      "timestamp": "2026-08-31T12:00:38.760070Z"
+    },
+    {
+      "insertId": "6a956ce6000db24eb3202615",
+      "labels": {
+        "instanceId": "00a41e8c1d6c076cea7638751bc04fadc28075cbf72dfa69ee854d035880d0fc9b5497a83255444962955c2fda9e42e3841f0eff6ae1e864f8261511e739d91a80842fa3ea5158c63f7dfcccb06bae8c"
+      },
+      "logName": "projects/caserelay/logs/run.googleapis.com%2Fstderr",
+      "receiveTimestamp": "2026-08-31T12:00:39.155913272Z",
+      "resource": {
+        "labels": {
+          "configuration_name": "caserelay-control-plane",
+          "location": "us-central1",
+          "project_id": "caserelay",
+          "revision_name": "caserelay-control-plane-00103-siz",
+          "service_name": "caserelay-control-plane"
+        },
+        "type": "cloud_run_revision"
+      },
+      "textPayload": "INFO caserelay.pubsub_push: wake for CR-0831110100 nacked \u2014 run 9b4a97203aad active, Pub/Sub will retry",
+      "timestamp": "2026-08-31T12:00:38.897614Z"
+    },
+    {
+      "insertId": "6a956ce700001761c14c9c72",
+      "labels": {
+        "instanceId": "00a41e8c1d6c076cea7638751bc04fadc28075cbf72dfa69ee854d035880d0fc9b5497a83255444962955c2fda9e42e3841f0eff6ae1e864f8261511e739d91a80842fa3ea5158c63f7dfcccb06bae8c"
+      },
+      "logName": "projects/caserelay/logs/run.googleapis.com%2Fstderr",
+      "receiveTimestamp": "2026-08-31T12:00:39.155913272Z",
+      "resource": {
+        "labels": {
+          "configuration_name": "caserelay-control-plane",
+          "location": "us-central1",
+          "project_id": "caserelay",
+          "revision_name": "caserelay-control-plane-00103-siz",
+          "service_name": "caserelay-control-plane"
+        },
+        "type": "cloud_run_revision"
+      },
+      "textPayload": "INFO caserelay.pubsub_push: wake for CR-0831110100 nacked \u2014 run 9b4a97203aad active, Pub/Sub will retry",
+      "timestamp": "2026-08-31T12:00:39.005985Z"
+    },
+    {
+      "insertId": "6a956ce70001b444430545b8",
+      "labels": {
+        "instanceId": "00a41e8c1d6c076cea7638751bc04fadc28075cbf72dfa69ee854d035880d0fc9b5497a83255444962955c2fda9e42e3841f0eff6ae1e864f8261511e739d91a80842fa3ea5158c63f7dfcccb06bae8c"
+      },
+      "logName": "projects/caserelay/logs/run.googleapis.com%2Fstderr",
+      "receiveTimestamp": "2026-08-31T12:00:39.155913272Z",
+      "resource": {
+        "labels": {
+          "configuration_name": "caserelay-control-plane",
+          "location": "us-central1",
+          "project_id": "caserelay",
+          "revision_name": "caserelay-control-plane-00103-siz",
+          "service_name": "caserelay-control-plane"
+        },
+        "type": "cloud_run_revision"
+      },
+      "textPayload": "INFO caserelay.pubsub_push: wake for CR-0831110100 nacked \u2014 run 9b4a97203aad active, Pub/Sub will retry",
+      "timestamp": "2026-08-31T12:00:39.111684Z"
+    },
+    {
+      "insertId": "6a956ce7000516061072d497",
+      "labels": {
+        "instanceId": "00a41e8c1d6c076cea7638751bc04fadc28075cbf72dfa69ee854d035880d0fc9b5497a83255444962955c2fda9e42e3841f0eff6ae1e864f8261511e739d91a80842fa3ea5158c63f7dfcccb06bae8c"
+      },
+      "logName": "projects/caserelay/logs/run.googleapis.com%2Fstderr",
+      "receiveTimestamp": "2026-08-31T12:00:39.490317646Z",
+      "resource": {
+        "labels": {
+          "configuration_name": "caserelay-control-plane",
+          "location": "us-central1",
+          "project_id": "caserelay",
+          "revision_name": "caserelay-control-plane-00103-siz",
+          "service_name": "caserelay-control-plane"
+        },
+        "type": "cloud_run_revision"
+      },
+      "textPayload": "INFO caserelay.pubsub_push: wake for CR-0831110100 nacked \u2014 run 9b4a97203aad active, Pub/Sub will retry",
+      "timestamp": "2026-08-31T12:00:39.333318Z"
+    },
+    {
+      "insertId": "6a956cf2000da5ecb491b99e",
+      "labels": {
+        "instanceId": "00a41e8c1d6c076cea7638751bc04fadc28075cbf72dfa69ee854d035880d0fc9b5497a83255444962955c2fda9e42e3841f0eff6ae1e864f8261511e739d91a80842fa3ea5158c63f7dfcccb06bae8c"
+      },
+      "logName": "projects/caserelay/logs/run.googleapis.com%2Fstderr",
+      "receiveTimestamp": "2026-08-31T12:00:51.172732807Z",
+      "resource": {
+        "labels": {
+          "configuration_name": "caserelay-control-plane",
+          "location": "us-central1",
+          "project_id": "caserelay",
+          "revision_name": "caserelay-control-plane-00103-siz",
+          "service_name": "caserelay-control-plane"
+        },
+        "type": "cloud_run_revision"
+      },
+      "textPayload": "INFO caserelay.pubsub_push: wake for CR-0831110100 nacked \u2014 run 9b4a97203aad active, Pub/Sub will retry",
+      "timestamp": "2026-08-31T12:00:50.894444Z"
+    },
+    {
+      "insertId": "6a956cf3000ce53e10d39447",
+      "labels": {
+        "instanceId": "00a41e8c1d6c076cea7638751bc04fadc28075cbf72dfa69ee854d035880d0fc9b5497a83255444962955c2fda9e42e3841f0eff6ae1e864f8261511e739d91a80842fa3ea5158c63f7dfcccb06bae8c"
+      },
+      "logName": "projects/caserelay/logs/run.googleapis.com%2Fstderr",
+      "receiveTimestamp": "2026-08-31T12:00:52.165982812Z",
+      "resource": {
+        "labels": {
+          "configuration_name": "caserelay-control-plane",
+          "location": "us-central1",
+          "project_id": "caserelay",
+          "revision_name": "caserelay-control-plane-00103-siz",
+          "service_name": "caserelay-control-plane"
+        },
+        "type": "cloud_run_revision"
+      },
+      "textPayload": "INFO caserelay.pubsub_push: wake for CR-0831110100 nacked \u2014 run 9b4a97203aad active, Pub/Sub will retry",
+      "timestamp": "2026-08-31T12:00:51.845118Z"
+    },
+    {
+      "insertId": "6a956cf4000d47a03251c560",
+      "labels": {
+        "instanceId": "00a41e8c1d6c076cea7638751bc04fadc28075cbf72dfa69ee854d035880d0fc9b5497a83255444962955c2fda9e42e3841f0eff6ae1e864f8261511e739d91a80842fa3ea5158c63f7dfcccb06bae8c"
+      },
+      "logName": "projects/caserelay/logs/run.googleapis.com%2Fstderr",
+      "receiveTimestamp": "2026-08-31T12:00:53.167769587Z",
+      "resource": {
+        "labels": {
+          "configuration_name": "caserelay-control-plane",
+          "location": "us-central1",
+          "project_id": "caserelay",
+          "revision_name": "caserelay-control-plane-00103-siz",
+          "service_name": "caserelay-control-plane"
+        },
+        "type": "cloud_run_revision"
+      },
+      "textPayload": "INFO caserelay.pubsub_push: wake for CR-0831110100 nacked \u2014 run 9b4a97203aad active, Pub/Sub will retry",
+      "timestamp": "2026-08-31T12:00:52.870304Z"
+    },
+    {
+      "insertId": "6a956cf6000d04d7a03b7b4c",
+      "labels": {
+        "instanceId": "00a41e8c1d6c076cea7638751bc04fadc28075cbf72dfa69ee854d035880d0fc9b5497a83255444962955c2fda9e42e3841f0eff6ae1e864f8261511e739d91a80842fa3ea5158c63f7dfcccb06bae8c"
+      },
+      "logName": "projects/caserelay/logs/run.googleapis.com%2Fstderr",
+      "receiveTimestamp": "2026-08-31T12:00:55.165249206Z",
+      "resource": {
+        "labels": {
+          "configuration_name": "caserelay-control-plane",
+          "location": "us-central1",
+          "project_id": "caserelay",
+          "revision_name": "caserelay-control-plane-00103-siz",
+          "service_name": "caserelay-control-plane"
+        },
+        "type": "cloud_run_revision"
+      },
+      "textPayload": "INFO caserelay.pubsub_push: wake for CR-0831110100 nacked \u2014 run 9b4a97203aad active, Pub/Sub will retry",
+      "timestamp": "2026-08-31T12:00:54.853207Z"
+    },
+    {
+      "insertId": "6a956d01000cd2bf903015dd",
+      "labels": {
+        "instanceId": "00a41e8c1d6c076cea7638751bc04fadc28075cbf72dfa69ee854d035880d0fc9b5497a83255444962955c2fda9e42e3841f0eff6ae1e864f8261511e739d91a80842fa3ea5158c63f7dfcccb06bae8c"
+      },
+      "logName": "projects/caserelay/logs/run.googleapis.com%2Fstderr",
+      "receiveTimestamp": "2026-08-31T12:01:06.174263516Z",
+      "resource": {
+        "labels": {
+          "configuration_name": "caserelay-control-plane",
+          "location": "us-central1",
+          "project_id": "caserelay",
+          "revision_name": "caserelay-control-plane-00103-siz",
+          "service_name": "caserelay-control-plane"
+        },
+        "type": "cloud_run_revision"
+      },
+      "textPayload": "INFO caserelay.pubsub_push: wake for CR-0831110100 nacked \u2014 run 9b4a97203aad active, Pub/Sub will retry",
+      "timestamp": "2026-08-31T12:01:05.840383Z"
+    },
+    {
+      "insertId": "6a956d01000dd29f4b96b187",
+      "labels": {
+        "instanceId": "00a41e8c1d6c076cea7638751bc04fadc28075cbf72dfa69ee854d035880d0fc9b5497a83255444962955c2fda9e42e3841f0eff6ae1e864f8261511e739d91a80842fa3ea5158c63f7dfcccb06bae8c"
+      },
+      "logName": "projects/caserelay/logs/run.googleapis.com%2Fstderr",
+      "receiveTimestamp": "2026-08-31T12:01:06.174263516Z",
+      "resource": {
+        "labels": {
+          "configuration_name": "caserelay-control-plane",
+          "location": "us-central1",
+          "project_id": "caserelay",
+          "revision_name": "caserelay-control-plane-00103-siz",
+          "service_name": "caserelay-control-plane"
+        },
+        "type": "cloud_run_revision"
+      },
+      "textPayload": "INFO caserelay.pubsub_push: wake for CR-0831110100 nacked \u2014 run 9b4a97203aad active, Pub/Sub will retry",
+      "timestamp": "2026-08-31T12:01:05.905887Z"
+    },
+    {
+      "insertId": "6a956d04000131d264d01966",
+      "labels": {
+        "instanceId": "00a41e8c1d6c076cea7638751bc04fadc28075cbf72dfa69ee854d035880d0fc9b5497a83255444962955c2fda9e42e3841f0eff6ae1e864f8261511e739d91a80842fa3ea5158c63f7dfcccb06bae8c"
+      },
+      "logName": "projects/caserelay/logs/run.googleapis.com%2Fstderr",
+      "receiveTimestamp": "2026-08-31T12:01:08.167652600Z",
+      "resource": {
+        "labels": {
+          "configuration_name": "caserelay-control-plane",
+          "location": "us-central1",
+          "project_id": "caserelay",
+          "revision_name": "caserelay-control-plane-00103-siz",
+          "service_name": "caserelay-control-plane"
+        },
+        "type": "cloud_run_revision"
+      },
+      "textPayload": "INFO caserelay.pubsub_push: wake for CR-0831110100 nacked \u2014 run 9b4a97203aad active, Pub/Sub will retry",
+      "timestamp": "2026-08-31T12:01:08.078290Z"
+    },
+    {
+      "insertId": "6a956d06000da8f45d05ce98",
+      "labels": {
+        "instanceId": "00a41e8c1d6c076cea7638751bc04fadc28075cbf72dfa69ee854d035880d0fc9b5497a83255444962955c2fda9e42e3841f0eff6ae1e864f8261511e739d91a80842fa3ea5158c63f7dfcccb06bae8c"
+      },
+      "logName": "projects/caserelay/logs/run.googleapis.com%2Fstderr",
+      "receiveTimestamp": "2026-08-31T12:01:11.168166082Z",
+      "resource": {
+        "labels": {
+          "configuration_name": "caserelay-control-plane",
+          "location": "us-central1",
+          "project_id": "caserelay",
+          "revision_name": "caserelay-control-plane-00103-siz",
+          "service_name": "caserelay-control-plane"
+        },
+        "type": "cloud_run_revision"
+      },
+      "textPayload": "INFO caserelay.pubsub_push: wake for CR-0831110100 nacked \u2014 run 9b4a97203aad active, Pub/Sub will retry",
+      "timestamp": "2026-08-31T12:01:10.895220Z"
+    },
+    {
+      "insertId": "6a956d16000ce078fa1f5807",
+      "labels": {
+        "instanceId": "00a41e8c1d6c076cea7638751bc04fadc28075cbf72dfa69ee854d035880d0fc9b5497a83255444962955c2fda9e42e3841f0eff6ae1e864f8261511e739d91a80842fa3ea5158c63f7dfcccb06bae8c"
+      },
+      "logName": "projects/caserelay/logs/run.googleapis.com%2Fstderr",
+      "receiveTimestamp": "2026-08-31T12:01:26.848244072Z",
+      "resource": {
+        "labels": {
+          "configuration_name": "caserelay-control-plane",
+          "location": "us-central1",
+          "project_id": "caserelay",
+          "revision_name": "caserelay-control-plane-00103-siz",
+          "service_name": "caserelay-control-plane"
+        },
+        "type": "cloud_run_revision"
+      },
+      "textPayload": "INFO caserelay.pubsub_push: wake for CR-0831110100 nacked \u2014 run 9b4a97203aad active, Pub/Sub will retry",
+      "timestamp": "2026-08-31T12:01:26.843896Z"
+    },
+    {
+      "insertId": "6a956d16000e5adeaf4ae411",
+      "labels": {
+        "instanceId": "00a41e8c1d6c076cea7638751bc04fadc28075cbf72dfa69ee854d035880d0fc9b5497a83255444962955c2fda9e42e3841f0eff6ae1e864f8261511e739d91a80842fa3ea5158c63f7dfcccb06bae8c"
+      },
+      "logName": "projects/caserelay/logs/run.googleapis.com%2Fstderr",
+      "receiveTimestamp": "2026-08-31T12:01:27.183984486Z",
+      "resource": {
+        "labels": {
+          "configuration_name": "caserelay-control-plane",
+          "location": "us-central1",
+          "project_id": "caserelay",
+          "revision_name": "caserelay-control-plane-00103-siz",
+          "service_name": "caserelay-control-plane"
+        },
+        "type": "cloud_run_revision"
+      },
+      "textPayload": "INFO caserelay.pubsub_push: wake for CR-0831110100 nacked \u2014 run 9b4a97203aad active, Pub/Sub will retry",
+      "timestamp": "2026-08-31T12:01:26.940766Z"
+    },
+    {
+      "insertId": "6a956d1a0001687a8c0cca1f",
+      "labels": {
+        "instanceId": "00a41e8c1d6c076cea7638751bc04fadc28075cbf72dfa69ee854d035880d0fc9b5497a83255444962955c2fda9e42e3841f0eff6ae1e864f8261511e739d91a80842fa3ea5158c63f7dfcccb06bae8c"
+      },
+      "logName": "projects/caserelay/logs/run.googleapis.com%2Fstderr",
+      "receiveTimestamp": "2026-08-31T12:01:30.182371228Z",
+      "resource": {
+        "labels": {
+          "configuration_name": "caserelay-control-plane",
+          "location": "us-central1",
+          "project_id": "caserelay",
+          "revision_name": "caserelay-control-plane-00103-siz",
+          "service_name": "caserelay-control-plane"
+        },
+        "type": "cloud_run_revision"
+      },
+      "textPayload": "INFO caserelay.pubsub_push: wake for CR-0831110100 nacked \u2014 run 9b4a97203aad active, Pub/Sub will retry",
+      "timestamp": "2026-08-31T12:01:30.092282Z"
+    },
+    {
+      "insertId": "6a956d1a000ab8eee0f7059e",
+      "labels": {
+        "instanceId": "00a41e8c1d6c076cea7638751bc04fadc28075cbf72dfa69ee854d035880d0fc9b5497a83255444962955c2fda9e42e3841f0eff6ae1e864f8261511e739d91a80842fa3ea5158c63f7dfcccb06bae8c"
+      },
+      "logName": "projects/caserelay/logs/run.googleapis.com%2Fstderr",
+      "receiveTimestamp": "2026-08-31T12:01:30.850265974Z",
+      "resource": {
+        "labels": {
+          "configuration_name": "caserelay-control-plane",
+          "location": "us-central1",
+          "project_id": "caserelay",
+          "revision_name": "caserelay-control-plane-00103-siz",
+          "service_name": "caserelay-control-plane"
+        },
+        "type": "cloud_run_revision"
+      },
+      "textPayload": "INFO caserelay.pubsub_push: wake for CR-0831110100 nacked \u2014 run 9b4a97203aad active, Pub/Sub will retry",
+      "timestamp": "2026-08-31T12:01:30.702702Z"
+    },
+    {
+      "insertId": "6a956d2f000b56d11d963451",
+      "labels": {
+        "instanceId": "00a41e8c1d6c076cea7638751bc04fadc28075cbf72dfa69ee854d035880d0fc9b5497a83255444962955c2fda9e42e3841f0eff6ae1e864f8261511e739d91a80842fa3ea5158c63f7dfcccb06bae8c"
+      },
+      "logName": "projects/caserelay/logs/run.googleapis.com%2Fstderr",
+      "receiveTimestamp": "2026-08-31T12:01:52.016557705Z",
+      "resource": {
+        "labels": {
+          "configuration_name": "caserelay-control-plane",
+          "location": "us-central1",
+          "project_id": "caserelay",
+          "revision_name": "caserelay-control-plane-00103-siz",
+          "service_name": "caserelay-control-plane"
+        },
+        "type": "cloud_run_revision"
+      },
+      "textPayload": "INFO caserelay.pubsub_push: wake for CR-0831110100 nacked \u2014 run 9b4a97203aad active, Pub/Sub will retry",
+      "timestamp": "2026-08-31T12:01:51.743121Z"
+    },
+    {
+      "insertId": "6a956d30000b1473484ef9fb",
+      "labels": {
+        "instanceId": "00a41e8c1d6c076cea7638751bc04fadc28075cbf72dfa69ee854d035880d0fc9b5497a83255444962955c2fda9e42e3841f0eff6ae1e864f8261511e739d91a80842fa3ea5158c63f7dfcccb06bae8c"
+      },
+      "logName": "projects/caserelay/logs/run.googleapis.com%2Fstderr",
+      "receiveTimestamp": "2026-08-31T12:01:53.011717127Z",
+      "resource": {
+        "labels": {
+          "configuration_name": "caserelay-control-plane",
+          "location": "us-central1",
+          "project_id": "caserelay",
+          "revision_name": "caserelay-control-plane-00103-siz",
+          "service_name": "caserelay-control-plane"
+        },
+        "type": "cloud_run_revision"
+      },
+      "textPayload": "INFO caserelay.pubsub_push: wake for CR-0831110100 nacked \u2014 run 9b4a97203aad active, Pub/Sub will retry",
+      "timestamp": "2026-08-31T12:01:52.726131Z"
+    },
+    {
+      "insertId": "6a956d30000eae1add9a0055",
+      "labels": {
+        "instanceId": "00a41e8c1d6c076cea7638751bc04fadc28075cbf72dfa69ee854d035880d0fc9b5497a83255444962955c2fda9e42e3841f0eff6ae1e864f8261511e739d91a80842fa3ea5158c63f7dfcccb06bae8c"
+      },
+      "logName": "projects/caserelay/logs/run.googleapis.com%2Fstderr",
+      "receiveTimestamp": "2026-08-31T12:01:53.011717127Z",
+      "resource": {
+        "labels": {
+          "configuration_name": "caserelay-control-plane",
+          "location": "us-central1",
+          "project_id": "caserelay",
+          "revision_name": "caserelay-control-plane-00103-siz",
+          "service_name": "caserelay-control-plane"
+        },
+        "type": "cloud_run_revision"
+      },
+      "textPayload": "INFO caserelay.pubsub_push: wake for CR-0831110100 nacked \u2014 run 9b4a97203aad active, Pub/Sub will retry",
+      "timestamp": "2026-08-31T12:01:52.962074Z"
+    },
+    {
+      "insertId": "6a956d33000ade9ac22e0b3a",
+      "labels": {
+        "instanceId": "00a41e8c1d6c076cea7638751bc04fadc28075cbf72dfa69ee854d035880d0fc9b5497a83255444962955c2fda9e42e3841f0eff6ae1e864f8261511e739d91a80842fa3ea5158c63f7dfcccb06bae8c"
+      },
+      "logName": "projects/caserelay/logs/run.googleapis.com%2Fstderr",
+      "receiveTimestamp": "2026-08-31T12:01:56.009998091Z",
+      "resource": {
+        "labels": {
+          "configuration_name": "caserelay-control-plane",
+          "location": "us-central1",
+          "project_id": "caserelay",
+          "revision_name": "caserelay-control-plane-00103-siz",
+          "service_name": "caserelay-control-plane"
+        },
+        "type": "cloud_run_revision"
+      },
+      "textPayload": "INFO caserelay.pubsub_push: wake for CR-0831110100 nacked \u2014 run 9b4a97203aad active, Pub/Sub will retry",
+      "timestamp": "2026-08-31T12:01:55.712346Z"
+    },
+    {
+      "insertId": "6a956d39000d8de6d6f595c2",
+      "labels": {
+        "instanceId": "00a41e8c1d6c076cea7638751bc04fadc28075cbf72dfa69ee854d035880d0fc9b5497a83255444962955c2fda9e42e3841f0eff6ae1e864f8261511e739d91a80842fa3ea5158c63f7dfcccb06bae8c"
+      },
+      "logName": "projects/caserelay/logs/run.googleapis.com%2Fstderr",
+      "receiveTimestamp": "2026-08-31T12:02:02.003898459Z",
+      "resource": {
+        "labels": {
+          "configuration_name": "caserelay-control-plane",
+          "location": "us-central1",
+          "project_id": "caserelay",
+          "revision_name": "caserelay-control-plane-00103-siz",
+          "service_name": "caserelay-control-plane"
+        },
+        "type": "cloud_run_revision"
+      },
+      "textPayload": "INFO backend.memory.platform: Extracted memories from session (case scope: CR-0831110100)",
+      "timestamp": "2026-08-31T12:02:01.888294Z"
+    },
+    {
+      "insertId": "6a956d4e00021401899f2845",
+      "labels": {
+        "instanceId": "00a41e8c1d6c076cea7638751bc04fadc28075cbf72dfa69ee854d035880d0fc9b5497a83255444962955c2fda9e42e3841f0eff6ae1e864f8261511e739d91a80842fa3ea5158c63f7dfcccb06bae8c"
+      },
+      "logName": "projects/caserelay/logs/run.googleapis.com%2Fstderr",
+      "receiveTimestamp": "2026-08-31T12:02:22.147974635Z",
+      "resource": {
+        "labels": {
+          "configuration_name": "caserelay-control-plane",
+          "location": "us-central1",
+          "project_id": "caserelay",
+          "revision_name": "caserelay-control-plane-00103-siz",
+          "service_name": "caserelay-control-plane"
+        },
+        "type": "cloud_run_revision"
+      },
+      "textPayload": "INFO caserelay.pubsub_push: wake for CR-0831110100/wf-CR-0831110100-education acked \u2014 checkpoint already completed",
+      "timestamp": "2026-08-31T12:02:22.136193Z"
+    },
+    {
+      "insertId": "6a956d4e0004038450b20952",
+      "labels": {
+        "instanceId": "00a41e8c1d6c076cea7638751bc04fadc28075cbf72dfa69ee854d035880d0fc9b5497a83255444962955c2fda9e42e3841f0eff6ae1e864f8261511e739d91a80842fa3ea5158c63f7dfcccb06bae8c"
+      },
+      "logName": "projects/caserelay/logs/run.googleapis.com%2Fstderr",
+      "receiveTimestamp": "2026-08-31T12:02:22.479710873Z",
+      "resource": {
+        "labels": {
+          "configuration_name": "caserelay-control-plane",
+          "location": "us-central1",
+          "project_id": "caserelay",
+          "revision_name": "caserelay-control-plane-00103-siz",
+          "service_name": "caserelay-control-plane"
+        },
+        "type": "cloud_run_revision"
+      },
+      "textPayload": "INFO caserelay.pubsub_push: wake for CR-0831110100/wf-CR-0831110100-health acked \u2014 checkpoint already completed",
+      "timestamp": "2026-08-31T12:02:22.263044Z"
+    },
+    {
+      "insertId": "6a956d4f00019f670935a559",
+      "labels": {
+        "instanceId": "00a41e8c1d6c076cea7638751bc04fadc28075cbf72dfa69ee854d035880d0fc9b5497a83255444962955c2fda9e42e3841f0eff6ae1e864f8261511e739d91a80842fa3ea5158c63f7dfcccb06bae8c"
+      },
+      "logName": "projects/caserelay/logs/run.googleapis.com%2Fstderr",
+      "receiveTimestamp": "2026-08-31T12:02:23.147450793Z",
+      "resource": {
+        "labels": {
+          "configuration_name": "caserelay-control-plane",
+          "location": "us-central1",
+          "project_id": "caserelay",
+          "revision_name": "caserelay-control-plane-00103-siz",
+          "service_name": "caserelay-control-plane"
+        },
+        "type": "cloud_run_revision"
+      },
+      "textPayload": "INFO caserelay.pubsub_push: wake for CR-0831110100/wf-CR-0831110100-family_services acked \u2014 checkpoint already completed",
+      "timestamp": "2026-08-31T12:02:23.106343Z"
+    },
+    {
+      "insertId": "6a956d540003bed6a9d91cd1",
+      "labels": {
+        "instanceId": "00a41e8c1d6c076cea7638751bc04fadc28075cbf72dfa69ee854d035880d0fc9b5497a83255444962955c2fda9e42e3841f0eff6ae1e864f8261511e739d91a80842fa3ea5158c63f7dfcccb06bae8c"
+      },
+      "logName": "projects/caserelay/logs/run.googleapis.com%2Fstderr",
+      "receiveTimestamp": "2026-08-31T12:02:28.476972302Z",
+      "resource": {
+        "labels": {
+          "configuration_name": "caserelay-control-plane",
+          "location": "us-central1",
+          "project_id": "caserelay",
+          "revision_name": "caserelay-control-plane-00103-siz",
+          "service_name": "caserelay-control-plane"
+        },
+        "type": "cloud_run_revision"
+      },
+      "textPayload": "INFO caserelay.pubsub_push: wake for CR-0831110100/wf-CR-0831110100-shelter acked \u2014 checkpoint already completed",
+      "timestamp": "2026-08-31T12:02:28.245462Z"
+    },
+    {
+      "insertId": "6a95b909000d61e04f844851",
+      "labels": {
+        "instanceId": "00a41e8c1d0e30930d4c50669ccdbe189a510c1a26fa5031747e11d17637d0b3fbaac9de509171d4cd1a66b5e7bd1322b3d0df12e6f9ef8d680376c4478e45186c0bfcee76e30f2c6d55ae94414e3b"
+      },
+      "logName": "projects/caserelay/logs/run.googleapis.com%2Fstdout",
+      "receiveTimestamp": "2026-08-31T17:25:30.012965413Z",
+      "resource": {
+        "labels": {
+          "configuration_name": "caserelay-control-plane",
+          "location": "us-central1",
+          "project_id": "caserelay",
+          "revision_name": "caserelay-control-plane-00105-yom",
+          "service_name": "caserelay-control-plane"
+        },
+        "type": "cloud_run_revision"
+      },
+      "textPayload": "INFO:     169.254.169.126:56486 - \"DELETE /v1/cases/CR-0831110100 HTTP/1.1\" 200 OK",
+      "timestamp": "2026-08-31T17:25:29.877024Z"
+    }
+  ]
+}

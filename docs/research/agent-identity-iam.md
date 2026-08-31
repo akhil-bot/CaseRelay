@@ -239,9 +239,9 @@ GOOGLE_API_USE_CLIENT_CERTIFICATE=true
 
 This is set on all eight engines in `infra/deploy_fleet.sh`. It tells the SDK to use `*.mtls.googleapis.com` endpoints, which satisfies the DPoP + mTLS binding requirement without weakening the security model.
 
-We deliberately did **NOT** set `GOOGLE_API_PREVENT_AGENT_TOKEN_SHARING_FOR_GCP_SERVICES=False` (Google's documented opt-out) because it disables token binding entirely — meaning agent tokens could be replayed or shared across contexts without cryptographic proof of possession. Keeping mTLS binding active is a genuine security strength.
+We deliberately did **NOT** set `GOOGLE_API_PREVENT_AGENT_TOKEN_SHARING_FOR_GCP_SERVICES=False` (Google's documented opt-out) because it disables token binding entirely — meaning agent tokens could be replayed or shared across contexts without cryptographic proof of possession.
 
-See also: [Troubleshoot Agent Identity authentication issues](https://docs.google.com/iam/docs/troubleshoot-auth-manager) and [Authenticate using an agent's own identity](https://docs.google.com/iam/docs/auth-agent-own-identity).
+See also: [Troubleshoot Agent Identity authentication issues](https://docs.cloud.google.com/iam/docs/troubleshoot-auth-manager) and [Authenticate using an agent's own identity](https://docs.cloud.google.com/iam/docs/auth-agent-own-identity).
 
 ---
 
@@ -373,7 +373,7 @@ config={
 }
 ```
 
-**We deliberately rejected this option** because it disables DPoP token binding, which means agent tokens can be replayed or shared across contexts without cryptographic proof of possession. Instead, we set `GOOGLE_API_USE_CLIENT_CERTIFICATE=true` to route all calls to the mTLS endpoint, satisfying the binding requirement while keeping CAA enforcement active. This is a stronger security posture.
+**We deliberately rejected this option** because it disables DPoP token binding, which means agent tokens can be replayed or shared across contexts without cryptographic proof of possession. Instead, we set `GOOGLE_API_USE_CLIENT_CERTIFICATE=true` to route all calls to the mTLS endpoint, satisfying the binding requirement while keeping CAA enforcement active.
 
 ---
 

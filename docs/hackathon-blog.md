@@ -119,14 +119,14 @@ That mattered because it let us spend more time on the problem itself: how a vol
 
 | Layer | What we used |
 |-------|------------|
-| **Models** | Gemini 3.5 Flash on Vertex AI for the agents. Gemma 4 drafts session summaries that the CaseRelay copilot and report flow can surface. Gemini Nano Banana helped create visuals for the demo video and architecture diagrams. |
+| **Models** | Gemini 3.5 Flash on Vertex AI for the agents. Gemma 4 writes the end-of-run session summary onto the run record. Gemini Nano Banana helped create visuals for the demo video and architecture diagrams. |
 | **Frameworks** | Google ADK for the agent fleet. CopilotKit for the portal copilot experience. |
 | **Protocols** | A2A for agent to agent coordination. MCP for partner tool calls. AG UI for chat and the run event stream. |
 | **Agents** | Google ADK. Eight reasoning engines on [Agent Runtime](https://docs.cloud.google.com/gemini-enterprise-agent-platform/build/runtime) in `us-central1`. A2A to the specialists. |
 | **Platform** | [Agent Identity](https://docs.cloud.google.com/gemini-enterprise-agent-platform/govern/agent-identity-overview), [Agent Gateway](https://docs.cloud.google.com/gemini-enterprise-agent-platform/govern/gateways/agent-gateway-overview), [Agent Registry](https://docs.cloud.google.com/gemini-enterprise-agent-platform/govern/agent-registry), [Sessions](https://docs.cloud.google.com/gemini-enterprise-agent-platform/scale/sessions), [Memory Bank](https://docs.cloud.google.com/gemini-enterprise-agent-platform/scale/memory-bank), Model Armor, [Observability](https://docs.cloud.google.com/gemini-enterprise-agent-platform/optimize/observability/overview). |
 | **Backend** | Python, FastAPI, Cloud Run (requires auth). |
 | **State** | Firestore. Cloud Scheduler on a recurring hourly sweep (`0 * * * *`). Pub/Sub to resume parked cases. |
-| **Frontend** | Next.js, Cloud Run (behind HTTP Basic auth). AG UI for chat and the run stream. |
+| **Frontend** | Next.js, Cloud Run (behind a session login page). AG UI for chat and the run stream. |
 | **Partners** | Simulated partner agencies exposed through MCP tools. Not live systems. |
 
 ## Disclosures
@@ -139,7 +139,7 @@ That mattered because it let us spend more time on the problem itself: how a vol
 
 **Authority gateway.** Field level access control lives in our code. [Agent Gateway](https://docs.cloud.google.com/gemini-enterprise-agent-platform/govern/gateways/agent-gateway-overview) is Google's egress control point. We call ours the "authority gateway" to avoid confusion.
 
-**Portal is deployed, behind a password.** [`caserelay-portal-6nwo7o4bbq-uc.a.run.app`](https://caserelay-portal-6nwo7o4bbq-uc.a.run.app): Cloud Run, HTTP Basic auth. Credentials on request. Setup is in the [README](https://github.com/akhil-bot/CaseRelay/blob/main/README.md).
+**Portal is deployed, behind a password.** [`caserelay-portal-6nwo7o4bbq-uc.a.run.app`](https://caserelay-portal-6nwo7o4bbq-uc.a.run.app): Cloud Run, behind a session login page. Sign in at `/login` with `admin@caserelay.com` and the password supplied in the Devpost submission's testing instructions. Setup is in the [README](https://github.com/akhil-bot/CaseRelay/blob/main/README.md).
 
 **AI use during building.** We used an agentic IDE while developing the code, Gemini for architecture help and ADK/API guidance, and Gemini Nano Banana for visuals used around the demo and architecture story. AI also helped us shape supporting assets such as image generation, Google Cloud integration notes, demo narration, and voiceover drafts. The product decisions, implementation, and final submission are ours.
 
@@ -149,7 +149,7 @@ That mattered because it let us spend more time on the problem itself: how a vol
 
 **Repo:** [github.com/akhil-bot/CaseRelay](https://github.com/akhil-bot/CaseRelay)
 
-**Portal:** [`caserelay-portal-6nwo7o4bbq-uc.a.run.app`](https://caserelay-portal-6nwo7o4bbq-uc.a.run.app): Cloud Run, behind HTTP Basic auth. Credentials on request.
+**Portal:** [`caserelay-portal-6nwo7o4bbq-uc.a.run.app`](https://caserelay-portal-6nwo7o4bbq-uc.a.run.app): Cloud Run, behind a session login page. Sign in at `/login` with `admin@caserelay.com` and the password supplied in the Devpost submission's testing instructions.
 
 ---
 

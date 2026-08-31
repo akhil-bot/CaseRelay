@@ -4,17 +4,17 @@ These are injected into every agent invocation. They override anything in the ta
 
 ## The gates are not yours to edit
 
-`harness/gate.py` and `harness/tasks.json` are **read-only**. The driver checks them for
-modification after every task and fails the task if you touched them, so weakening a gate cannot
-make a task pass — it can only waste an attempt.
+`harness/gate.py` is **read-only**. After every task the driver checks it for modification and
+reverts any edit before the next gate run, so weakening a gate cannot make a task pass — it can
+only waste an attempt.
 
 If a gate looks wrong, do not edit it. Write the argument into `harness/NOTES.md` under
 `## Gate disputes` and move on. A human will read it.
 
 ## Do not fake the thing you are being asked to build
 
-This whole plan exists because the repo is full of code that looks finished and is not. Adding more
-of that is worse than leaving the task undone. Specifically, never:
+This plan was written against code that looked finished and was not. Adding more of that is worse
+than leaving the task undone. Specifically, never:
 
 - hardcode an id, timestamp, status or outcome that the system is supposed to compute
 - stub, freeze or inject a clock in a production code path

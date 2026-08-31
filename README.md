@@ -33,7 +33,7 @@ cases, open the live view, start outreach and prepare reports from the same scre
 | **Demo video** | [Watch on YouTube](https://www.youtube.com/watch?v=Bp2PKUXg_PQ) |
 | **Repository** | [github.com/akhil-bot/CaseRelay](https://github.com/akhil-bot/CaseRelay) |
 | **Control plane** | [`caserelay-control-plane-6nwo7o4bbq-uc.a.run.app`](https://caserelay-control-plane-6nwo7o4bbq-uc.a.run.app) — Cloud Run, auth-required: `curl -s -o /dev/null -w '%{http_code}' https://caserelay-control-plane-6nwo7o4bbq-uc.a.run.app/v1/cases` → `403`. (There is no `/healthz`; a path that does not exist returns 404.) |
-| **Portal** | [`caserelay-portal-6nwo7o4bbq-uc.a.run.app`](https://caserelay-portal-6nwo7o4bbq-uc.a.run.app) — Cloud Run, behind a session login page. Navigate to `/login`, choose any role, and sign in with `admin@caserelay.com` and the password supplied in the Devpost testing instructions. (`portal/src/middleware.ts` implements HTTP Basic for restricted deployments; not enabled on the judging revision.) |
+| **Portal** | [`caserelay-portal-6nwo7o4bbq-uc.a.run.app`](https://caserelay-portal-6nwo7o4bbq-uc.a.run.app) — Cloud Run, behind a session login page. Navigate to `/login`, choose any role, and sign in with `admin@caserelay.com` and the password supplied in the Devpost testing instructions. You get an app-rendered login page, not a browser Basic-auth dialog: the serving revision returns 307 to `/login?next=…` and sends no `WWW-Authenticate` header. (`portal/src/middleware.ts` holds an HTTP Basic gate for restricted deployments; it is not in effect on this build — Next.js 16 renamed the interception convention from `middleware` to `proxy` and there is no `proxy.ts`.) |
 | **Architecture diagram** | The image above, sources in [`docs/diagrams/`](docs/diagrams/) |
 | **Spin-up instructions** | [docs/deploy.md](docs/deploy.md) |
 | **Blog post** | [Read on DEV.to](https://dev.to/akill_m_8f67cabd174364802/caserelay-a-governed-agent-fleet-that-follows-up-on-a-childs-court-ordered-services-for-weeks-3hnf) |
@@ -46,7 +46,7 @@ cases, open the live view, start outreach and prepare reports from the same scre
 Clone and run — no GCP project, no service account, no API key:
 
 ```bash
-git clone git@github.com:akhil-bot/CaseRelay.git && cd CaseRelay
+git clone https://github.com/akhil-bot/CaseRelay.git && cd CaseRelay
 uv sync && source .venv/bin/activate
 cd portal && npm install && cd ..   # needed for t2.3 (TypeScript typecheck)
 python harness/gate.py --all
@@ -61,10 +61,9 @@ result is **34 passed, 0 failed, 4 skipped**. **Without a Docker daemon** runnin
 announces itself as a skip; without both it is **33 passed, 0 failed, 5 skipped**. No gate
 silently fails because a prerequisite is absent.
 
-**38 executable gates** (35 offline, 3 requiring cloud access) plus **64 unit tests with 83
-assertions** in `tests/`. A skip is never counted as a pass.
+**38 executable gates** (35 offline, 3 requiring cloud access) plus **64 unit tests** in `tests/`.
 
-What the 34 offline gates verify:
+What the 35 offline gates verify:
 
 | Gates | What they prove |
 |---|---|
@@ -87,12 +86,19 @@ To run a single gate: `python harness/gate.py t5.1`. To run a stage: `python har
 ## Quick start
 
 The local path runs the whole flagship case — intake, activation gate, five-way fan-out,
-checkpoint, wake, Model Armor quarantine, escalation gate, follow-up — in one process. It needs
+checkpoint, wake, quarantine, escalation gate, follow-up — in one process. It needs
 application default credentials and `roles/aiplatform.user` on any GCP project. Nothing
 allowlisted, no Firestore, no deployed engine.
 
+The quarantine step is the one place the local path is not the deployed path. `MODEL_ARMOR_TEMPLATE`
+is commented out in `.env.example`, and the `caserelay-screen` template is not reachable from
+another project, so `backend/gateway/armor.py` raises `ScreeningUnavailable` and the verifier
+quarantines the callback with the rule `screening_unavailable` instead of a Model Armor verdict.
+The escalation, the gate and the follow-up that follow are the same code either way — that is what
+failing closed is for.
+
 ```bash
-git clone git@github.com:akhil-bot/CaseRelay.git && cd CaseRelay
+git clone https://github.com/akhil-bot/CaseRelay.git && cd CaseRelay
 uv sync && source .venv/bin/activate
 gcloud auth application-default login
 
@@ -164,7 +170,7 @@ Pub/Sub push carries a five-attempt dead-letter policy with 10s–300s exponenti
 
 ## The flagship case
 
-**Case CR-1042 — Maya's stalled school enrollment** *(scripted walkthrough; the same arc ran live as `CR-0831120614`)*
+**Case CR-1042 — Maya's stalled school enrollment** *(scripted walkthrough; the same arc ran live as `CR-0831211122`)*
 
 1. Supervisor activates monitoring after verifying court authority.
 2. Orchestrator delegates scoped tasks to five partner agents, reaching each over authenticated A2A.
@@ -196,7 +202,7 @@ The routing is one branch with no fallback in either direction
 never swaps in scripted data.
 
 Maya's arc as described above is scripted **in the portal** and live **in the fleet**. The same arc
-executed end to end against the deployed control plane on 31 Aug 2026 as `CR-0831120614` (and in
+executed end to end against the deployed control plane on 31 Aug 2026 as `CR-0831211122` (and in
 the video as `CR-0830203440`). To watch it run rather than read it, create a fresh case with the
 four commands in [docs/scenario-showcase.md](docs/scenario-showcase.md) and open the case ID it
 returns — that path renders live. Partner behaviour is injected per-service and the agents are
@@ -250,10 +256,14 @@ These have been demonstrated on the deployed fleet, not merely asserted.
 - No unrestricted cross-agency child profile
 - No autonomous emergency response
 
-Persona switching in the portal (advocate vs. platform view) is UI-only and carries no
-authorization implications — role-switching changes the view, not the data access. The session
-login accepts any password on the persona select and writes down which role you chose;
-`admin@caserelay.com` with the Devpost-supplied password works on the deployed revision.
+The persona selector in the portal is a prototype view-switcher, not an authentication boundary —
+it records which role you chose and carries no authorization, and the sign-in form in the
+checked-in code (`portal/src/components/auth/useSignIn.ts`) has no auth backend behind it at all.
+What gates access to the deployed portal is the session login on the serving revision, which
+covers the control-plane API proxy as well as the pages: an unauthenticated page request is
+redirected to `/login?next=…` (307) and an unauthenticated `/api/control-plane/*` call returns
+401. Agent-to-agent authorization is enforced by platform identity and A2A bearer auth, not by
+anything in the UI.
 
 ---
 

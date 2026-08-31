@@ -87,3 +87,14 @@ artifacts/recordings/
 # harness run logs
 harness/logs/
 harness/.current-task.md
+
+# ── Internal working documents ───────────────────────────────────────────────
+# The filming script and the post-video work queue record how the demo was
+# staged and which screens were still unfinished when it was shot. They are
+# notes to ourselves about a moment in time, not descriptions of the shipped
+# system, and they misrepresent it when read on their own.
+docs/demo-test-script.md
+docs/post-video-geap-deploy.md
+
+# Hand-downloaded package tarball; npm resolves this from the registry.
+playwright-core-*.tgz

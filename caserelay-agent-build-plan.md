@@ -6,7 +6,12 @@
 >
 > **Platform:** Gemini Enterprise Agent Platform (GEAP) — formerly Vertex AI.
 >
-> **This file is the only implementation plan.** Execute the numbered action list in order. No calendar / day-of-sprint language.
+> **Status: historical.** This is the original build plan, written before the system was built and
+> kept as a record of the intended design and sequence. It is not a description of the shipped
+> system and has not been edited to match it, so where the two differ the code is authoritative —
+> see [README.md](README.md) and [docs/architecture.md](docs/architecture.md) for what actually
+> exists. Read the numbered action list below as the plan of record at the time, not as a to-do
+> list.
 
 ---
 
@@ -589,8 +594,7 @@ agents-cli --version   # 1.4.0
 # uv tool install google-adk
 adk --version          # 2.7.1
 
-# gcloud is Google Cloud SDK 580.0.0 at
-# /Users/akhil.maddala/google-cloud-sdk/bin/gcloud
+# gcloud is Google Cloud SDK 580.0.0
 ```
 
 There is **no** `gcloud components install agents` on this SDK. The official Agents CLI is the separate package `google-agents-cli` (`agents-cli`).
@@ -791,7 +795,7 @@ Docs:
 
 **Cursor (build-time gcloud):**
 
-Project `/Users/akhil.maddala/Documents/projects/CaseRelay/.cursor/mcp.json` and user `~/.cursor/mcp.json`:
+Project `.cursor/mcp.json` (repo root) and user `~/.cursor/mcp.json`:
 
 ```json
 "gcloud": {
@@ -840,13 +844,12 @@ Running CaseRelay agents  --McpToolset-->  Firestore MCP (later), other Google M
 
 | Item | Value |
 |------|--------|
-| gcloud | `/Users/akhil.maddala/google-cloud-sdk/bin/gcloud` — SDK 580.0.0 |
+| gcloud | on `PATH` — SDK 580.0.0 |
 | Account | `<redacted>` (logged in); ADC present |
-| Project | `caserelay` (189353698936), billing **enabled** (`01D1E6-387355-5796AA`) |
-| Also exists | `careops-505719` — do not deploy CaseRelay there |
+| Project | `caserelay` (189353698936), billing **enabled** (`<redacted>`) |
 | Enabled on `caserelay` | `aiplatform`, `agentregistry`, `modelarmor`, `firestore`, `pubsub`, `cloudtasks`, `run`, `secretmanager`, `iap`, `logging`, `cloudtrace` |
-| `agents-cli` | `/Users/akhil.maddala/.local/bin/agents-cli` 1.4.0 |
-| `adk` | `/Users/akhil.maddala/.local/bin/adk` 2.7.1 |
+| `agents-cli` | on `PATH` — 1.4.0 |
+| `adk` | on `PATH` — 2.7.1 |
 | `gemini` | 0.3.3 — MCP Connected for gcloud + GEAP registry + GEAP platform |
 | Firestore database | API on; **native DB create is still action 6** |
 | Cursor gcloud MCP | Config written; **restart Cursor** |

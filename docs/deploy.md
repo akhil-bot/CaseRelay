@@ -24,7 +24,7 @@ Cloud project you hold `roles/aiplatform.user` on. Node 20+ as well if you want 
 is no key file to obtain.
 
 ```bash
-git clone git@github.com:akhil-bot/CaseRelay.git && cd CaseRelay
+git clone https://github.com/akhil-bot/CaseRelay.git && cd CaseRelay
 uv sync && source .venv/bin/activate
 
 gcloud auth application-default login          # every model call goes to Vertex AI
@@ -60,9 +60,9 @@ Have all of these before you start. Every one of them is a hard failure partway 
 |---|---|---|
 | GEAP access on the project | Agent Registry, Agent Identity and Agent Gateway are the whole submission | Allowlist request to Google; not self-serve |
 | `agents-cli` 1.4.0 | `infra/deploy_fleet.sh` shells out to it; it is **not** a `pyproject.toml` dependency | From the `google-agents-cli` package, e.g. `uv tool install google-agents-cli` |
-| Docker with `buildx` | The control-plane and partner images are built `linux/amd64` locally | Docker Desktop or equivalent |
+| Docker with `buildx` | The control-plane and portal images are built `linux/amd64` locally. `deploy_partners.sh` uses a plain `docker build` with no `--platform`, so on an arm64 machine build the partner image yourself with `docker buildx build --platform linux/amd64 -f Dockerfile.partners` or Cloud Run will reject it | Docker Desktop or equivalent |
 | Artifact Registry repo `caserelay` in `us-central1` | Every image pushes to `us-central1-docker.pkg.dev/$PROJECT/caserelay/...` | `gcloud artifacts repositories create caserelay --repository-format=docker --location=us-central1` |
-| Firestore database **named** `caserelay` | Not `(default)` — Agent Runtime's proxy URL-encodes the parentheses and Firestore rejects the result with HTTP 400 | `gcloud firestore databases create --database=caserelay --location=us-central1` |
+| Firestore database **named** `caserelay` | Not `(default)` — Agent Runtime's proxy URL-encodes the parentheses and Firestore rejects the result with HTTP 400 | `gcloud firestore databases create --database=caserelay --location=nam5` — `nam5` is what the live deployment runs on, and the proofs in this repo come from it |
 | Project owner or equivalent | `bootstrap.sh` enables APIs and edits the project IAM policy | — |
 
 `infra/bootstrap.sh` handles the rest of the provisioning: API enablement, Pub/Sub topics and
@@ -170,13 +170,21 @@ bash infra/policies/apply.sh --apply deny       # one named step
 ### The portal
 
 Every command runs from `portal/`, not the repo root — npm resolves the wrong `package.json` from
-above, which is why `npm run typecheck` in particular misbehaves when run from the wrong directory.
+above.
 
 ```bash
 cd portal
 cp .env.local.example .env.local
 npm install
 npm run dev
+```
+
+For static checks, call the local binaries directly rather than the npm scripts, which is what
+survives being invoked from a workspace rooted above `portal/`:
+
+```bash
+./node_modules/.bin/tsc --noEmit
+npx eslint .
 ```
 
 Next.js reads `.env.local` on its own, so there is no sourcing step on this side. The portal has no

@@ -40,9 +40,10 @@ timing rather than logic: its mechanism is verifiable at rest but its arc runs t
 
 ## How a complex run is produced
 
-Everything is driven through the deployed control plane's public API. No test hooks, no clock
-manipulation, no injected state — the agents read a case out of Firestore and react to whatever the
-partner simulator returns.
+Everything is driven through the deployed control plane's public API. No test hooks and no clock
+manipulation — the agents read a case out of Firestore and react to whatever the partner simulator
+returns. What the scenario does set up front is the case itself: referrals backdated 17 days and the
+per-service partner behaviours, both written by the scenario factory before any agent runs.
 
 ```bash
 CP=$(cat infra/control_plane_url.txt)
@@ -64,6 +65,10 @@ curl -s -X POST "$CP/v1/cases/$CASE/activate" -H "Authorization: Bearer $TOK" \
 curl -s -X POST "$CP/v1/workflows/sweep" -H "Authorization: Bearer $TOK"
 
 # 5. rule on the safeguarding escalation Maya raises
+# GET /v1/approvals returns only what is still pending, across every case.
+APPROVAL_ID=$(curl -s "$CP/v1/approvals" -H "Authorization: Bearer $TOK" \
+  | python3 -c 'import sys,json; print(next(a["approval_id"] for a in json.load(sys.stdin)
+                if a.get("action_type") == "escalation"))')
 curl -s -X POST "$CP/v1/approvals/$APPROVAL_ID/decide" -H "Authorization: Bearer $TOK" \
   -H 'content-type: application/json' -d '{"decision":"approved","decided_by":"your-name-here"}'
 
@@ -79,7 +84,9 @@ it is not allowed to make, records where it stopped, and ends. Something outside
 or the scheduler — starts a **new run with a new run id** that picks the case up from the recorded
 state.
 
-Maya's four runs, verbatim from [`maya/runs.json`](proofs/complex-scenarios/maya/runs.json):
+Maya's four runs. The ids, states and times are from
+[`maya/runs.json`](proofs/complex-scenarios/maya/runs.json); the last column reads them against the
+event feed:
 
 | Run id | Created | Ends | Why it ended |
 |---|---|---|---|
@@ -88,8 +95,8 @@ Maya's four runs, verbatim from [`maya/runs.json`](proofs/complex-scenarios/maya
 | `47a84239bcf7` | 21:13:38 | `completed` at `approved` | Woke on a due checkpoint, quarantined the callback, parked at `gate:escalation` |
 | `a4ba8e4909b2` | 21:14:54 | `completed` at `done` | Followed up, closed the last commitment, wrote memory, closed the case |
 
-Two of those four transitions are human decisions and one is a timer. Only the fourth run reaches
-the end of the case, and it could not have existed without the three before it.
+Two of the three transitions between those runs are human decisions and one is a timer. Only the
+fourth run reaches the end of the case, and it could not have existed without the three before it.
 
 ### On `due_in`, and what is honestly compressed
 
@@ -104,9 +111,20 @@ so each fires separately and visibly.
 `POST /v1/pubsub/push`, which calls the same `durable.sweep()` that
 `POST /v1/workflows/sweep` calls. Triggering it by hand fires the identical code path without
 waiting up to an hour between run end and wake. What the manual trigger does **not** prove is that
-the timer fires unattended. That has been observed separately: case `CR-0831110100` woke about 59
-minutes after its checkpoint with nobody at the keyboard. Read this page as proof that the *ladder*
-works, and that observation as proof that the *timer* does.
+the timer fires unattended. That was observed separately, on an earlier run: case `CR-0831110100`
+parked at its checkpoints at about 11:03 UTC on 31 August, and the hourly sweep resumed it at
+12:00:38.760 UTC — roughly 57 minutes later, with nobody at the keyboard. The Cloud Logging capture
+is in [`proofs/unattended-wake/`](proofs/unattended-wake/wake-timeline.txt) (raw entries in
+[`unattended-wake-logs.json`](proofs/unattended-wake/unattended-wake-logs.json)). What it shows is
+that the `caserelay-sweep` tick with `scheduledTime` 12:00:35.692 UTC published to
+`caserelay-events`, and the control plane started resumed run `9b4a97203aad` **3.068 seconds later**
+through the `caserelay.pubsub_push` handler on revision `caserelay-control-plane-00103-siz` — a
+timer, not a person. The checkpoint-write timestamp is not logged, so the interval is bounded between
+**57m04s and 57m53s** rather than stated precisely; the capture explains that bound, and also why the
+scheduler's own execution records carry *later* log timestamps than the wake they caused. The case
+was deleted at 17:25 UTC the same day, so those logs are the only remaining record of it. Read this
+page as proof that the *ladder* works; the unattended timer rests on that separate capture rather
+than on anything below.
 
 The four sweeps that carried Maya are in [`maya/sweeps.json`](proofs/complex-scenarios/maya/sweeps.json),
 each naming the workflow ids it fired.
@@ -123,15 +141,15 @@ readout of what is actually wrong with the case, not a script.
 |---|---|---|
 | `3-fanout-*` (×5) | Case is `monitoring` and no specialist has reported yet | One A2A call per specialist, concurrently |
 | `4-checkpoint` | At least one specialist reported, no per-commitment checkpoints written yet | `schedule_wake` — writes one checkpoint per commitment |
-| `5-wake` | A checkpoint is waiting or running and something is still open | `wake_workflow`, `check_overdue`, reconciliation |
+| `5-wake` | A checkpoint is waiting or running, not already awake, and something is still open | `wake_workflow`, `check_overdue`, reconciliation |
 | `6-quarantine` | Checkpoint is awake, a referral is flagged for callback, no escalation raised yet | Safeguarding verifier screens the partner callback |
 | `8-followup` | An escalation has been decided and the referral is still not closed | Re-ask the specialist inside its scope |
-| `9-nudge` | Something is overdue and has not been chased | `send_followup` |
+| `9-nudge` | The wake has fired, something is overdue and unchased, and no escalation is blocking | `send_followup` |
 | `10-unanswered` | A follow-up went out and nothing came back | `notify_supervisor` |
 | `11-memory` | Checkpoint is awake and no escalation is blocking | `preload_memory`, write the session summary |
 
-Maya visits `6-quarantine` and `8-followup`; Kai visits `10-unanswered`; Amara visits neither. That
-difference is the whole point of the design, and it is visible in the captured feeds.
+Maya visits `6-quarantine` and `8-followup`; Kai visits `10-unanswered`; Amara visits none of the
+three. That difference is the whole point of the design, and it is visible in the captured feeds.
 
 ### The activation gate, on all three
 
@@ -140,10 +158,9 @@ Every fan-out precondition requires `monitoring`, so nothing is ready, and `awai
 returns `"activation"`. The run records `current_phase="gate:activation"` and ends.
 
 The orchestrator cannot release itself. `CONTROL_PLANE_TOOLS` in
-`backend/agents/orchestrator/agent.py` grants seven tools and `activate_case` is not among them —
-the capability was removed from the tool surface rather than forbidden in the prompt, because with
-the tool present and the prompt saying a supervisor signs off, the model approved its own work
-anyway.
+`backend/agents/orchestrator/agent.py` grants seven tools and `activate_case` is not among them.
+The capability is absent from the tool surface rather than forbidden in the prompt, because with the
+tool present and the prompt saying a supervisor signs off, the model approved its own work anyway.
 
 ---
 
@@ -192,7 +209,8 @@ date, then the run suspends. Nothing is polling.
 ```
 
 **3. A sweep fires the due checkpoint and a new run starts.** The `workflow_wake` audit event is
-attributed to `caserelay-scheduler`, not to an agent — a machine, not a person, restarted the case.
+attributed to `caserelay-scheduler`, not to an agent: the case was restarted by the scheduler path,
+not by anybody reviewing it. On this run that path was entered by the hand-triggered sweep above.
 
 ```json
 // docs/proofs/complex-scenarios/maya/audit-events.json
@@ -235,9 +253,10 @@ cross-scope data policy. The match is recorded in Firestore before anything else
 
 `sdp` is the filter that matched — Sensitive Data Protection, the branch of the template backed by
 the cross-scope inspect template. The medical-notes instruction tripped a detector written for
-exactly that, and the verdict is Google's, not CaseRelay's.
+exactly that. The match is Google's; `quarantine` is CaseRelay's name for what it does about a
+match.
 
-The quarantine is then written to the immutable audit log against the verifier's own deployed
+The quarantine is then written to the append-only audit log against the verifier's own deployed
 platform identity:
 
 ```json
@@ -284,12 +303,15 @@ identity of whoever made it —
 [`escalation-decision.json`](proofs/complex-scenarios/maya/escalation-decision.json) shows
 `"decision": "approved", "decided_by": "demo-supervisor"`.
 
-**7. Only then does the scoped follow-up go out, and it names a person.** The district is chased
-once, inside the same authority grant that covered the original request. The reply names the officer
-who has taken the referral on; that name is written back onto the referral and the commitment
-closes.
+**7. Only then does the scoped follow-up go out, and the chase behind it names a person.** The
+district is re-asked inside the same authority grant that covered the original request, and answers
+that it still has no enrollment on record — which leaves the commitment overdue, so `9-nudge`
+chases it once. That chase is what comes back with the officer who has taken the referral on; the
+name is written onto the referral and the commitment closes.
 
 ```
+[21:15:08] Contacting Lincoln Unified about Maya's school enrollment.
+[21:15:29] Lincoln Unified could not resolve Maya's school enrollment.
 [21:15:31] Chasing Lincoln Unified on Maya's school enrollment.
 [21:15:40] Sarah Miller has taken on Maya's school enrollment.
 [21:15:40] The follow-ups landed — every commitment on Maya's case is fulfilled.
@@ -327,14 +349,16 @@ withheld. When the school asked for medical notes, the agent being asked had nev
 `project()` in `backend/policy/projection.py` strips the payload in code, not by instruction, so a
 confused or compromised agent fails safe for the same reason.
 
-Seven such disclosure events were written across the run, one per specialist tool call, each with
-its own legal basis: `ferpa_court_order` for education, `hipaa_signed_authorization` for health,
-`state_juvenile_court_order` for legal, shelter and family services.
+Six such disclosure events were written across the run — one per specialist at fan-out, plus
+education's re-check on the follow-up — each carrying its own legal basis: `ferpa_court_order` for
+education, `hipaa_signed_authorization` for health, `state_juvenile_court_order` for legal, shelter
+and family services.
 
 ### The Google Cloud side of the same run
 
 **Five separate deployed engines answered inside one fan-out** — card resolution, then invocation,
-per specialist. From [`maya/gcp/fanout-five-engines.txt`](proofs/complex-scenarios/maya/gcp/fanout-five-engines.txt):
+per specialist. From [`maya/gcp/fanout-five-engines.txt`](proofs/complex-scenarios/maya/gcp/fanout-five-engines.txt),
+sorted oldest-first and with the client address column dropped:
 
 ```
 2026-08-31T21:12:28.650032Z  7993613910919872512  "GET /a2a/family/.well-known/agent-card.json HTTP/1.1" 200 OK
@@ -352,8 +376,9 @@ per specialist. From [`maya/gcp/fanout-five-engines.txt`](proofs/complex-scenari
 Five distinct reasoning engine ids in a 35-second window. This is what shows the fleet is five
 separate deployments rather than one process with five prompts.
 
-**Every engine egress was TLS-intercepted and policy-evaluated.** The Agent Gateway logged 93
-outbound calls during the run —
+**Engine egress to a named host was TLS-intercepted and policy-evaluated.** The Agent Gateway
+logged 93 outbound calls in Maya's window, and the 70 of them that resolve to a hostname all carry
+`REQUEST_WAS_TLS_INTERCEPTED: True` and `RESULT: ALLOWED` —
 [`maya/gcp/gateway-egress.txt`](proofs/complex-scenarios/maya/gcp/gateway-egress.txt):
 
 ```
@@ -364,8 +389,11 @@ TIMESTAMP                    HOSTNAME                            TLS_INTERCEPTED
 2026-08-31T21:12:34.575509Z  cloudresourcemanager.mtls...:443    True             ALLOWED
 ```
 
-Each entry carries the three authorization policies attached to the `caserelay-egress` gateway and
-the Model Armor service extension that processed the request body:
+The remaining 23 rows are calls to the internal address `240.0.0.2:443`, which the log records with
+no interception verdict and no policy result at all; do not read them as intercepted. Each
+intercepted entry carries the gateway's authorization evaluation — the IAP and Model Armor policies
+named, plus a default entry for no deny policy matching — and the Model Armor service extension that
+processed the request body:
 
 ```json
 "authzPolicyInfo": { "policies": [
@@ -379,9 +407,10 @@ the Model Armor service extension that processed the request body:
     "perProcessingRequestInfo": [ { "eventType": "REQUEST_BODY", "processingEffect": "CONTENT_MODIFIED" } ] } ]
 ```
 
-**Cloud Trace shows the guardrail evaluation inside the call.** Three
-`apply_guardrail "Google Cloud Model Armor"` traces were written during Maya's run by the gateway,
-not by CaseRelay — [`maya/gcp/cloud-trace-model-armor.json`](proofs/complex-scenarios/maya/gcp/cloud-trace-model-armor.json):
+**Cloud Trace shows the guardrail evaluation inside the call.** The capture holds three
+`apply_guardrail "Google Cloud Model Armor"` traces from Maya's run, written by the gateway rather
+than by CaseRelay — the query is paged, so three is what was captured rather than a census —
+[`maya/gcp/cloud-trace-model-armor.json`](proofs/complex-scenarios/maya/gcp/cloud-trace-model-armor.json):
 
 ```
 traceId: 5360d68028ee185b02c04815e2fea19f
@@ -432,10 +461,12 @@ extraction topics, not ADK defaults.
   `backend/gateway/armor.py` emits it at INFO on a module logger, which the reasoning engine does
   not appear to propagate to stdout. The quarantine is evidenced by the Firestore verdict and the
   audit event instead; do not go looking for that log line.
-- **No Agent Gateway entries carry an MCP method for this run.** The gateway governs what a *bound
-  engine* calls outward; the partner queries and follow-ups run on the control plane, which is not a
-  bound engine. "Every outbound call the engines make is intercepted and policy-evaluated" is what
-  the gateway log above supports — not "every partner call traverses the gateway."
+- **No Agent Gateway entries carry an MCP method for this run, and no partner host appears in the
+  log at all.** Partner calls are in-process Python through `backend/partners/sim.py` unless
+  `CASERELAY_PARTNER_MCP=1` is set, and `deploy_fleet.sh` deploys the fleet with `0`, so there is no
+  outbound partner request for the gateway to parse a method out of. What the gateway log above
+  supports is "the engines' outbound calls to Google services were intercepted and
+  policy-evaluated" — not "every partner call traverses the gateway."
 - **The sweep was triggered by hand**, as described above.
 
 ---
@@ -473,9 +504,9 @@ overdue, but health's default of 24 days is not. Hence the override in
 due_offsets={"health": 10},
 ```
 
-Kai sets no `default_due_in`, so this run passed no `due_in` at all. The checkpoints were written
-against real calendar deadlines, and the two overdue ones were fired by the sweep — which is the
-uncompressed path, not a demo shortcut.
+Kai sets no `default_due_in`, and this run passed no `due_in` at all — the captured case carries
+`"due_in": null`. The checkpoints were written against real calendar deadlines, and the sweep fired
+the ones that had genuinely come due. That is the uncompressed path, not a demo shortcut.
 
 ### What actually happened
 
@@ -499,7 +530,7 @@ together:
 [21:18:04] Anna Reed is overdue on Kai's legal aid referral.
 ```
 
-Then the divergence — two chases, two different outcomes, eleven seconds apart:
+Then the divergence — two chases in the same second, two different answers eleven seconds later:
 
 ```
 [21:18:13] Chasing Riverbend Community Health on Kai's clinic visit.
@@ -644,7 +675,7 @@ demonstrates that wakes fire in sequence, but no longer that state survives acro
 The case reached status `closed` while three of its checkpoints were still `waiting`. Deleting a
 case removes its checkpoints (`delete_checkpoints_for_case`), but auto-close does not, so those
 three documents remain scheduled against a closed case and will be swept on their due dates. That is
-the state observed at capture time; it is recorded here rather than smoothed over.
+the state at capture time.
 
 ---
 
@@ -655,14 +686,14 @@ Everything below is unmodified output from the runs described above.
 | File | What it is |
 |---|---|
 | [maya/event-feed.txt](proofs/complex-scenarios/maya/event-feed.txt) | The full 48-line narrated feed, `GET /v1/cases/{id}/events` |
-| [maya/audit-events.json](proofs/complex-scenarios/maya/audit-events.json) | All 11 Firestore audit events — 7 disclosures, 1 followup, 1 quarantine, 3 workflow wakes |
+| [maya/audit-events.json](proofs/complex-scenarios/maya/audit-events.json) | All 11 Firestore audit events — 6 disclosures, 1 followup, 1 quarantine, 3 workflow wakes |
 | [maya/model-armor-screening-verdict.json](proofs/complex-scenarios/maya/model-armor-screening-verdict.json) | The Model Armor verdict document, `verdict: quarantine`, `rules: ["sdp"]` |
 | [maya/escalation-approval.json](proofs/complex-scenarios/maya/escalation-approval.json) · [escalation-decision.json](proofs/complex-scenarios/maya/escalation-decision.json) | The escalation as raised, and as decided |
 | [maya/runs.json](proofs/complex-scenarios/maya/runs.json) · [sweeps.json](proofs/complex-scenarios/maya/sweeps.json) | Four run records; the sweeps that fired each wake |
 | [maya/case-final.json](proofs/complex-scenarios/maya/case-final.json) | Final case, commitments, five authority grants, timeline |
 | [maya/memory-bank.json](proofs/complex-scenarios/maya/memory-bank.json) | Vertex AI Memory Bank records scoped to the case |
 | [maya/gcp/fanout-five-engines.txt](proofs/complex-scenarios/maya/gcp/fanout-five-engines.txt) | Cloud Logging: five reasoning engines, card resolution then invocation |
-| [maya/gcp/gateway-egress.txt](proofs/complex-scenarios/maya/gcp/gateway-egress.txt) | Agent Gateway: 93 TLS-intercepted, policy-evaluated egress calls |
+| [maya/gcp/gateway-egress.txt](proofs/complex-scenarios/maya/gcp/gateway-egress.txt) | Agent Gateway: 93 egress calls in the run window, 70 of them TLS-intercepted and policy-evaluated |
 | [maya/gcp/cloud-trace-model-armor.json](proofs/complex-scenarios/maya/gcp/cloud-trace-model-armor.json) | Cloud Trace: three `apply_guardrail` spans with the policy consulted by name |
 | [kai/event-feed.txt](proofs/complex-scenarios/kai/event-feed.txt) | The narrated feed through reconciliation, divergence and escalation |
 | [kai/audit-events.json](proofs/complex-scenarios/kai/audit-events.json) | Two `followup` verdicts on one trace id, plus `unresponsive_partner` |

@@ -138,11 +138,12 @@ fi
 # --------------------------------------------------------------------------------------
 if want armor; then
   echo
-  echo "=== Model Armor extension: failOpen true -> false ==="
-  # The live caserelay-ma-authz-ext carries failOpen: true, so a Model Armor timeout
-  # currently lets traffic through unscreened — laxer than backend/gateway/armor.py, which
-  # quarantines. This import replaces the extension in place; the CONTENT_AUTHZ policy
-  # pointing at it does not change and no policy slot is consumed.
+  echo "=== Model Armor extension: re-import fail-closed definition ==="
+  # The live caserelay-ma-authz-ext is already fail-closed, so this import is idempotent
+  # and exists to restore that state if the extension is ever changed. A fail-open gateway
+  # would be laxer than backend/gateway/armor.py, which quarantines on a screening failure.
+  # The import replaces the extension in place; the CONTENT_AUTHZ policy pointing at it does
+  # not change and no policy slot is consumed.
   run gcloud beta service-extensions authz-extensions import caserelay-ma-authz-ext \
     --source="$DIR/authzext-model-armor-failclosed.yaml" \
     --location="$REGION" --project="$PROJECT"

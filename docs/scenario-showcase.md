@@ -7,8 +7,12 @@ tells you less than one that has been left alone.
 This page covers the **non-Maya** scenarios. Maya and the other two complex scenarios — Kai and
 Amara — are walked through link by link, with their raw captures attached, in
 [complex-scenarios.md](complex-scenarios.md). Every scenario below was run end to end against the
-deployed control plane on **31 August 2026** (revision `caserelay-control-plane-00105-yom`),
-and the evidence is captured output rather than description. Where a scenario does not do what its
+deployed control plane, most recently on **31 August 2026** against revision
+`caserelay-control-plane-00105-yom`. The Google Cloud captures in
+[Cloud evidence](#cloud-evidence) come from the **29 August 2026** runs on revision
+`caserelay-control-plane-00073-wan`, which is why the case ids and timestamps there read
+`CR-0829…`. Everything on this page is captured output rather than description. Where a scenario
+does not do what its
 definition claims, that is stated rather than omitted — the list of what does not hold is at the
 bottom and is part of the point.
 
@@ -58,13 +62,21 @@ At much longer values (e.g. `17d`) the checkpoints have not come due yet and the
 Ten seconds is the conventional compressed value; the checkpoints are stale within moments of
 being written and will be fired on the next sweep, whenever that arrives.
 
-**What is compressed, and what that means.** `due_in` compresses the checkpoint deadlines, not the execution path. Even at `10s`, the run that writes the checkpoints ends and is recorded `suspended`; Cloud Scheduler sweeps, finds the due checkpoints, publishes to Pub/Sub, and an authenticated push starts a new run. **The deployed sweep runs at `0 * * * *` — once per hour at the top of the hour — so a case created at 11:01 waits until 12:00 for its wake.** Read these as proof that the ladder works at compressed scale — the same Cloud Scheduler and Pub/Sub path as a seventeen-day case, just a much shorter deadline window to make the checkpoints stale.
+**What is compressed, and what that means.** `due_in` compresses the checkpoint deadlines, not the
+execution path. Even at `10s`, the run that writes the checkpoints ends and is recorded
+`suspended`. Cloud Scheduler then publishes to Pub/Sub, an authenticated push reaches
+`POST /v1/pubsub/push` on the control plane, and the sweep it calls finds the due checkpoints and
+starts a new run. **The deployed sweep runs at `0 * * * *` — once per hour at the top of the hour —
+so a case created at 11:01 waits until 12:00 for its wake.** Read these as proof that the ladder
+works at compressed scale: the same Cloud Scheduler and Pub/Sub path as a seventeen-day case, with
+a much shorter deadline window to make the checkpoints stale.
 
 ---
 
 ## Verification summary
 
-All runs below were served by Cloud Run revision `caserelay-control-plane-00105-yom` on **31 August 2026**.
+The verdicts below are from the 31 August 2026 runs on revision
+`caserelay-control-plane-00105-yom`. Wall clocks are approximate.
 
 | Scenario | Verdict | Wall clock | What it exercises that the others do not |
 |---|---|---|---|
@@ -90,10 +102,11 @@ because nothing arrives to trigger a response. A missing reply looks exactly lik
 has not come *yet*, and it keeps looking like that until a court date arrives. Any system that
 only reacts to inbound events will never notice.
 
-**What it exercises that the others do not.** Priya is the only scenario that reaches
+**What it exercises that the others do not.** Priya is the only simple scenario that reaches
 `10-unanswered`, the last rung of the escalation ladder. Maya's district answers its follow-up, so
-Maya never gets there. Priya's provider is configured to time out on the original request *and* on
-the chase, which is the only way to make the ladder run out of rungs and reach a human.
+Maya never gets there. Priya's provider times out on the original request *and* on the chase, which
+is what makes the ladder run out of rungs and reach a human. Kai reaches the same rung, on the same
+`timeout` behaviour, alongside a second failure of a different kind.
 
 **What actually happens.** Health fails during fan-out and the other four commitments close. The
 checkpoint phase sets the reminders; reconciliation reports one overdue; the nudge phase chases
@@ -103,7 +116,7 @@ calls `notify_supervisor`, which writes a `supervisor_notice` approval record an
 `unresponsive_partner` audit event attributed to the health agent's own platform identity. The run
 ends reporting four of five fulfilled.
 
-The narrated feed, verbatim from `GET /v1/cases/{case_id}/events`:
+The narrated feed, rendered from the AG-UI events `GET /v1/cases/{case_id}/events` returns:
 
 ```
 phase_complete  3-fanout-health_coordination  Still waiting on David Chen about Priya's clinic visit.
@@ -159,7 +172,7 @@ run_summary                                 All 5 commitments for Rosa are fulfi
 case_closed                                 Case closed — every commitment on Rosa's file is fulfilled.
 ```
 
-What makes the refusal robust is not the refusal. It is that the education agent never held the
+What makes the refusal safe is not the refusal. It is that the education agent never held the
 medical records to begin with. The authority gateway had already projected the case down to three
 fields before the agent saw anything, and the Firestore disclosure record below shows
 `clinical_notes` and `diagnosis` among the eleven fields withheld. An agent cannot leak what was
@@ -247,9 +260,9 @@ phase runs as the close-out step.
 
 ## Cloud evidence
 
-Everything below is real captured output from the verification runs, with the console path where a
-reader can see the same thing. Console screenshots the user should capture are listed after this
-section.
+Everything below is captured output from the 29 August 2026 verification runs, with the console path
+where a reader can see the same thing. Console screenshots worth taking by hand are listed after
+this section.
 
 ### Which code produced these results
 
@@ -263,6 +276,8 @@ caserelay-control-plane-00073-wan  2026-08-29T10:55:36.716048Z
 caserelay-control-plane-00071-qir  2026-08-29T10:23:47.699730Z
 caserelay-control-plane-00069-tas  2026-08-29T08:43:09.767103Z
 ```
+
+`00073-wan` is the revision that served the runs captured in this section.
 
 Console: **Cloud Run → caserelay-control-plane → Revisions**.
 
@@ -349,7 +364,7 @@ $ gcloud logging read 'resource.type="aiplatform.googleapis.com/ReasoningEngine"
 2026-08-29T11:02:46.823985Z  2657974252392677376  "POST /a2a/health    HTTP/1.1" 200 OK
 ```
 
-Five distinct reasoning engine ids inside a ten-second window. This is the shot that shows the
+Five distinct reasoning engine ids inside a ten-and-a-half-second window. This is the shot that shows the
 fleet is five separate deployments rather than one process with five prompts. Narrowing to one
 engine shows the A2A handshake itself — the caller fetches the agent card, then invokes the task:
 
@@ -394,8 +409,9 @@ caserelay-ma-authz-policy             CUSTOM  .../agentGateways/caserelay-egress
 **Scope of this claim.** The Agent Gateway governs what a bound engine calls *outward* — the
 partner MCP server, Firestore, Vertex. The A2A fan-out shown in the previous block runs
 control-plane-to-engine, and the control plane is not a bound engine, so that traffic does not
-traverse the gateway. "Every outbound call the engines make is intercepted and policy-evaluated"
-is what these logs support.
+traverse the gateway. What these logs support is "the engines' outbound calls to a named host are
+intercepted and policy-evaluated" — the gateway also logs calls to internal addresses with no
+interception verdict recorded at all, and those should not be counted.
 
 Console: **Logging → Logs Explorer** with
 `logName="projects/caserelay/logs/networkservices.googleapis.com%2Fgateway_requests"` and
@@ -517,11 +533,15 @@ because a judge who finds one of them in the source and runs it should find this
 Kai is not among them — it does what it claims, and its evidence is in
 [complex-scenarios.md](complex-scenarios.md#kai--two-failures-one-recovery-one-human).
 
-**Diego — missing enrollment, resolved by nudge.** The SIS returns `enrollment_found: false` with no confirmed school. The education agent's instruction handles this explicitly: missing enrollment means `unresolved`, not `completed`. The agent sets the commitment to `unresolved` and reports it honestly. Because the guard only triggers when a specialist *claims* `completed` against a contradicting response, the guard is never invoked — the prompt handles the condition upstream.
+**Diego — missing enrollment, resolved by nudge.** The SIS returns `enrollment_found: false` with no
+confirmed school. The education agent's instruction handles this explicitly: missing enrollment means
+`unresolved`, not `completed`. The agent sets the commitment to `unresolved` and reports it honestly.
 
-The case then follows the same path as every other unresolved overdue commitment: the nudge fires, Lincoln Unified is chased, and the follow-up response resolves the enrollment. All five commitments reach `completed`, and auto-close transitions the case to `closed`.
+The case then follows the same path as every other unresolved overdue commitment: the nudge fires,
+Lincoln Unified is chased, and the follow-up response resolves the enrollment. All five commitments
+reach `completed`, and auto-close transitions the case to `closed`.
 
-**Why the commitment guard is not exercised.** Two independent reasons, both worth understanding:
+**Why the commitment guard is not exercised.** Two independent reasons:
 
 1. The education agent's instruction says "If enrollment is missing, status is `unresolved`." Given `enrollment_found: false` from the SIS, the agent sets `unresolved` — not `completed`. The guard fires only on a `completed` claim against a contradicting response. The prompt handles the failure upstream of the guard, so the guard has nothing to refuse.
 
@@ -533,20 +553,23 @@ What the fleet does and does not do about hallucination risk: the projection in
 `backend/policy/projection.py` strips the specialist's context to its granted fields in code —
 the education agent receives a three-key dict and cannot hallucinate around or leak a field it
 was never handed. That stripping is not a prompt instruction. Separately, the supervisor
-activation gate means nothing executes before a named human approves the authority grants; Model
-Armor fails closed and quarantines any callback that reaches outside the permitted scope; the
-Safeguarding Verifier's escalation requires a second named decision before the fleet continues;
-Agent Gateway policy limits which MCP methods any engine may call; and the commitment guard sits
-on the write path ready to refuse any unevidenced `completed` claim — it is simply never presented
+activation gate means nothing executes before a named human approves the authority grants; the
+Model Armor screening fails closed at both layers — the `caserelay-ma-authz-ext` Agent Gateway
+extension carries no `failOpen` override, so it takes the proto3 default of `false`, and the
+application-level call in `backend/gateway/armor.py` raises `ScreeningUnavailable`, which maps to a
+quarantine verdict — so a callback is quarantined both when Model Armor matches it and when Model
+Armor cannot be reached at all; the Safeguarding Verifier's escalation requires a second named
+decision before the fleet continues; a DENY authorization policy
+on the Agent Gateway limits which MCP methods any engine may call; and the commitment guard sits on
+the write path ready to refuse any unevidenced `completed` claim — it is simply never presented
 with one by this scenario.
 
 **Ellis — duplicate callback.** Claims a partner update arrives twice and idempotency logic
 discards the second. The `duplicate` branch in the partner simulator is a no-op (`pass`) that
 falls through to the normal reply path, so the callback only ever arrives once and the idempotency
-path is never reached. The run closes all 5 of 5 commitments and the case auto-closes — which is
-not the same outcome as Noah's clean close, because health was never actually impaired. At the
-partner layer `duplicate` is indistinguishable from a normal reply, so the claimed behaviour — a
-duplicate arriving and being discarded — does not occur.
+path is never reached. The run closes all 5 of 5 commitments and the case auto-closes, which is the
+same outcome as Noah's clean run: at the partner layer `duplicate` is indistinguishable from a
+normal reply. The claimed behaviour — a duplicate arriving and being discarded — does not occur.
 
 **Amara — long horizon.** Claims three staggered deadlines across several weeks with the fleet
 sleeping between wakes and carrying memory across sessions. All five partners answer during fan-out,

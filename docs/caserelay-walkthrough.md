@@ -23,7 +23,7 @@ Each agent lives in `backend/agents/<folder>/agent.py` and exports a `root_agent
 | Agent name | Folder | Role |
 |---|---|---|
 | `intake_authority` | `intake` | Reads the referral packet, derives one commitment per referral, proposes the authority grants. **Cannot activate a case.** |
-| `continuity_orchestrator` | `orchestrator` | Control plane. Activates the case, fans out to specialists, checkpoints and wakes workflows, approves escalations, chases overdue providers, tells the supervisor when nobody answers, reports status. Holds no raw records. |
+| `continuity_orchestrator` | `orchestrator` | Control plane. Fans out to specialists, checkpoints and wakes workflows, chases overdue providers, tells the supervisor when nobody answers, reports status. Holds no raw records. **Cannot activate a case and cannot decide an escalation** — neither tool is on its surface. |
 | `education_liaison` | `education` | School enrollment. Sees name, DOB, referral id. |
 | `health_coordination` | `health` | Appointment status. Sees appointment fields only — never diagnosis or notes. |
 | `legal_aid` | `legal` | Referral acceptance and deadlines. Never strategy. |
@@ -35,7 +35,7 @@ The five specialists have an identical three-tool shape: `get_authorized_context
 
 The orchestrator's seven control-plane tools — `schedule_wake`, `wake_workflow`, `check_overdue`, `send_followup`, `notify_supervisor`, `preload_memory`, `get_commitment_states` — are not all handed to it at once. Each phase is built with only the tools its own step needs, plus `get_commitment_states`, which is read-only and attached to every phase because the instruction requires every reported status to come from a tool rather than the model's recollection. See section 7 for why that withholding matters.
 
-A ninth agent, `caserelay_chat`, sits outside the fleet in `backend/api/agui.py`. It is the operator copilot behind the portal's chat panel, served over AG-UI, and it holds no case-data tools of its own — it drives the portal's own frontend tools (`list_scenarios`, `create_case`, `run_fleet`) and can therefore do nothing a logged-in operator could not do by clicking.
+A ninth agent, `caserelay_chat`, sits outside the fleet in `backend/api/agui.py`. It is the operator copilot behind the portal's chat panel, served over AG-UI, and it holds no case-data tools of its own — it drives the portal's own frontend tools (`list_scenarios`, `list_cases`, `create_case`, `start_outreach`, `case_report`) and can therefore do nothing a logged-in operator could not do by clicking.
 
 Everything runs on `gemini-3.5-flash`.
 
@@ -87,7 +87,7 @@ Agent Runtime exposes the container's own HTTP routes under an `/api` passthroug
 
 The `AgentTool` wrapper is the important detail. A local specialist built in `single_turn` mode is exposed by ADK as a tool, so calling it returns control to the orchestrator when it finishes. A `RemoteA2aAgent` has no such mode — as a bare `sub_agent` it would be reached by `transfer_to_agent`, which hands the turn away permanently and never comes back. Wrapping it in `AgentTool` restores the call-and-return shape that the phase driver depends on.
 
-The local fallback is what makes local testing possible at all: with no `CASERELAY_URL_*` set, the orchestrator assembles the whole fleet in one process and needs no cloud. In control-plane mode (`CASERELAY_CONTROL_PLANE=1`), the fallback is disabled — every specialist must be reachable via its `CASERELAY_URL_*` env var, and the control plane fails fast at startup if endpoints are missing. The old silent in-process fallback is gone for deployed use.
+The local fallback is what makes local testing possible at all: with no `CASERELAY_URL_*` set, the orchestrator assembles the whole fleet in one process and needs no cloud. In control-plane mode (`CASERELAY_CONTROL_PLANE=1`), the fallback is disabled — every specialist must be reachable via its `CASERELAY_URL_*` env var, and the control plane fails fast at startup if endpoints are missing rather than falling back silently.
 
 Authenticated A2A calls are handled by two small modules: `backend/runtime/a2a_auth.py` mints and refreshes a bearer token from Application Default Credentials (`RemoteA2aAgent`'s default client sends no credentials, and the `/api` passthrough sits behind Google's API frontend, which rejects anonymous requests); `backend/runtime/a2a_client.py` is the caller side, sending a JSON-RPC `message/send` and flattening every text part out of whatever shape the task result came back in.
 
@@ -101,7 +101,7 @@ When `CASERELAY_STATE=firestore` those same dicts become a read-through / write-
 
 Firestore uses the **named database `caserelay`**, not `(default)`. Agent Runtime's network proxy URL-encodes parentheses in outgoing requests, turning `(default)` into `%28default%29`, which Firestore rejects with HTTP 400. A named database sidesteps this entirely since it contains no special characters.
 
-The reason this exists is structural, not a nice-to-have. Once the eight agents are eight separate endpoints they no longer share memory. The authority grant that the orchestrator writes when it activates the case has to be readable by the education agent running on a different host a second later. Without a shared store, the education agent looks for its grant, finds nothing, and raises `no granted authority`.
+The reason this exists is structural, not a nice-to-have. Once the eight agents are eight separate endpoints they no longer share memory. The authority grant that intake proposes, and that activation flips to `granted`, has to be readable by the education agent running on a different host a second later. Without a shared store, the education agent looks for its grant, finds nothing, and raises `no granted authority`.
 
 One detail in `Workspace.load()` is worth calling out: it re-syncs from Firestore on **every** read, not just when the local dict is empty. Deployed instances are long-lived and serve many requests, so a view cached once goes stale the moment another agent writes. `get_case()` raises `CaseNotFound` for a case that was never ingested — the agents read cases, they never invent one.
 
@@ -115,13 +115,16 @@ Run events are the one collection that reads the other way round. `workspace.run
 
 ### The Gateway is a single choke point
 
-Every specialist's first tool call goes to `authorized_context(case_id, purpose)` in `backend/gateway/gateway.py`. That function does five things in order:
+Every specialist's first tool call goes to `authorized_context(case_id, purpose)` in `backend/gateway/gateway.py`. That function does six things in order:
 
 1. Resolves the caller's principal from GCP credentials (deployed engines) or `RunContext.agent_identity` (in-process), and `verify()`s that the identity is known in the registry.
 2. Looks up a matching authority grant with `workspace.grant_for(case_id, identity, purpose)`. **No grant, no data** — it raises `IdentityDenied`.
-3. Assembles the full ("fat") set of 14 case facts, then calls `project(fat, grant["allowed_fields"])` from `backend/policy/projection.py`. `project` is fifteen lines and does exactly one thing: split the payload into what is allowlisted and what is not, returning `(projected, disclosed, withheld)`.
-4. Appends a `disclosure` audit event.
-5. Writes a Memory Bank entry keyed on the purpose.
+3. Checks that the grant's `granted_to` is the caller. A principal mismatch is refused even though a grant for that purpose exists.
+4. Assembles the full ("fat") set of 14 case facts, then calls `project(fat, grant["allowed_fields"])` from `backend/policy/projection.py`. `project` is fifteen lines and does exactly one thing: split the payload into what is allowlisted and what is not, returning `(projected, disclosed, withheld)`.
+5. Appends a `disclosure` audit event.
+6. Writes a Memory Bank entry keyed on the purpose.
+
+Each of the three refusals above writes its own `denial` audit event before raising, so a rejected access leaves a record rather than only an exception.
 
 The important property is that **the stripping happens in code**. The projection is not a prompt instruction that the model is trusted to honour. The education agent literally receives a three-key dict; there is no `diagnosis` field in its context for it to leak, hallucinate around, or be talked into revealing.
 
@@ -141,7 +144,7 @@ Note what is *not* in any list: `diagnosis`, `legal_strategy`, `family_notes`, `
 
 `authorized_context` returns the referral id as a top-level key on its result, *outside* the projected `payload`. This looks inconsistent until you see the reasoning: `allowed_fields` governs **facts about the child**, and a referral id is not one — it is an addressing handle for a partner who was already sent that exact referral. The shelter agent needs `shl-1042` to ask Safe Harbor about the right case; that discloses nothing new to Safe Harbor.
 
-Before this change, a specialist whose grant covered only its own status fields (family services can see exactly one field, `assessment_scheduling`) had no handle at all to query its partner with, so it silently reported `pending` for a reason that had nothing to do with the partner's actual answer.
+Without it, a specialist whose grant covers only its own status fields — family services can see exactly one field, `assessment_scheduling` — would have no handle to query its partner with, and would report `pending` for a reason that had nothing to do with the partner's actual answer.
 
 ### Every access is audited
 
@@ -167,7 +170,7 @@ Screening **fails closed**: if the Model Armor API is unreachable or returns no 
 
 When the verdict is `quarantine`, the matched filter names (e.g. `sdp`) are included in the audit trail and the maya verdict reports the rule as `sdp`. The policy basis recorded on the escalation remains `block_cross_scope_request` / `CR-POLICY-003`.
 
-The verifier agent's `inspect_school_callback` tool pulls the school's callback, runs it through `screen()`, and returns the verdict. When the verdict is `quarantine`, its second tool `open_escalation` writes a **pending** human approval (`approval_id: apr-{uuid4[:8]}`, policy basis `["block_cross_scope_request", "CR-POLICY-003"]`) plus a `quarantine` audit event. It does not carry out the instruction, not even partially, and it never touches a commitment status.
+The verifier agent's `inspect_partner_callback` tool pulls the school's callback, runs it through `screen()`, and returns the verdict. When the verdict is `quarantine`, its second tool `open_escalation` writes a **pending** human approval (`approval_id: apr-{uuid4[:8]}`, policy basis `["block_cross_scope_request", "CR-POLICY-003"]`) plus a `quarantine` audit event. It does not carry out the instruction, not even partially, and it never touches a commitment status.
 
 Nothing moves until a supervisor decides. `approve_escalation` is not on the orchestrator's tool surface — the guarantee is structural, not a matter of instruction compliance. The run parks in `awaiting_supervisor`; only an explicit `POST /v1/approvals/{approval_id}/decide` carrying a `decided_by` identity can release it.
 
@@ -208,11 +211,11 @@ Both are written to the store as ordinary case data. Once ingested they are indi
 
 ## 7. Why the phases are driven by code
 
-`backend/runtime/fleet.py` defines `PHASE_REGISTRY`: fourteen `PhaseSpec` entries, each one orchestrator turn with one hand-written prompt. Each phase is one turn.
+`backend/runtime/fleet.py` defines `PHASE_REGISTRY`: twelve `PhaseSpec` entries — five fan-out phases plus `4-checkpoint`, `5-wake`, `6-quarantine`, `8-followup`, `9-nudge`, `10-unanswered` and `11-memory` — each one orchestrator turn with one hand-written prompt.
 
 This is not laziness about prompting — it is a finding. A single turn asked to chain a dozen ordered steps silently drops some of them, and reports success anyway. Two specific failure modes led to the current shape:
 
-- **Sequencing.** The fourteen phases had to become fourteen turns because one turn asked to do all of them would skip steps and claim they were done.
+- **Sequencing.** The phases had to become one turn each because a single turn asked to do all of them would skip steps and claim they were done.
 - **Fan-out.** The five-specialist fan-out is one specialist per turn. Asked for all five in a single turn, the model reliably called two or three and reported the rest as complete — leaving real commitments `pending` behind a confident summary. Hence each fan-out prompt says *"Call no other specialist. Then stop."*
 
 **The list is not a script, though, and this is the part worth being precise about.** Each `PhaseSpec` carries a `precondition` — a predicate over real case state — and the run engine in `backend/api/main.py` re-evaluates every phase's precondition after each completed phase, dispatching whichever are now ready. Phases sharing a `group` go out concurrently; among ungrouped phases the lowest `priority` wins as a deterministic tie-break; each phase runs at most once per run. So which phases run, and how many, is decided by what the case actually looks like, not by a cursor walking an array. CR-1042 never reaches `10-unanswered` because its provider answers; `priya` does because hers does not.
@@ -305,7 +308,7 @@ The school sends a callback. From `fixtures/cr-1042/poisoned_school_payload.json
 }
 ```
 
-The orchestrator asks `safeguarding_verifier` to inspect it. `inspect_school_callback` reads the education referral id off the stored packet, fetches the payload, and runs `screen()` on it. Model Armor's SDP filter (backed by the Cloud DLP custom dictionary in `caserelay-cross-scope`) matches the cross-scope attempt, and the verdict is `quarantine` with rule `sdp`.
+The orchestrator asks `safeguarding_verifier` to inspect it. `inspect_partner_callback` reads the education referral id off the stored packet, fetches the payload, and runs `screen()` on it. Model Armor's SDP filter (backed by the Cloud DLP custom dictionary in `caserelay-cross-scope`) matches the cross-scope attempt, and the verdict is `quarantine` with rule `sdp`.
 
 The verifier then calls `open_escalation`, which writes a pending approval (`apr-{uuid4[:8]}`) and a `quarantine` audit event with the verifier's agent identity. **The instruction is never carried out.**
 
@@ -434,6 +437,10 @@ RUN=$(curl -s -X POST "localhost:8000/v1/cases/$CASE/runs" \
   | python3 -c 'import sys,json; print(json.load(sys.stdin)["run_id"])')
 
 curl -N "localhost:8000/v1/runs/$RUN/events"      # AG-UI frames as they happen
+
+# that run parks at the activation gate. Release it, which starts a new run.
+curl -s -X POST "localhost:8000/v1/cases/$CASE/activate" \
+  -H 'content-type: application/json' -d '{"supervisor_id":"supervisor-001"}'
 ```
 
 **Leave `due_in` at `10s`, and do not raise it to look more realistic.** `due_in` is not a commitment deadline — it is the window `schedule_wake` spreads the five per-commitment checkpoints across, at `now + due_in × (i+1)/5`, so the earliest checkpoint lands at a fifth of whatever you pass. The wake phase only promotes a checkpoint that is already past due. At `10s` the earliest is due at +2s and has lapsed by the time the wake is asked for, so the case wakes and carries on; at anything much longer it is still in the future, nothing wakes, and with nothing awake the quarantine, follow-up and memory preconditions are all unsatisfiable — no phase is ready and the run ends `run_partial_failure` with no escalation gate and no close.
@@ -446,7 +453,19 @@ curl -s -X POST localhost:8000/v1/pubsub/push -H 'content-type: application/json
   -d "{\"message\":{\"data\":\"$(printf '{"event_type":"workflow_wake","case_id":"%s"}' "$CASE" | base64)\"}}"
 ```
 
-The push handler replies with the `run_id` of the resumed run, which streams from the same endpoint and carries the case through the wake, the quarantine, the approval and the follow-up. OIDC verification on that route is skipped when `CASERELAY_CONTROL_PLANE` is unset, which is what makes the stand-in possible locally and why the deployed service sets it.
+OIDC verification on that route is skipped when `CASERELAY_CONTROL_PLANE` is unset, which is what makes the stand-in possible locally and why the deployed service sets it.
+
+The push handler replies with the `run_id` of the resumed run, which streams from the same endpoint and carries the case through the wake and the quarantine, then parks on the escalation gate. That decision is a separate call, exactly as activation was:
+
+```bash
+APPROVAL_ID=$(curl -s localhost:8000/v1/approvals \
+  | python3 -c 'import sys,json; print(next(a["approval_id"] for a in json.load(sys.stdin)
+                if a.get("action_type") == "escalation"))')
+curl -s -X POST "localhost:8000/v1/approvals/$APPROVAL_ID/decide" \
+  -H 'content-type: application/json' -d '{"decision":"approved","decided_by":"supervisor-001"}'
+```
+
+Deciding it starts the run that does the scoped follow-up and closes the case.
 
 ```bash
 curl -s "localhost:8000/v1/cases/$CASE" | python3 -m json.tool
@@ -523,7 +542,7 @@ Two things to check in that output: the shelter agent never sees Maya's name, an
 
 The portal reaches it through a Next.js BFF proxy (`portal/src/app/api/control-plane/[...path]/route.ts`) that mints Google-signed ID tokens server-side. No credential is exposed to the browser. SSE endpoints are proxied with incremental delivery preserved.
 
-The control plane deploys with `CASERELAY_URL_*`, `CASERELAY_IDENTITY_*` and `CASERELAY_CONTROL_PLANE=1`, and fails fast at startup if endpoints are missing. The old silent in-process fallback is gone — a portal-triggered run fans out over real A2A to the deployed engines.
+The control plane deploys with `CASERELAY_URL_*`, `CASERELAY_IDENTITY_*` and `CASERELAY_CONTROL_PLANE=1`, and fails fast at startup if endpoints are missing rather than falling back silently, so a portal-triggered run fans out over real A2A to the deployed engines.
 
 Every read and write model is under `/v1`; the AG-UI chat endpoint and the liveness probe sit outside it:
 
@@ -655,7 +674,7 @@ A useful pairing for demos: `--keep`, then `python infra/case_cli.py show <case_
 - All eight agents deployed to Vertex AI Agent Engine (reasoning engines) in `us-central1`, each with platform-managed Agent Identity (`identityType: AGENT_IDENTITY`).
 - `caserelay-control-plane` deployed to Cloud Run (`--timeout=900`, `--no-cpu-throttling`, gen2, min/max instances pinned to 1), auth-required (`allUsers` removed from `roles/run.invoker`).
 - Portal reaches the control plane through a BFF proxy that mints Google-signed ID tokens server-side. No credential exposed to the browser. SSE proxied with incremental delivery.
-- Control plane deploys with `CASERELAY_CONTROL_PLANE=1` and fails fast if specialist endpoints are missing. The old silent in-process fallback is gone.
+- Control plane deploys with `CASERELAY_CONTROL_PLANE=1` and fails fast if specialist endpoints are missing, rather than falling back to an in-process fleet.
 - Portal-triggered runs fan out over real A2A to the deployed engines. Verified: case CR-0825094224 ran to completion with 7 engines serving A2A.
 - Local in-process end-to-end: green, matching section 9.
 - Cloud end-to-end against deployed endpoints: green, with the same final state, verified by reading Firestore rather than trusting the agents.
@@ -666,13 +685,13 @@ A useful pairing for demos: `--keep`, then `python infra/case_cli.py show <case_
 - **Model Armor screening** via `modelarmor.googleapis.com` template `caserelay-screen`: PI/jailbreak detection, malicious URI, SDP Advanced Config referencing a Cloud DLP inspect template (`caserelay-cross-scope`) with custom dictionary detectors and a hotword proximity rule. The cross-scope policy is auditable cloud configuration enforced by Google services, not hand-coded regexes. Screening fails closed: `ScreeningUnavailable` quarantines with rule `screening_unavailable`.
 - **GEAP Memory Bank** (instance `8631858420611284992`) accessed through ADK's `VertexAiMemoryBankService` (`backend/memory/platform.py`). Sessions are extracted once per wake via `memories.generate` (synchronous), scoped per case (`case_id` mapped to the ADK `user_id` slot, cross-case isolation verified). Three custom memory topics configured: `partner_contacts`, `institutional_shortcuts`, `unblocking_strategies` — codified in `infra/bootstrap.sh`. The `amara` scenario is the memory showcase. Note: the older `backend/memory/bank.py` Firestore module still exists for lightweight per-purpose state; it is NOT the GEAP service.
 - **Cloud Trace enabled** on the fleet and control plane (`otel_to_cloud=True` in `agent_server.py`; `GOOGLE_CLOUD_AGENT_ENGINE_ENABLE_TELEMETRY=true` + `OTEL_SEMCONV_STABILITY_OPT_IN=gen_ai_latest_experimental` set in `deploy_fleet.sh`). ADK spans (`invoke_agent`, `call_llm`, `execute_tool`) carry `gen_ai.*` attributes and token counts. **Limitation**: control-plane and engine traces do NOT share a trace id — Agent Runtime starts a fresh trace context rather than honouring the incoming `traceparent`. End-to-end distributed correlation across both hops is not achieved.
-- **Pub/Sub push + Cloud Scheduler** drives timed wakes automatically: subscription `caserelay-events-push` → `/v1/workflows/sweep`, hourly cron (`0 * * * *`) via scheduler job `caserelay-sweep`, dead-letter after 5 attempts. All codified in `infra/bootstrap.sh`.
+- **Pub/Sub push + Cloud Scheduler** drives timed wakes automatically: subscription `caserelay-events-push` pushes to `/v1/pubsub/push`, which calls the same `durable.sweep()` that `/v1/workflows/sweep` calls; hourly cron (`0 * * * *`) via scheduler job `caserelay-sweep`, dead-letter after 5 attempts. All codified in `infra/bootstrap.sh`.
 - **GEAP Agent Platform Sessions** on two dedicated Agent Engines, both through ADK's `VertexAiSessionService`. `caserelay-chat-sessions` holds the operator chat transcript, with the AG-UI thread id doubling as the platform session id so a restarted instance resolves a returning conversation with one read rather than listing every session the operator has ever held. `caserelay-run-sessions` holds every orchestrator agent turn, one session per phase invocation — not one per run, because the fan-out dispatches five phases concurrently and Google documents row-level locking only for `DatabaseSessionService`. A deployed control plane raises at startup if either engine id is unset, rather than degrading to in-memory sessions that look identical until the instance recycles mid-case. A throttled append (the 300-per-minute project quota is reachable by a five-way fan-out on its own) is retried with jittered backoff and, if it still will not land, kept in the session the model reads from and in the turn Memory Bank extracts from, with the lost durable copy logged and traced. Both engines are separate from each other and from the Memory Bank instance: they hold different things and a retention or deletion decision about one must not reach another.
 - **AG-UI on the run event wire.** Both event surfaces carry AG-UI envelopes — the live SSE stream (`/v1/runs/{run_id}/events`) and the recorded replay (`/v1/cases/{case_id}/events`) — so the portal decodes a replayed history and a live one the same way. Five of CaseRelay's event names have a true counterpart and travel as `RUN_STARTED`, `RUN_FINISHED`, `RUN_ERROR`, `STEP_STARTED` and `STEP_FINISHED`; the rest have none and travel as `CUSTOM` naming themselves, with the whole internal event alongside. The stream's own control frames go out in the same envelope, so every frame a client parses is an AG-UI event. Storage is untouched — `backend/api/wire.py` is the only translation point.
-- **Run history survives a restart.** Each run event is a Firestore document under its run, keyed by the position it was pushed at, so a read sorts back into the order the live stream showed without depending on timestamps that repeat within a phase. The write is handed to a background thread and the in-memory list the SSE stream serves is updated first, so narrating a phase never waits on the database; a run flushes the queue once it has finished. Before this, any Cloud Run restart emptied a case's activity feed, timeline rail and audit trail while the case itself stayed valid. Deleting a case now deletes its events too, since Firestore keeps subcollections when their parent document goes.
+- **Run history survives a restart.** Each run event is a Firestore document under its run, keyed by the position it was pushed at, so a read sorts back into the order the live stream showed without depending on timestamps that repeat within a phase. The write is handed to a background thread and the in-memory list the SSE stream serves is updated first, so narrating a phase never waits on the database; a run flushes the queue once it has finished. A Cloud Run restart therefore leaves a case's activity feed, timeline rail and audit trail intact. Deleting a case deletes its events with it, since Firestore keeps subcollections when their parent document goes.
 - **A missed deadline has consequences.** `backend/workflows/escalation.py` is the ladder after a wake: every overdue provider is chased exactly once, scoped by the same authority grant that covered the original request. One that answers names the officer who has taken the referral on and that name is written back onto the referral; one that stays silent is raised to the supervisor as a `supervisor_notice`, deliberately a different kind of approval from the safeguarding escalation because "nobody replied" and "the reply reached outside its scope" need different things from a volunteer.
 - **Plain-language narration with real names.** Every run event carries a `message` a volunteer can read, naming the supervisor, the partner organisation and — once a provider names one — the person who took the referral on. Names are read off the case's referral packet rather than written into a template, so a name cannot follow a string onto another child's case. An organisation is named in full the first time a run mentions it and by its short name after that.
-- **Run records persist to Firestore.** The portal's case detail and cases list render live control-plane data for real cases; the other screens remain a scripted walkthrough with mock data.
+- **Run records persist to Firestore.** The portal's cases list, case detail, registry and approvals screens all render live control-plane data. The scripted walkthrough with mock data is reached only by opening one of the six mock case ids in `portal/src/lib/mock/cases.ts` (`CR-1042` and its siblings) on the case detail route.
 - Memory Bank verified on cloud: all five purposes plus the checkpoint scope.
 - Test cases created and deleted on demand, from either source, with `purge` as a backstop.
 - All eight agents are **auto-registered in Google Cloud Agent Registry** by `agents-cli deploy`. There is no separate registration step.
@@ -681,9 +700,15 @@ A useful pairing for demos: `--keep`, then `python infra/case_cli.py show <case_
 
 ### Portal status
 
-The portal is deployed at [`caserelay-portal-6nwo7o4bbq-uc.a.run.app`](https://caserelay-portal-6nwo7o4bbq-uc.a.run.app) on Cloud Run, behind HTTP Basic auth. Credentials on request. `caserelay-portal.web.app` is not live.
+The portal is deployed at [`caserelay-portal-6nwo7o4bbq-uc.a.run.app`](https://caserelay-portal-6nwo7o4bbq-uc.a.run.app) on Cloud Run. `caserelay-portal.web.app` is not live.
 
-Persona switching (advocate vs. platform view) is UI-only and carries no authentication or access-control implications. There is no end-user authentication.
+Access to it works like this:
+
+- **A session login page guards the serving revision.** On `caserelay-portal-00008-p8w`, which takes 100% of traffic, `/` returns a 307 to `/login`, `/cases` and `/admin` return a 307 to `/login?next=…`, and the API returns `401 {"error": "Not signed in."}` to an unauthenticated request.
+- **`portal/src/middleware.ts` is the committed HTTP Basic gate.** One shared credential — `admin@caserelay.com` and the password supplied in the Devpost submission's testing instructions — challenged with `WWW-Authenticate: Basic realm="CaseRelay"`. It does not execute under Next.js 16 on this build: no path on the deployed portal returns a Basic challenge.
+- **The in-app persona selector is a prototype view-switcher, not a security boundary.** `useSignIn.ts` has no auth backend, and it accepts any password. The control plane authenticates the portal, not the person using it.
+
+The persona does decide what the UI offers — only the supervisor persona is shown decision buttons on an approval gate, and other personas see the same card read-only — and it decides which name is recorded as the decider.
 
 ### Open: invoking from the Gemini Enterprise web UI
 
@@ -695,7 +720,7 @@ The symptom: invoking from the UI fails with `Reasoning Engine Execution Service
 
 The hypothesis: Gemini Enterprise invokes an ADK agent via Vertex AI `:streamQuery`, which on a standard `AdkApp` dispatches to `streaming_agent_run_with_events`. Our deployment does not use `AdkApp` — it serves a custom FastAPI app built by `get_fast_api_app`, so the native method may simply not be there to dispatch to.
 
-There is a partial mitigation already in the code, and it is important not to mistake it for a fix. `app/agent_server.py` now passes `gemini_enterprise_app_name=FOLDER` to `get_fast_api_app`. That argument gates an entire route block inside ADK: without it, the `/api/reasoning_engine` and `/api/stream_reasoning_engine` routes that `streamQuery` calls are never mounted at all, which produces a 404 on every invocation and a silent fallback to the base Gemini model. So the routes should now exist.
+There is a partial mitigation in the code, and it is important not to mistake it for a fix. `app/agent_server.py` passes `gemini_enterprise_app_name=FOLDER` to `get_fast_api_app`. That argument gates an entire route block inside ADK: without it, the `/api/reasoning_engine` and `/api/stream_reasoning_engine` routes that `streamQuery` calls are never mounted at all, which produces a 404 on every invocation and a silent fallback to the base Gemini model. With it, those routes should exist.
 
 Whether that resolves the `NOT_FOUND` has **not** been confirmed. Treat this as an open issue with a plausible cause and a candidate mitigation in place, not as solved.
 
@@ -708,10 +733,10 @@ Worth being honest about, since section 6 makes a strong claim about the agents 
 
 Neither of these is case data, and neither is read by an agent as a fact about a child.
 
-The `tools` list on each card now names the agent's real tools — `safeguarding-verifier-v1` advertises `inspect_school_callback` and `open_escalation`, `education-liaison-v1` advertises `get_authorized_context`, `query_school` and `submit_enrollment_status`, and so on for every agent in the fleet. The identities, owner orgs and data scopes are the ones the gateway enforces. `GET /v1/registry` serves the fixture as-is, and a judge who cross-references it against the agent source will find a match.
+The `tools` list on each card names the agent's real tools — `safeguarding-verifier-v1` advertises `inspect_partner_callback` and `open_escalation`, `education-liaison-v1` advertises `get_authorized_context`, `query_school` and `submit_enrollment_status`, and so on for every agent in the fleet. The identities, owner orgs and data scopes are the ones the gateway enforces. `GET /v1/registry` serves the fixture as-is, and a judge who cross-references it against the agent source will find a match.
 
 ### One path, not two
 
-The tree used to carry an alternative inbound-payload path alongside the live one — `gateway.dispatch()`, handler registrations in `backend/runtime/handlers.py`, and a `service.py` beside each agent — and a reader could reasonably have assumed it was load-bearing when nothing called it. It is gone. `backend/gateway/` is now `gateway.py` and `armor.py`, and there is exactly one specialist path: `authorized_context()` for the projected fields, then a direct `sim` call from the agent's own tool. The quarantine in the journey comes from `verifier/agent.py::open_escalation`, which creates `apr-{uuid4[:8]}`.
+`backend/gateway/` holds two modules, `gateway.py` and `armor.py`, and there is exactly one specialist path: `authorized_context()` for the projected fields, then a direct partner call from the agent's own tool. There is no second inbound-payload path — no `gateway.dispatch()`, no handler registry, no `service.py` beside each agent — so nothing in the tree looks load-bearing while going uncalled. The quarantine in the journey comes from `verifier/agent.py::open_escalation`, which creates `apr-{uuid4[:8]}`.
 
-`armor.screen()` is on that live path, via the verifier agent's `inspect_school_callback` tool. It calls the Model Armor API (`ModelArmorClient.sanitize_user_prompt`) against the `caserelay-screen` template, which delegates cross-scope detection to a Cloud DLP inspect template with custom dictionary detectors.
+`armor.screen()` is on that live path, via the verifier agent's `inspect_partner_callback` tool. It calls the Model Armor API (`ModelArmorClient.sanitize_user_prompt`) against the `caserelay-screen` template, which delegates cross-scope detection to a Cloud DLP inspect template with custom dictionary detectors.

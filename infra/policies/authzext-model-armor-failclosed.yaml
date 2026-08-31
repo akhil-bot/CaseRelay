@@ -1,4 +1,6 @@
-# Replaces the live caserelay-ma-authz-ext, which currently carries failOpen: true.
+# The definition of caserelay-ma-authz-ext that is live. `describe` returns no failOpen
+# field for this extension, which is the proto3 default of false; the sibling
+# caserelay-iap-authz-ext returns failOpen: true, so the field is reported when set.
 #
 # failOpen: true means a Model Armor timeout or outage lets the traffic through unscreened.
 # backend/gateway/armor.py raises ScreeningUnavailable and quarantines. In a system holding

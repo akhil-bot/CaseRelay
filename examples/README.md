@@ -5,9 +5,9 @@ Runnable ways to make CaseRelay do something, for readers who want more than the
 
 | | What it does | Needs |
 |---|---|---|
-| **[`local-maya-run.sh`](local-maya-run.sh)** | The flagship case end to end against a control plane on your laptop: activation gate, five-way fan-out, checkpoint, wake, Model Armor quarantine, escalation gate, scoped follow-up | ADC + `roles/aiplatform.user` on any GCP project |
+| **[`local-maya-run.sh`](local-maya-run.sh)** | The flagship case end to end against a control plane on your laptop: activation gate, five-way fan-out, checkpoint, wake, quarantine, escalation gate, scoped follow-up | ADC + `roles/aiplatform.user` on any GCP project |
 | **[`cloud-scenario-run.sh`](cloud-scenario-run.sh)** | Any of the nine named scenarios against the deployed control plane and its eight reasoning engines | `roles/run.invoker` on `caserelay-control-plane` |
-| **[`scenarios.md`](scenarios.md)** | What each scenario demonstrates, which four do not demonstrate their own claim, and the two settings that decide whether a run reaches anything interesting | — |
+| **[`scenarios.md`](scenarios.md)** | What each scenario demonstrates, which three do not demonstrate their own claim, and the two settings that decide whether a run reaches anything interesting | — |
 
 ---
 

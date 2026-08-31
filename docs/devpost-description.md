@@ -10,12 +10,12 @@ CaseRelay closes that gap with an accountable, governed multi-agent fleet.
 
 **The cycle:** A volunteer activates monitoring after verifying court authority. Eight ADK agents on Vertex AI Agent Runtime delegate scoped tasks to five simulated partner agencies over authenticated A2A. Four confirm. One defers and the system writes down when to come back. The run ends there on its checkpoints rather than holding a session open. No user prompt arrives. Cloud Scheduler sweeps every hour, finds checkpoints that have come due, publishes to Pub/Sub, and the case resumes itself — the same checkpoint logic, same authority grant, no human at the keyboard. The Education Agent requests only enrollment-status fields through Agent Gateway. The partner tries to retrieve medical notes. Model Armor quarantines it. The Safeguarding Verifier opens an escalation showing evidence, recipient, and policy basis, and records the quarantine against its own platform identity. The run parks with school enrollment still open. A supervisor approves. Only then does the scoped follow-up go out. The district is chased once within the same authority grant that covered the original request. It names the enrollment coordinator who has taken the referral on. That name is written back. The commitment closes. Had nobody answered, the supervisor would have been told instead.
 
-The flagship case is called Maya. She is not the only scenario. A provider that goes silent ends up in front of a named human. A school asks for medical records while answering a question about enrollment. A partner reply cannot be parsed. Each scenario was run end to end against the deployed control plane on 29 August 2026, verified twice on two serving revisions. Where a scenario does not do what its definition claims, that is stated rather than omitted.
+The flagship case is called Maya. She is not the only scenario. A provider that goes silent ends up in front of a named human. A school asks for medical records while answering a question about enrollment. A partner reply cannot be parsed. Each scenario was run end to end against the deployed control plane on 31 August 2026, with the captured output committed to the repository. Where a scenario does not do what its definition claims, that is stated rather than omitted.
 
 **Boundaries:** CaseRelay makes no placement, custody, safety-risk, clinical, or eligibility decisions. It neither replaces existing case-management systems nor creates an unrestricted cross-agency child profile. It is not autonomous emergency response.
 
 **Architecture discipline:** Eight agents deployed as Vertex AI reasoning engines, each with a platform-managed Agent Identity and a scoped data projection. None of the eight runs on Cloud Run; the control plane, the portal and the partner MCP server do. The eight have:
-- **Continuity Orchestrator** — operational facts only; cannot activate or contact anyone
+- **Continuity Orchestrator** — operational facts only, never raw partner records; cannot activate a case
 - **Intake & Authority Agent** — extracts commitments; cannot activate without supervisor
 - **Education Liaison Agent** — enrollment status only; no health/legal/family data
 - **Health Coordination Agent** — appointment status only; no diagnoses or clinical notes
@@ -24,7 +24,7 @@ The flagship case is called Maya. She is not the only scenario. A provider that 
 - **Family Services Agent** — scheduling/status only; no risk scores or findings
 - **Safeguarding Verifier** — policy enforcement; cannot approve its own actions
 
-The control plane is auth-required. The portal is deployed to Cloud Run behind a session login page. Both are production deployments; both stay live through the judging period (Oct 1, 2026).
+The control plane is auth-required. The portal is deployed to Cloud Run behind a login gate. Both are deployed on Cloud Run and both stay live through the judging period (Oct 1, 2026).
 
 ## How It Was Built
 

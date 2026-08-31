@@ -1,5 +1,10 @@
 # Admin Page Spec — `/admin`
 
+The contract the admin page was built against, and still the reference for its behaviour. The page
+exists at `portal/src/app/(app)/admin/page.tsx` and every endpoint below is live on the control
+plane; the imperative voice here ("render", "default to") is the instruction it was built from, not
+a description of work outstanding.
+
 Operator surface for synthetic cases only. Refuses to display any case without `test_case: true`.
 
 ## Sequence
@@ -59,7 +64,7 @@ Navigate to `/cases/{case_id}`, hit **Run**:
 
    The five specialist fan-out phases (`3-fanout-*`) execute concurrently, so their events will interleave. Each event carries a `phase` field identifying its specialist (e.g. `3-fanout-education_liaison`) for correct UI attribution.
 
-   Phases are not a fixed sequence: `PHASE_REGISTRY` in `backend/runtime/fleet.py` holds fourteen specs, each with a precondition and a priority, and the engine picks the highest-priority phase whose precondition currently holds. The UI should therefore treat the phase label as a name, not a step number — `9-nudge` and `10-unanswered` appear only when a provider actually missed a deadline.
+   Phases are not a fixed sequence: `PHASE_REGISTRY` in `backend/runtime/fleet.py` holds twelve specs — one per specialist for the fan-out, plus checkpoint, wake, quarantine, follow-up, nudge, unanswered and memory — each with a precondition and a priority, and the engine picks the highest-priority phase whose precondition currently holds. The UI should therefore treat the phase label as a name, not a step number — `9-nudge` and `10-unanswered` appear only when a provider actually missed a deadline.
 
 4. Poll `GET /v1/runs/{run_id}` for the authoritative terminal state:
 
@@ -70,6 +75,8 @@ Navigate to `/cases/{case_id}`, hit **Run**:
 | `completed` | All phases succeeded | green / success |
 | `partial_failure` | Some phases failed (see `failed_phases`) | amber / warning |
 | `failed` | All phases failed or fatal error (see `error`) | red / error |
+| `suspended` | Run parked on its checkpoints; the sweep resumes it as a new run | amber / waiting |
+| `awaiting_supervisor` | Run parked on the activation or escalation gate; a human decision resumes it | amber / waiting |
 
 The response also includes `failed_phases` (list of phase labels that errored) and `error` (human-readable message) when applicable.
 
@@ -103,5 +110,5 @@ When `approval_required` arrives, surface the approval in the Approval Center:
 | DELETE | `/v1/cases/{case_id}` | Cleanup |
 | — | `/agui` | Operator copilot chat, mounted as its own AG-UI app over `ag_ui_adk`; the transcript is held on Agent Platform Sessions, keyed on the AG-UI thread id |
 
-Base URL: `https://caserelay-control-plane-189353698936.us-central1.run.app` (auth-required; portal reaches it through the BFF proxy)  
+Base URL: whatever `infra/control_plane_url.txt` holds — currently `https://caserelay-control-plane-6nwo7o4bbq-uc.a.run.app` (auth-required; portal reaches it through the BFF proxy)  
 OpenAPI contract: `contracts/openapi.json`

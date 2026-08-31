@@ -25,7 +25,7 @@ Where each submission component lives. Requirements are from the
 | 1 | **Demo video** | **Done** | [https://www.youtube.com/watch?v=Bp2PKUXg_PQ](https://www.youtube.com/watch?v=Bp2PKUXg_PQ) — public, 234 seconds, `#AllThingsAgenticHackathon` in description |
 | 2 | **Text description** | **Done** | [devpost-description.md](devpost-description.md) pasted into the Devpost description field |
 | 3 | **Code repository** | **Done** | [github.com/akhil-bot/CaseRelay](https://github.com/akhil-bot/CaseRelay) — public |
-| 4 | **Hosted URL** | **Done** | `https://caserelay-portal-6nwo7o4bbq-uc.a.run.app` — session login, returns 401 on case data without session cookie |
+| 4 | **Hosted URL** | **Done** | `https://caserelay-portal-6nwo7o4bbq-uc.a.run.app` — gated; returns 401 on case data to an unauthenticated request |
 | 5 | **Spin-up instructions** | **Done** | [README quick start](../README.md#quick-start) plus [deploy.md](deploy.md) |
 | 6 | **Architecture diagram** | **Done** | `docs/diagrams/caserelay-multi-agent-mesh.png`, embedded at the top of the README |
 
