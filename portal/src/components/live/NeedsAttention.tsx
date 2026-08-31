@@ -127,7 +127,7 @@ function attentionItems(
       title: commitmentTitle(domain, labels),
       icon: DOMAIN_META[domain].icon,
       variant: "warn",
-      body: `Its date passed ${formatFollowUp(deadline)} and nobody has answered.`,
+      body: `Its date passed ${formatFollowUp(deadline, true)} and nobody has answered.`,
     });
   }
 

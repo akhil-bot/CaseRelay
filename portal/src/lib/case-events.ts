@@ -168,28 +168,32 @@ export function formatMoment(ms: number, scale: TimeScale): string {
   return at.toLocaleDateString([], { day: "numeric", month: "short" });
 }
 
-/** A follow-up date, named relative to today where that is what a person would say. */
-export function formatFollowUp(ts: unknown): string {
+/**
+ * A follow-up date, named relative to today where that is what a person would say.
+ *
+ * Pass `past = true` when the date is already overdue (e.g. NeedsAttention).
+ * For upcoming checkpoints (e.g. DormantBanner) the sweep runs on an hourly
+ * cadence, so the exact minute is never a reliable promise — "within the hour"
+ * is the honest window.
+ */
+export function formatFollowUp(ts: unknown, past = false): string {
   const ms = parseTime(ts);
   if (ms === null) return "";
   const due = new Date(ms);
   if (due.toDateString() === new Date().toDateString()) {
-    return `today at ${due.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`;
+    return past ? "today" : "within the hour";
   }
   return due.toLocaleDateString([], { day: "numeric", month: "short" });
 }
 
 /**
- * A scheduled time, always shown as a concrete local clock time so the viewer
- * knows exactly when the follow-up is — never a vague relative word.
+ * A scheduled time for activity-feed notes and "next steps" items.
  *
- * Returns "" when now === 0, which is the server snapshot from useNow(). This
- * prevents a hydration mismatch: both server and client agree on an empty string
- * until the clock is live in the browser, at which point the real value fills in.
+ * Returns "" when now === 0 (server snapshot) to prevent hydration mismatches.
  *
- * Past times are described as "was due at …" so they do not read as a broken
- * future promise — this was the original complaint that drove earlier attempts
- * at relative formatting.
+ * For today's checkpoints the hourly sweep means the exact clock minute is
+ * never reliable, so "within the hour" replaces the specific time. For dates
+ * beyond today the date is shown without a time for the same reason.
  */
 export function formatScheduledAt(ts: unknown, now: number): string {
   if (now === 0) return "";
@@ -197,17 +201,13 @@ export function formatScheduledAt(ts: unknown, now: number): string {
   if (ms === null) return "";
 
   const at = new Date(ms);
-  const timeStr = at.toLocaleTimeString([], { hour: "numeric", minute: "2-digit", hour12: true });
   const isToday = at.toDateString() === new Date(now).toDateString();
   const isPast = ms < now;
-
-  if (isToday) {
-    if (isPast) return `was due at ${timeStr}`;
-    return `due at ${timeStr}`;
-  }
   const dateStr = at.toLocaleDateString([], { month: "short", day: "numeric" });
-  if (isPast) return `was due ${dateStr} at ${timeStr}`;
-  return `due ${dateStr} at ${timeStr}`;
+
+  if (isToday) return "within the hour";
+  if (isPast) return `was due ${dateStr}`;
+  return `due ${dateStr}`;
 }
 
 // ─── The audit trail's vocabulary ─────────────────────────────────────────────
