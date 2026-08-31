@@ -130,24 +130,28 @@ Run 1 is fast — under a minute. If you are waiting three minutes for fan-out, 
 
 **Approve the escalation** on the same page, then:
 
-**Run 3 — close out.**
+**Run 3 — guard catch, chase, close.** *(post-guard behaviour — see note below)*
 
 | Phase | Event | Expected message | ~Time | What it proves |
 |---|---|---|---|---|
 | — | `run_started` | "Escalation decided — picking Maya's case back up." | 0s | Third run id |
 | — | `memory_recall` | "Recalled N notes from earlier work on Maya's case.", with up to three quoted previews under it | — | **Run 2** wrote memory (run 1 wrote none). This is the one run in the walkthrough where recall can fire, and it is not guaranteed — extraction has to have produced at least one fact. The injection of recalled memories into the orchestrator prompt for the wake, nudge and follow-up phases is deployed and live (`_MEMORY_DECISION_PHASES` in `backend/api/main.py`), with a `memory_injected` audit event when it fires; observed end-to-end on run `de73dabce1d4`, where one recalled memory was injected into `5-wake` and `8-followup`. The recalled content so far is general process observations rather than operationally specific intelligence, because the compressed end-to-end script re-executes orchestrator phases that the specialists already handled. The other path where a recalled memory reaches a model is `preload_memory` inside `11-memory` |
-| 8-followup | `phase_started` | "Contacting Lincoln Unified about Maya's school enrollment." | — | Scoped re-request under the same authority grant that covered the original outreach |
-| 8-followup | `phase_complete` | "Lincoln Unified has confirmed Maya's school enrollment." | 10–30s | **Education closes** — the district answers the scoped re-request and the commitment resolves |
+| 8-followup | `phase_started` | "Contacting Lincoln Unified School District about Maya's school enrollment." | — | Scoped re-request under the same authority grant that covered the original outreach |
+| 8-followup | `phase_complete` | "Maya's school enrollment was reported complete, but Lincoln Unified's own response does not confirm it — caught and held for follow-up." | 10–30s | **Commitment guard fires.** The education agent re-queries the SIS, receives `enrollment_found: false`, and claims `completed`. The deterministic guard compares the two, finds the explicit contradiction, and refuses the write — education is recorded as `blocked`, not `completed`. This is the guard catching a real unevidenced claim, not a test scenario |
+| 9-nudge | `phase_started` | "Following up on Maya's missed deadlines." | — | Education is still open and overdue after the guard blocked it, so the nudge precondition is now met |
+| — | `followup_sent` | "Chasing Lincoln Unified on Maya's school enrollment." | — | The ladder chases the overdue provider under the same authority grant |
+| — | `followup_answered` | "Sarah Miller has taken on Maya's school enrollment." | — | The district answers the chase and names the officer who owns the referral — the contact that was empty at intake |
+| 9-nudge | `phase_complete` | "The follow-ups landed — every commitment on Maya's case is fulfilled." | 10–20s | **Education resolves legitimately.** The follow-up response has no `enrollment_found: false` field, so the guard allows it. All five commitments are now `completed` |
 | 11-memory | `phase_started` | "Recording everything that happened for Maya's file." | — | Memory persistence |
 | 11-memory | `phase_complete` | "Case notes updated — every status on Maya's file is recorded." | 5–15s | All scopes written |
-| — | `run_completed` | "All 5 commitments for Maya are fulfilled." (or "4 of 5 commitments fulfilled for Maya." if the follow-up did not land) | — | Terminal state |
+| — | `run_completed` | "All 5 commitments for Maya are fulfilled." | — | Terminal state |
 | — | `case_closed` | "Case closed — every commitment on Maya's file is fulfilled." | immediate | Auto-close fires: all five commitments `completed`, no pending approvals. Case status moves from `monitoring` to `closed` |
 
-**Expect `9-nudge` not to fire.** Its precondition is a missed deadline with a commitment still open and no pending escalation — but education is still open when the escalation gate parks run 2, so there is no past deadline without a pending escalation to go with it. Once you approve the escalation, `8-followup` runs first: it makes another scoped request to the district, and if the district answers, education closes without the run ever reaching the nudge. That is what happened on case `CR-0831110100`.
+> **This table describes behaviour after the commitment guard is deployed.** Before that deploy, the guard does not exist, `8-followup` accepts the agent's completion claim unchecked, education closes there, `9-nudge` never fires, and the case stays at `status: monitoring`. Case `CR-0831110100` on the current fleet shows the pre-guard arc. After the deploy, `8-followup` still runs first but the guard blocks it, which makes `9-nudge`'s precondition satisfiable — the phase graph is dynamic and the guard changes which path through it the case takes.
 
-What closes education is `8-followup`, narrated "Lincoln Unified has confirmed Maya's school enrollment." There is no `followup_answered` event naming a coordinator in the observed arc — the district answers the scoped re-request directly and the commitment resolves.
+**Why `9-nudge` fires after the guard.** Before the guard, `8-followup` accepted the agent's claim, closed education, and left no open commitment for the nudge to chase. After the guard, `8-followup` runs but the completion claim is refused — education stays `blocked`, the deadline is still past due, and no escalation is pending, so `_overdue_and_unchased` evaluates true and the nudge dispatches. The nudge calls `send_followup`, the district answers with a response that carries no contradicting field, the guard allows it, and education closes for real.
 
-If you do see `9-nudge` fire — "Chasing Lincoln Unified School District on Maya's school enrollment" followed by a `followup_answered` event — it means `8-followup` ran but the district did not answer, so the nudge ladder picked it up. That is a valid alternate path; run 3 just has one more phase in it.
+**The pre-guard completion is itself a hallucination.** In the current build, the SIS returns `enrollment_found: false` and the education agent asserts fulfilment — this is exactly the kind of unevidenced claim the guard was built to catch. The filmed demo contains this hallucinated completion. After the deploy, the same moment becomes a live demonstration of the system catching its own specialist overclaiming and resolving it properly.
 
 One more phase in the registry stays silent on maya:
 
@@ -201,8 +205,8 @@ Navigate to: **Console → Firestore → Select database "caserelay"**
 
 | Collection path | What to check |
 |---|---|
-| `cases/{case_id}` | Top-level doc: `status` is `"closed"` after a fully completed run where all five commitments are `completed` and no approvals are pending. `closed_at` is set. `child_name` is "Maya" |
-| `cases/{case_id}/commitments` | 5 docs keyed by type. Education should show `status: "completed"` after a full run — closed by `8-followup` in run 3 |
+| `cases/{case_id}` | Top-level doc: `status` is `"closed"` after a fully completed run where all five commitments are `completed` and no approvals are pending. `closed_at` is set. `child_name` is "Maya". *(Pre-guard: `status` stays `"monitoring"` because no auto-close logic existed.)* |
+| `cases/{case_id}/commitments` | 5 docs keyed by type. Education should show `status: "completed"` after a full run — post-guard, closed by `9-nudge` after the guard blocked `8-followup`'s claim. The education commitment also carries a `guard_refusal` field recording the blocked attempt |
 | `cases/{case_id}` referral packet | The education referral's `contact` starts null and ends as Sarah Miller, Enrollment Coordinator. That write is the escalation ladder's visible result |
 | `cases/{case_id}/authority_grants` | 5 docs. Each has `granted_to` matching an agent identity, `status: "granted"`, and **`granted_by: "advocate"`** — see below |
 | `cases/{case_id}/human_approvals` | At least one doc with `action_type: "escalation"` — the one you ruled on reads `decision: "approve"`, `recipient: "Lincoln Unified School District"` and **`decided_by: "advocate"`**. **Do not promise exactly one on camera.** The verifier mints a fresh `apr-{uuid4}` on every `open_escalation` call, so a single quarantined callback often leaves duplicate records behind, and the extras stay `pending` forever. That is cosmetic, not a stuck gate: the run asks whether an escalation has been *decided*, not whether one is still pending, so your one click clears it. A `supervisor_notice` doc appears only on scenarios where a chased provider stayed silent |
@@ -439,7 +443,7 @@ curl -s -G -H "Authorization: Bearer $(gcloud auth print-access-token)" \
 | `phase_error` on a single specialist | **May be transient.** The run continues with partial_failure. Re-run if only one failed. |
 | SSE stream disconnects mid-run | **Likely a proxy timeout.** The run is still going in the background — poll `GET /v1/runs/{run_id}` manually, or reopen the case and read the recorded history from `GET /v1/cases/{case_id}/events`. |
 | `6-quarantine` never fires | **Broken.** The `inject_callback` flag is probably not set on the case. Verify the scenario was "maya" not a generic create. |
-| `9-nudge` never fires | **Normal.** Education is still open when the escalation gate parks run 2. `8-followup` runs first in run 3 and closes it; `9-nudge` only fires if `8-followup` did not close the commitment. |
+| `9-nudge` never fires | **Pre-guard: normal.** Before the commitment guard is deployed, `8-followup` closes education unchecked and `9-nudge`'s precondition is never met. **Post-guard: unexpected** — the guard blocks `8-followup`'s claim and `9-nudge` should fire to chase the overdue commitment. If `9-nudge` does not fire after the guard deploy, check that education is still `blocked` after `8-followup`. |
 | `10-unanswered` never fires on maya | **Normal.** Its precondition needs a chased provider that stayed silent, and the district answers its follow-up. Run `priya` to see it. |
 | Run 2 ends `suspended` and a later run still never reaches `6-quarantine` | **Almost always the deadline.** Check `due_in` on the case: at anything above ~`10s` the earliest checkpoint is not due when `5-wake` asks. The run that wrote them ends `suspended`; the sweep fires them when they come due and starts a new run. But if the deadline is long (e.g. `45s`), the arc completes eventually — just not within the demo window. Re-run at `10s` and do not raise the deadline to "look realistic". |
 | Approving returns `400 supervisor_id is required` | **Broken.** The portal always sends one; a 400 means the request did not come from the gate card. |

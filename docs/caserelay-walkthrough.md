@@ -321,17 +321,19 @@ Prompt: *"A supervisor reviewed the quarantined callback … and approved the es
 
 Only now that the escalation has been ruled on may a follow-up go out, and it goes out under the same authority grant that covered the original request — chasing a provider discloses nothing extra.
 
-Education is asked to re-check its commitment using only the fields it has been granted. It goes through the gateway a third time — **another disclosure audit event** — and the SIS still has nothing, because the district's out-of-scope attempt was refused rather than answered. Education stays **`unresolved`**.
+Education is asked to re-check its commitment using only the fields it has been granted. It goes through the gateway a third time — **another disclosure audit event** — and the SIS returns `enrollment_found: false`. The education agent claims `completed`, but the **deterministic commitment guard** on the write path compares the claimed status against the recorded partner response, finds the explicit contradiction, and **refuses the write**. Education is recorded as `blocked`, not `completed`, and a `commitment_guard` approval is raised for review.
 
-This phase is where a reader expecting a clean second callback will be surprised. There isn't one. The district gets exactly one attempt at an out-of-scope request; once that has been quarantined and ruled on, it stops re-sending it and answers inside its own scope, which for a stalled referral means admitting it still has nothing. What closes the case is the next phase.
+> **This is the guard catching a real hallucination, not a test scenario.** Before the guard was deployed, this same claim was accepted unchecked and education closed here on an unevidenced assertion — the SIS said "no enrollment on file" and the agent said "completed". The guard turns that silent failure into a visible, recoverable event.
 
 ### Phase 9 — `9-nudge`
 
-A deadline has passed with a commitment still open, so the orchestrator calls `send_followup`. `backend/workflows/escalation.py::nudge_overdue` chases every overdue provider exactly once, scoped by that service's existing grant, and writes a `followup` audit event recording the disclosed fields and whether anyone answered.
+Education is still open and overdue after the guard blocked it, so `_overdue_and_unchased` evaluates true and the nudge phase dispatches. `backend/workflows/escalation.py::nudge_overdue` chases every overdue provider exactly once, scoped by that service's existing grant, and writes a `followup` audit event recording the disclosed fields and whether anyone answered.
 
-Lincoln Unified answers, and its answer names **Sarah Miller, Enrollment Coordinator** as the officer who has taken the referral on. That name is written back onto the referral rather than read once and discarded — it is the difference between a commitment nobody owns and one somebody does, so it belongs on the case where every later reader can see it. The reply also resolves the commitment, so education finally goes **`completed`**.
+Lincoln Unified answers, and its answer names **Sarah Miller, Enrollment Coordinator** as the officer who has taken the referral on. That name is written back onto the referral rather than read once and discarded — it is the difference between a commitment nobody owns and one somebody does, so it belongs on the case where every later reader can see it. The follow-up response carries no `enrollment_found: false` field, so the guard allows the completion — education finally goes **`completed`** on legitimate evidence.
 
 This is the payoff for the empty contact in the packet. A case that started with nobody named on the other side ends up crediting the person who owned it, and every narrated line after this point says "Sarah Miller" rather than "Lincoln Unified".
+
+> **Before the guard was deployed, `9-nudge` did not fire.** Phase 8 accepted the unchecked claim and closed education, leaving no open commitment for the nudge to chase. The phase graph is dynamic — the guard changes which path through it the case takes.
 
 ### Phase 10 — `10-unanswered` (does not fire for CR-1042)
 
@@ -353,9 +355,9 @@ Both the local in-process run and the cloud run against deployed endpoints reach
 
 | Thing | Value |
 |---|---|
-| case status | `monitoring` |
+| case status | `closed` *(post-guard; pre-guard: `monitoring`)* |
 | authority grants | 5, all `granted` |
-| approvals | `apr-{id}` → `approved` |
+| approvals | escalation `apr-{id}` → `approved`; commitment guard `apr-guard-{hash}` → `pending` (stale — education has since been resolved by `9-nudge`, so the guard approval is informational) |
 | Memory Bank scopes | all five purposes, plus `checkpoint` |
 | education referral contact | Sarah Miller, Enrollment Coordinator — written on by the follow-up, absent at intake |
 
@@ -369,16 +371,15 @@ Commitments:
 | shelter | `completed` |
 | family_services | `completed` |
 
-The audit events, in order: five fan-out disclosures, education's day-17 re-check, the quarantine event, education's post-approval re-check, and the follow-up that named an owner and closed the commitment.
+The audit events, in order: five fan-out disclosures, education's day-17 re-check, the quarantine event, education's post-approval re-check, a `commitment_guard_refusal` event when the guard blocks the follow-up's completion claim, and the follow-up chase that named an owner and closed the commitment.
 
-**All five closing is the flagship's outcome, not the system's default.** It matters that it is a scenario choice rather than a happy accident, because the interesting property of CaseRelay is the opposite case: a partner that genuinely reports bad news and an agent that honestly records it. Two scenarios show that today:
+**All five closing is the flagship's outcome, not the system's default.** It matters that it is a scenario choice rather than a happy accident, because the interesting property of CaseRelay is the opposite case: a partner that genuinely reports bad news and an agent that honestly records it. Three scenarios show that today:
 
 - `priya` — the health partner never answers, and never answers the chase either. Its commitment stays `unresolved`, Dana Whitfield is told about it as a `supervisor_notice`, and the other four close.
 - `theo` — legal returns a response that fails its schema. Its agent's instruction maps an `error` key to `unresolved`, so it reports honestly rather than guessing, and the other four proceed.
+- `diego` — the school SIS returns `enrollment_found: false` and the education agent claims `completed`. The deterministic commitment guard catches this — the same guard that fires on Maya — and refuses the write. Diego's education stays `blocked` with a pending guard approval, the case stays at `monitoring`, and a judge can see the refusal in both the feed and the audit trail.
 
-A system that flipped a commitment to `completed` because the round trip succeeded would be exactly the failure mode CaseRelay exists to catch, and it is those scenarios, not CR-1042, that prove it does not.
-
-The `diego` scenario is the honest gap here. It makes the school SIS return a false positive so that education can claim `completed` on a referral that was never confirmed, and there is no guard in the code that catches it: `reconcile_commitments` compares a commitment's deadline against its status, not a claimed status against the partner's stored reply. The grounding and reconciliation guards that would catch it are Step 22 of the hardening plan and are not built. `diego` currently describes an intended behaviour rather than an observed one.
+A system that flipped a commitment to `completed` because the round trip succeeded would be exactly the failure mode CaseRelay exists to catch. Maya now demonstrates the recovery from that failure — the guard catches it, the ladder resolves it — and Diego demonstrates the refusal holding when no recovery path exists.
 
 ---
 

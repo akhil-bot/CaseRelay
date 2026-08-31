@@ -517,9 +517,10 @@ the original description said never appeared. The fresh run closed 3 of 5 commit
 pending; legal did not recover through the nudge in this run, so the scenario ends with both open
 commitments unresolved rather than the single health escalation its spec claims.
 
-**Diego — hallucinated status, now guarded.** The SIS returns `enrollment_found: false` with no
-confirmed school. A deterministic commitment guard in `backend/runtime/workspace.py` now sits on
-the write path: when any specialist claims `completed`, the guard checks the recorded partner tool
+**Diego — hallucinated status, now guarded.** *(Post-guard behaviour — the guard and auto-close
+are committed but not yet deployed; runs against the current fleet will not show this.)* The SIS
+returns `enrollment_found: false` with no confirmed school. A deterministic commitment guard in
+`backend/runtime/workspace.py` now sits on the write path: when any specialist claims `completed`, the guard checks the recorded partner tool
 response for an explicit contradiction. In Diego's case the education agent calls `query_school`,
 receives `enrollment_found: false`, and then claims `completed` — the guard compares the two,
 finds the positive assertion of the negative, and refuses the write. The commitment is recorded as

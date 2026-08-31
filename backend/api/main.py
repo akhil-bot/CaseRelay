@@ -948,13 +948,19 @@ class _Narrator:
 
     def guard_refusal(self, service: str, refusal: dict) -> str:
         """A commitment was refused by the deterministic guard because the
-        partner response explicitly contradicts the fulfilment claim."""
+        partner response explicitly contradicts the fulfilment claim.
+
+        The structured refusal dict carries the technical detail (reason_code,
+        contradiction, remediation) for machine consumption and audit.  The
+        feed line rendered here speaks in the same plain voice as the rest of
+        the case timeline — no field names, no system acronyms.
+        """
         subject = self._subject(service)
-        contradiction = refusal.get("contradiction", "partner response contradicts the claim")
-        remediation = refusal.get("remediation", "Escalate to supervisor for manual verification")
+        org = self._org(service)
         return (
-            f"Guard refused {self.child}'s {subject} — {contradiction}. "
-            f"{remediation}."
+            f"{self.child}'s {subject} was reported complete, but "
+            f"{org}'s own response does not confirm it — "
+            f"caught and held for follow-up."
         )
 
     def deferred(self, service: str) -> str:
