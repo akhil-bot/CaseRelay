@@ -14,8 +14,8 @@
 # The URL comes from infra/control_plane_url.txt, which deploy_control_plane.sh writes on
 # its last successful deploy, so this cannot drift from what was actually shipped.
 #
-# This does NOT stand in for Cloud Scheduler. In the cloud the one-minute Pub/Sub sweep is
-# the real wake mechanism. Under a compressed deadline the wake phase runs inside the same
+# This does NOT stand in for Cloud Scheduler. In the cloud the hourly Pub/Sub sweep
+# (`0 * * * *`) is the real wake mechanism. Under a compressed deadline the wake phase runs inside the same
 # run that set the checkpoint, so what you see below is proof that the ladder works, not
 # that the timer does.
 set -euo pipefail
@@ -80,6 +80,10 @@ echo ""
 step "waiting for the fleet"
 # Fan-out reaches five reasoning engines over authenticated A2A. Wall clock is 1.5-3
 # minutes depending on the scenario; the escalation ladder is the slow part.
+# NOTE: if the scenario includes a checkpoint wake (e.g. maya), the run will end
+# `suspended` and resume only after Cloud Scheduler fires — up to an hour later.
+# To skip the wait, fire the sweep on demand:
+#   curl -s -X POST "$CP/v1/workflows/sweep" -H "Authorization: Bearer $TOK"
 for i in $(seq 1 30); do
   sleep 6
   STATE=$(curl -sf "$CP/v1/cases/$CASE/runs" "${AUTH[@]}" | _json '[0]["state"]' 2>/dev/null || echo "?")

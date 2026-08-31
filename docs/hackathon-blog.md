@@ -31,7 +31,7 @@ All of it surfaces in one portal, where Elena can see where each commitment stan
 
 ![CaseRelay portal with case status and copilot](diagrams/platform_image.png)
 
-This is the CASA volunteer's view: assigned cases on the left, live commitment status in the middle, and the **CaseRelay copilot** on the right to help drive the workflow.
+**This is the CASA volunteer's view:** assigned cases on the left, live commitment status in the middle, and the **CaseRelay copilot** on the right to help drive the workflow.
 
 ## How it works behind the scenes
 
@@ -69,7 +69,7 @@ When a reply crosses the boundary, [Model Armor](https://docs.cloud.google.com/m
 
 ![CaseRelay multi agent mesh](diagrams/caserelay-multi-agent-mesh.png)
 
-This is the technical view of the same Maya workflow: Copilot at the front, orchestration in the middle, and GEAP runtime, identity, guardrails, memory, and observability around the fleet.
+**This is the technical view of the same Maya workflow:** Copilot at the front, orchestration in the middle, and GEAP runtime, identity, guardrails, memory, and observability around the fleet.
 
 ## How CaseRelay became an enterprise agent fleet
 
@@ -125,7 +125,7 @@ That mattered because it let us spend more time on the problem itself: how a vol
 | **Agents** | Google ADK. Eight reasoning engines on [Agent Runtime](https://docs.cloud.google.com/gemini-enterprise-agent-platform/build/runtime) in `us-central1`. A2A to the specialists. |
 | **Platform** | [Agent Identity](https://docs.cloud.google.com/gemini-enterprise-agent-platform/govern/agent-identity-overview), [Agent Gateway](https://docs.cloud.google.com/gemini-enterprise-agent-platform/govern/gateways/agent-gateway-overview), [Agent Registry](https://docs.cloud.google.com/gemini-enterprise-agent-platform/govern/agent-registry), [Sessions](https://docs.cloud.google.com/gemini-enterprise-agent-platform/scale/sessions), [Memory Bank](https://docs.cloud.google.com/gemini-enterprise-agent-platform/scale/memory-bank), Model Armor, [Observability](https://docs.cloud.google.com/gemini-enterprise-agent-platform/optimize/observability/overview). |
 | **Backend** | Python, FastAPI, Cloud Run (requires auth). |
-| **State** | Firestore. Cloud Scheduler on a recurring sweep. Pub/Sub to resume parked cases. |
+| **State** | Firestore. Cloud Scheduler on a recurring hourly sweep (`0 * * * *`). Pub/Sub to resume parked cases. |
 | **Frontend** | Next.js, Cloud Run (behind HTTP Basic auth). AG UI for chat and the run stream. |
 | **Partners** | Simulated partner agencies exposed through MCP tools. Not live systems. |
 
@@ -156,3 +156,5 @@ That mattered because it let us spend more time on the problem itself: how a vol
 I created this piece of content for the purposes of entering the All Things Agentic Hackathon. #AllThingsAgenticHackathon
 
 CaseRelay is our [Fortified Enterprise Fleet](https://allthingsagentichackathon.devpost.com/) entry.
+
+Questions, suggestions, or ideas for making this useful to real volunteers are welcome in the comments.

@@ -89,6 +89,17 @@ curl -s -X POST "$CP/v1/pubsub/push" -H 'content-type: application/json' \
   -d "{\"message\":{\"data\":\"$(printf '{"event_type":"workflow_wake","case_id":"%s"}' "$CASE" | base64)\"}}"
 ```
 
+Against the deployed control plane, Cloud Scheduler fires the sweep at `0 * * * *` — up to an hour
+after a case parks on its checkpoint. If you do not want to wait, fire it on demand:
+
+```bash
+CP_URL=$(cat infra/control_plane_url.txt)
+TOK=$(gcloud auth print-identity-token)
+curl -s -X POST "$CP_URL/v1/workflows/sweep" -H "Authorization: Bearer $TOK"
+```
+
+That marks all due checkpoints running and triggers the authenticated push that starts the continuation run.
+
 ## Also worth knowing about
 
 `infra/case_cli.py` is the operator CLI for the deployed fleet, and `infra/cloud_e2e.py` runs the

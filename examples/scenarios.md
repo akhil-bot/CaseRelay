@@ -65,7 +65,7 @@ This is not a commitment deadline. It is the window across which the five per-co
 checkpoints are spread, at `now + due_in × (i+1)/5`, computed during the checkpoint phase. The wake
 phase asks for already-due checkpoints seven to twelve seconds later.
 
-At `10s` the earliest checkpoint is due at +2s; the sweep fires it in the first sweep cycle and the resumed run reaches the wake, quarantine, follow-up and memory phases within seconds. At `60s` the checkpoints come due a minute after creation — the run that wrote them ends `suspended`, and a new run is started by the sweep when they fire. The arc still completes, but on camera you wait the full sweep interval between run end and wake. Ten seconds is what makes a seventeen-day story fit in two minutes.
+At `10s` the earliest checkpoint is due at +2s; the sweep fires it in the next sweep cycle and the resumed run reaches the wake, quarantine, follow-up and memory phases shortly after. At `60s` the checkpoints come due a minute after creation — the run that wrote them ends `suspended`, and a new run is started by the sweep when they fire. The arc still completes, but on camera you wait the full sweep interval (up to an hour) between run end and wake. Ten seconds is what makes a seventeen-day story fit in two minutes.
 
 Both example scripts default to `DUE_IN=10s`. Overriding it upward is the most common way to get a
 run that looks broken and is not.
@@ -88,9 +88,9 @@ prompt saying a supervisor signs off, the model approved its own work anyway.
 
 Because the deadline window is squeezed into seconds, the wake phase runs inside the same run that
 set the checkpoint. **Nothing in a compressed run is woken autonomously by Cloud Scheduler** — the
-one-minute Pub/Sub sweep is the real mechanism, and it is what runs the uncompressed case, but it
+hourly Pub/Sub sweep (`0 * * * *`) is the real mechanism, and it is what runs the uncompressed case, but it
 is not what a two-minute demo shows. Read a compressed run as proof that the *ladder* works, not
 that the *timer* does.
 
 The timer has been observed separately: a Maya run ended on its checkpoints and a sweep restarted
-it with a 23-second gap and nobody at the keyboard.
+it with nobody at the keyboard.

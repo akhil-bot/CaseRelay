@@ -76,6 +76,7 @@ Agent Platform Sessions.
 export CASERELAY_PROJECT=your-project           # default: caserelay
 export CASERELAY_REGION=us-central1             # the fleet lives here; do not change casually
 export CASERELAY_PROJECT_NUMBER=123456789012    # deploy_fleet.sh uses it to build /api URLs
+export CASERELAY_SWEEP_CRON="0 * * * *"        # Cloud Scheduler sweep schedule; default hourly. Use "* * * * *" for near-immediate wakes at the cost of keeping the control plane warm.
 
 bash infra/bootstrap.sh                         # 1. provision
 bash infra/deploy_fleet.sh                      # 2. create the eight engines
@@ -117,13 +118,13 @@ points at `$CONTROL_PLANE_URL/v1/pubsub/push`, and it needs `infra/control_plane
 that URL. On the first pass the file does not exist and the script prints
 `SKIP: control_plane_url.txt not found`. `deploy_control_plane.sh` writes the file on success, so
 re-running `bootstrap.sh` afterwards is what completes the wake path. Without it, Cloud Scheduler
-publishes every minute and nothing is subscribed to receive it.
+publishes every hour and nothing is subscribed to receive it.
 
 ### What each script does and refuses to do
 
 | Script | Creates | Refuses to run when |
 |---|---|---|
-| `bootstrap.sh` | APIs, Pub/Sub topics + pull/push subscriptions, dead-letter, Cloud Scheduler `caserelay-sweep` (`* * * * *`), Firestore index, Memory Bank instance + custom topics + IAM, `caserelay-chat-sessions` and `caserelay-run-sessions` engines | A recorded Memory Bank or Sessions engine id no longer resolves — delete the matching `infra/*.env` and re-run |
+| `bootstrap.sh` | APIs, Pub/Sub topics + pull/push subscriptions, dead-letter, Cloud Scheduler `caserelay-sweep` (`0 * * * *`), Firestore index, Memory Bank instance + custom topics + IAM, `caserelay-chat-sessions` and `caserelay-run-sessions` engines | A recorded Memory Bank or Sessions engine id no longer resolves — delete the matching `infra/*.env` and re-run |
 | `deploy_fleet.sh` | Eight reasoning engines with `--agent-identity`, plus Agent Registry entries and the IAM roles `--agent-identity` does not provision | Any pinned identity in `infra/pinned_identities.env` is empty, or the orchestrator's specialist URLs are missing |
 | `collect_endpoints.sh` | `infra/fleet_endpoints.env` — eight A2A base URLs, eight resource names, eight identity principals | — |
 | `deploy_partners.sh` | `caserelay-partners` on Cloud Run (five partner simulators as MCP tools) and five Agent Registry entries | Registration fails for any partner |

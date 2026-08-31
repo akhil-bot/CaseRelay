@@ -7,6 +7,7 @@ set -euo pipefail
 
 PROJECT="${CASERELAY_PROJECT:-caserelay}"
 REGION="${CASERELAY_REGION:-us-central1}"
+SWEEP_CRON="${CASERELAY_SWEEP_CRON:-0 * * * *}"
 
 echo "=== enabling APIs ==="
 gcloud services enable \
@@ -71,10 +72,17 @@ gcloud scheduler jobs describe caserelay-sweep \
   || gcloud scheduler jobs create pubsub caserelay-sweep \
        --project="$PROJECT" \
        --location="$REGION" \
-       --schedule="* * * * *" \
+       --schedule="$SWEEP_CRON" \
        --topic=caserelay-events \
        --message-body='{"action":"sweep"}' \
-       --description="Triggers the CaseRelay workflow sweep every minute"
+       --description="Triggers the CaseRelay workflow sweep ($SWEEP_CRON)"
+# Always sync the schedule so re-runs pick up CASERELAY_SWEEP_CRON changes.
+gcloud scheduler jobs update pubsub caserelay-sweep \
+  --project="$PROJECT" \
+  --location="$REGION" \
+  --schedule="$SWEEP_CRON" \
+  --description="Triggers the CaseRelay workflow sweep ($SWEEP_CRON)" 2>/dev/null \
+  || true
 
 echo "=== Firestore indexes ==="
 gcloud firestore indexes composite list --project="$PROJECT" --database=caserelay --format=json 2>/dev/null | grep -q "due_at" \

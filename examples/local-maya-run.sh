@@ -17,8 +17,8 @@
 #    checkpoints in the future, the resumed run arrives before education's check-back is
 #    due, and the quarantine, follow-up and memory phases never become reachable.
 #
-# 2. There is no Pub/Sub locally. In the cloud, Cloud Scheduler's one-minute sweep
-#    publishes the wake and an authenticated push handler starts the continuation run.
+# 2. There is no Pub/Sub locally. In the cloud, Cloud Scheduler's hourly sweep
+#    (`0 * * * *`) publishes the wake and an authenticated push handler starts the continuation run.
 #    Here we stand in for it by calling /v1/workflows/sweep and then posting the push
 #    envelope ourselves. OIDC verification on /v1/pubsub/push is skipped when
 #    CASERELAY_CONTROL_PLANE is unset — which is exactly what makes this possible, and

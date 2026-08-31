@@ -123,7 +123,7 @@ deliberately; do not let a Devpost description walk them back.
   distinguish it from Google's Agent Gateway, which is the egress control point.
 - **Nothing in [post-video-geap-deploy.md](post-video-geap-deploy.md) is done** unless that file
   says so explicitly. It is a queue of work that has not been applied.
-- **Compressed runs use the same machinery.** `due_in` compresses the deadlines, not the execution path. The run that writes checkpoints ends and is recorded `suspended`; Cloud Scheduler sweeps once a minute, finds it, and publishes to Pub/Sub; an authenticated push starts a new run with a new `run_id`. In `CR-0830203440` the checkpoint run was `84bd42c6b0c4` and the wake run was `411d07c94595`. The gap is whatever remains of the minute — about ten seconds in the filmed run, 25 on reference run `CR-0830212122`, never more than 60. Do not cite the old "23-second" figure; it came from a run whose records have been purged.
+- **Compressed runs use the same machinery.** `due_in` compresses the deadlines, not the execution path. The run that writes checkpoints ends and is recorded `suspended`; Cloud Scheduler sweeps once an hour, finds it, and publishes to Pub/Sub; an authenticated push starts a new run with a new `run_id`. In `CR-0830203440` the checkpoint run was `84bd42c6b0c4` and the wake run was `411d07c94595`. The gap is whatever remains of the hour. Do not cite the old "23-second" figure; it came from a run whose records have been purged.
 
 ---
 

@@ -8,7 +8,7 @@ When a child in foster care is referred to a school, a clinic, legal aid, and a 
 
 CaseRelay closes that gap with an accountable, governed multi-agent fleet.
 
-**The cycle:** A volunteer activates monitoring after verifying court authority. Eight ADK agents on Vertex AI Agent Runtime delegate scoped tasks to five simulated partner agencies over authenticated A2A. Four confirm. One defers and the system writes down when to come back. The run ends there on its checkpoints rather than holding a session open. No user prompt arrives. Cloud Scheduler sweeps every minute, finds checkpoints that have come due, publishes to Pub/Sub, and the case resumes itself — the same checkpoint logic, same authority grant, no human at the keyboard. The Education Agent requests only enrollment-status fields through Agent Gateway. The partner tries to retrieve medical notes. Model Armor quarantines it. The Safeguarding Verifier opens an escalation showing evidence, recipient, and policy basis, and records the quarantine against its own platform identity. The run parks with school enrollment still open. A supervisor approves. Only then does the scoped follow-up go out. The district is chased once within the same authority grant that covered the original request. It names the enrollment coordinator who has taken the referral on. That name is written back. The commitment closes. Had nobody answered, the supervisor would have been told instead.
+**The cycle:** A volunteer activates monitoring after verifying court authority. Eight ADK agents on Vertex AI Agent Runtime delegate scoped tasks to five simulated partner agencies over authenticated A2A. Four confirm. One defers and the system writes down when to come back. The run ends there on its checkpoints rather than holding a session open. No user prompt arrives. Cloud Scheduler sweeps every hour, finds checkpoints that have come due, publishes to Pub/Sub, and the case resumes itself — the same checkpoint logic, same authority grant, no human at the keyboard. The Education Agent requests only enrollment-status fields through Agent Gateway. The partner tries to retrieve medical notes. Model Armor quarantines it. The Safeguarding Verifier opens an escalation showing evidence, recipient, and policy basis, and records the quarantine against its own platform identity. The run parks with school enrollment still open. A supervisor approves. Only then does the scoped follow-up go out. The district is chased once within the same authority grant that covered the original request. It names the enrollment coordinator who has taken the referral on. That name is written back. The commitment closes. Had nobody answered, the supervisor would have been told instead.
 
 The flagship case is called Maya. She is not the only scenario. A provider that goes silent ends up in front of a named human. A school asks for medical records while answering a question about enrollment. A partner reply cannot be parsed. Each scenario was run end to end against the deployed control plane on 29 August 2026, verified twice on two serving revisions. Where a scenario does not do what its definition claims, that is stated rather than omitted.
 
@@ -28,7 +28,7 @@ The control plane is auth-required. The portal is deployed to Cloud Run behind a
 
 ## How It Was Built
 
-**Runtime cycle:** Agent Runtime runs the engines. Firestore holds the case state — commitments, grants, checkpoints. Cloud Scheduler sweeps every minute, finds checkpoints that have come due, and publishes to Pub/Sub. An authenticated push resumes a waiting case. The checkpoint / sleep / deadline-triggered resume cycle is Firestore plus Pub/Sub push and Cloud Scheduler, not Agent Runtime itself.
+**Runtime cycle:** Agent Runtime runs the engines. Firestore holds the case state — commitments, grants, checkpoints. Cloud Scheduler sweeps every hour, finds checkpoints that have come due, and publishes to Pub/Sub. An authenticated push resumes a waiting case. The checkpoint / sleep / deadline-triggered resume cycle is Firestore plus Pub/Sub push and Cloud Scheduler, not Agent Runtime itself.
 
 **Security:** Each specialist gets its own Agent Identity — a platform principal, not a shared service account. The education engine cannot answer as the health engine. Field-level access control is CaseRelay's own code, called the authority gateway — it is not Agent Gateway, which is Google's egress control point.
 
@@ -62,7 +62,7 @@ Agent Platform Sessions hold the operator chat transcript and every orchestrator
 - **Gemma 4** — end-of-run session narrative (`gemma-4-26b-a4b-it-maas`); observed on serving revision
 - **Cloud Run** — control plane and portal
 - **Firestore** — named database `caserelay`; checkpoint storage, event log, audit trail
-- **Cloud Scheduler** — one-minute sweep for checkpoint due dates
+- **Cloud Scheduler** — hourly sweep (`0 * * * *`) for checkpoint due dates
 - **Pub/Sub** — authenticated push delivery to resume parked cases
 - **Cloud Trace** — MCP tool call spans and Model Armor guardrail evaluation spans (demonstrated end-to-end; see trace `442a845a56a86c50ee5d35be1891cdd7`)
 - **Cloud Logging** — gateway request log
@@ -113,7 +113,7 @@ The video runs the flagship case — intake, activation gate, five-way fan-out, 
 
 **Portal is deployed, behind a session login.** Navigate to `/login`, choose any role, and sign in with email `admin@caserelay.com` and the password supplied in the Devpost submission's testing instructions. The pre-filled email on the role pages is a persona placeholder — use `admin@caserelay.com` regardless of which role you choose.
 
-**Compressed runs use the same machinery.** `due_in` compresses the checkpoint deadlines — not the execution path. The run that writes the checkpoints ends and is recorded `suspended`. Cloud Scheduler sweeps once a minute, finds the due checkpoints, and publishes to Pub/Sub. An authenticated push starts a new run with a new `run_id` and new Firestore records. In the filmed case (`CR-0830203440`) the checkpoint run was `84bd42c6b0c4`; the wake run started by the sweep was `411d07c94595`. The gap is whatever remains of the minute: 25 seconds on the reference run (`CR-0830212122`), about ten in the filmed run, never more than 60.
+**Compressed runs use the same machinery.** `due_in` compresses the checkpoint deadlines — not the execution path. The run that writes the checkpoints ends and is recorded `suspended`. Cloud Scheduler sweeps once an hour, finds the due checkpoints, and publishes to Pub/Sub. An authenticated push starts a new run with a new `run_id` and new Firestore records. In the filmed case (`CR-0830203440`) the checkpoint run was `84bd42c6b0c4`; the wake run started by the sweep was `411d07c94595`. The gap is whatever remains of the hour; in the demo video the compressed `due_in` window meant the checkpoints had already lapsed before the sweep fired.
 
 **Memory Bank recall is thin on short runs.** The mechanism is deployed and observed; the recalled content is general process observation rather than named contacts or institutional shortcuts. A compressed demo does not accumulate the history that would produce those.
 
